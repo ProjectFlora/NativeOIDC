@@ -865,7 +865,7 @@ mod tests {
         let hmac_token = jsonwebtoken::encode(
             &jsonwebtoken::Header::new(Algorithm::HS256),
             &valid_claims,
-            &jsonwebtoken::EncodingKey::from_secret(b"test-secret"),
+            &jsonwebtoken::EncodingKey::from_secret(b"test-secret").unwrap(),
         )
         .unwrap();
 
