@@ -6,6 +6,8 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-22
+
 ### Security
 
 - Upgrade `jsonwebtoken` from 9.3.1 to 12.0.0 with the `rust_crypto`
@@ -13,7 +15,21 @@ interoperability testing and support policies are still evolving. Each release r
   GHSA-h395-gr6q-cpjc. NativeOIDC was not exploitable: ID Token validation
   already rejected time claims with the wrong type. The RustCrypto crates it
   brings include `rsa` 0.10, which is not affected by RUSTSEC-2023-0071
-  ([#197](https://github.com/ProjectFlora/NativeOIDC/issues/197)).
+  ([#197](https://github.com/ProjectFlora/NativeOIDC/issues/197)). One
+  behavior changes with the upgrade: a JWKS that also contains a key with an
+  unknown `kty` is now accepted instead of failing as a whole; ID Tokens are
+  still verified only with RSA and P-256 EC keys.
+
+### Fixed
+
+- OIDC discovery (`ServiceConfiguration::discover`, `FfiServiceConfiguration::discover`)
+  and dynamic client registration (`ClientRegistrationRequest::register`,
+  `register_public_client`) now honor cancellation even when the transport
+  does not: `cancel()` returns `Cancelled` and drops the pending request, and
+  an already-cancelled handle sends no request, as the token, refresh, and
+  revocation requests already did. The Windows operations that discover
+  their endpoints get the same behavior
+  ([#183](https://github.com/ProjectFlora/NativeOIDC/issues/183)).
 
 ### Changed
 
@@ -39,6 +55,32 @@ interoperability testing and support policies are still evolving. Each release r
   XCFramework packaging step builds the same targets in release, and every
   Apple check uses those release slices or the host library
   ([#175](https://github.com/ProjectFlora/NativeOIDC/issues/175)).
+- The Swift and Kotlin test suites call every UniFFI operation through the
+  generated bindings against scripted transports: discovery, revocation,
+  public client registration, end session, authentication state JSON, and
+  cancellation of in-flight requests. They also check which Swift and Kotlin
+  error each `FfiError` variant becomes. The coverage is mapped in
+  [docs/api-coverage.md](docs/api-coverage.md)
+  ([#164](https://github.com/ProjectFlora/NativeOIDC/issues/164)).
+- The adapter error paths are tested: on Android,
+  `CallbackActivityNotRegistered` and `BrowserUnavailable` (with the
+  callback route released); on macOS, a browser that cannot be opened
+  (with the loopback listener released). The checks of the macOS smoke that
+  need no browser moved to XCTest, so `swift test` reports them one by one
+  ([#167](https://github.com/ProjectFlora/NativeOIDC/issues/167)).
+- CI runs the Android emulator tests on API 35 as well as API 28. The
+  release workflows still use API 28
+  ([#166](https://github.com/ProjectFlora/NativeOIDC/issues/166)).
+- CI runs only the jobs a change can affect, following the rules in
+  [docs/ci-job-selection.md](docs/ci-job-selection.md). Unclassified paths,
+  workflow changes, and `Cargo.toml`/`Cargo.lock` run everything, and a
+  `CI result` check fails if a selected job did not pass. The Release
+  workflow still runs every check
+  ([#174](https://github.com/ProjectFlora/NativeOIDC/issues/174)).
+- The Android jobs of CI and the Release workflow cache the Rust build for
+  the host and both Android ABIs, keyed on the NDK version and the native
+  API level
+  ([#177](https://github.com/ProjectFlora/NativeOIDC/issues/177)).
 
 ### Documentation
 
@@ -65,12 +107,43 @@ interoperability testing and support policies are still evolving. Each release r
   for the release tracking issue. The macOS check is type-checked in CI
   ([#65](https://github.com/ProjectFlora/NativeOIDC/issues/65)).
 
+### Distribution
+
+- Published as a regular GitHub Release while remaining a pre-1.0 version,
+  with the Apple XCFramework, Android AAR, Windows DLL/C ABI package, API
+  documentation, and SHA-256 checksums. Each package carries `LICENSE`,
+  `THIRD_PARTY_LICENSES.txt`, and `RUST_STANDARD_LIBRARY_COPYRIGHT.html`.
+- The Android library is published to Maven Central as
+  `net.project-flora.nativeoidc:native-oidc-android:0.8.0`. Swift Package
+  Manager remains available through release tags.
+- The public API and the serialized authentication state are unchanged from
+  0.7.1.
+
 ### Known limitations
 
+- Live identity-provider interoperability has not been validated, including
+  token revocation.
 - macOS and Windows CI does not open a real system browser. The real
   system-browser flow is checked by the manual verification above, and its
   result is recorded for each release
   ([#65](https://github.com/ProjectFlora/NativeOIDC/issues/65)).
+- The release consumer fixtures for the Android AAR and the Apple
+  XCFramework only construct the configuration object, and the SPM consumer
+  runs a host-side smoke of the generated API without an authorization flow.
+  The Windows C++ and .NET fixtures check the refresh and revocation
+  success paths and the refresh and end-session error paths.
+- The generated Swift API still requires the Swift 5 language mode: UniFFI
+  stays at 0.32.2 until a release with the Swift 6 fix is published
+  ([#133](https://github.com/ProjectFlora/NativeOIDC/issues/133)).
+- The iOS authorization flow smoke has failed once on the iOS 27.2
+  simulator with `authorizationSessionCouldNotStart`; a re-run passed
+  ([#203](https://github.com/ProjectFlora/NativeOIDC/issues/203)).
+- The ASCII armor of the Maven Central signature files carries a
+  `Version: BCPG v@RELEASE_NAME@` header. The header is a comment and the
+  signatures verify
+  ([#169](https://github.com/ProjectFlora/NativeOIDC/issues/169)).
+- SPM is supported only through release tags; depending on the `main`
+  branch is not supported.
 
 ## [0.7.1] - 2026-11-20
 
