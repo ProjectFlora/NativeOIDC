@@ -6,6 +6,7 @@ Implement the latest plan comment on the issue, review your own work, and open a
 - Read the issue, all of its comments, and the latest comment starting with `<!-- agent-workflow:plan -->`. This plan is your instruction for this phase
 - Read every comment from me posted after that plan (see "Post Markers" in [common-rules.md](common-rules.md)). They take priority over the plan
 - If there is no plan comment, stop: this phase cannot start without one
+  - Exception: an issue resumed from a pause posted before the phase split runs the plan phase first (see "Pauses posted before the phase split" in [issue-to-pr.md](issue-to-pr.md))
   - Manual mode: report in this session
   - Scheduled mode: follow "Pausing for input" in [issue-to-pr.md](issue-to-pr.md), with `phase=plan` and the plan-phase `resume-label` for this flow
 

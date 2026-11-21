@@ -109,6 +109,7 @@ Older `needs-input` markers have only `step` and `pr`, without `phase` or `resum
 - Take the phase from the marker: `pr` recorded or `step` 6–7 → `pr`; `step` 3–5 → `implement`; `step` 1–2 → `plan`
 - If the phase is `pr`: the PR phase handles it. A run with `pr` also treats an issue labeled `agent-ready` with such a marker as a "PR phase" target (line 1 above), and changes the label to `agent-in-progress` first
 - Otherwise: handle it as an "End-to-end issue" (line 3 above), resuming from that phase and `step`
+  - Older steps did not require a plan comment. If the phase is `implement` and the issue has no plan comment, first run [phase-plan.md](phase-plan.md) to record one, then continue with [phase-implement.md](phase-implement.md) in the same run. The plan must reflect work already pushed to the issue branch, if any, and say which steps are done
 - New pauses always use the current marker format
 
 ### Ending each phase in scheduled mode
