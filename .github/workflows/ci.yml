@@ -251,7 +251,10 @@ jobs:
       - run: ./native/android/gradlew -p native/android assembleRelease
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
-      - name: Run Android callback tests on an emulator
+      # The emulator tests run on the minSdk (API 28) and on the compileSdk and
+      # consumer targetSdk (API 35), one after the other in this job, so the
+      # required "Android adapters validation" check covers both (#166).
+      - name: Run Android callback tests on an emulator (API 28)
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 28
@@ -259,9 +262,18 @@ jobs:
           target: google_apis_playstore
           disable-linux-hw-accel: false
           disable-animations: true
-          script: |
+          script: &android-emulator-tests |
             ./native/android/gradlew -p native/android connectedDebugAndroidTest || { echo "::group::Android emulator diagnostics"; adb devices -l || true; adb shell getprop || true; adb shell dumpsys activity activities || true; adb shell dumpsys window windows || true; adb exec-out uiautomator dump /dev/tty || true; adb logcat -d -t 500 || true; echo "::endgroup::"; exit 1; }
             scripts/check-android-release-consumer.sh native/android/build/outputs/aar/native-oidc-android-release.aar
+      - name: Run Android callback tests on an emulator (API 35)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis_playstore
+          disable-linux-hw-accel: false
+          disable-animations: true
+          script: *android-emulator-tests
       - name: Verify Android native libraries in AAR
         run: |
           aar=native/android/build/outputs/aar/native-oidc-android-release.aar

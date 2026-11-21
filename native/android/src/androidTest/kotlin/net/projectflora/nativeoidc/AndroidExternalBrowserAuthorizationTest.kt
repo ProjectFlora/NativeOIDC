@@ -1,6 +1,7 @@
 package net.projectflora.nativeoidc
 
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -86,16 +87,15 @@ class AndroidExternalBrowserAuthorizationTest {
                                 throw AssertionError("Authorization completed without opening the mock provider")
                             }
                         }
-                    } ?: throw AssertionError("External browser did not open the mock provider")
+                    } ?: throw uiFailure(device, "External browser did not open the mock provider")
                 assertEquals("code", authorizationParameters["response_type"])
                 assertEquals("mock-client", authorizationParameters["client_id"])
                 assertEquals(redirectUri, authorizationParameters["redirect_uri"])
                 assertEquals("S256", authorizationParameters["code_challenge_method"])
 
-                assertTrue(
-                    "Mock provider page did not load in the external browser",
-                    clickWhenAvailable(device, By.text("Authorize"), 20_000),
-                )
+                if (!clickWhenAvailable(device, By.text("Authorize"), 20_000)) {
+                    throw uiFailure(device, "Mock provider page did not load in the external browser")
+                }
                 confirmExternalAppLaunch(device)
 
                 val tokenParameters =
@@ -107,7 +107,7 @@ class AndroidExternalBrowserAuthorizationTest {
                                 throw AssertionError("Authorization completed before token exchange")
                             }
                         }
-                    } ?: throw AssertionError("Browser callback did not reach the token endpoint")
+                    } ?: throw uiFailure(device, "Browser callback did not reach the token endpoint")
                 assertEquals("authorization_code", tokenParameters["grant_type"])
                 assertEquals("mock-code", tokenParameters["code"])
                 assertEquals(redirectUri, tokenParameters["redirect_uri"])
@@ -134,6 +134,11 @@ class AndroidExternalBrowserAuthorizationTest {
     }
 
     private fun prepareChrome(device: UiDevice) {
+        // Android 13+ asks for Chrome's notification permission in a system dialog
+        // that covers the page. Grant it up front so the dialog never appears.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            device.executeShellCommand("pm grant com.android.chrome android.permission.POST_NOTIFICATIONS")
+        }
         device.executeShellCommand("am start -a android.intent.action.VIEW -d about:blank -p com.android.chrome")
         assertTrue(
             "Chrome did not open before the authorization flow",
@@ -188,6 +193,23 @@ class AndroidExternalBrowserAuthorizationTest {
             // on the next bounded polling iteration; do not reuse the old node.
             false
         }
+
+    // Records what is on screen when the browser flow stalls, before the
+    // scenario closes and the Custom Tab goes away.
+    private fun uiFailure(device: UiDevice, message: String): AssertionError {
+        val hierarchy = ByteArrayOutputStream()
+        val dump =
+            try {
+                device.dumpWindowHierarchy(hierarchy)
+                hierarchy.toString("UTF-8")
+            } catch (error: Exception) {
+                "unavailable: $error"
+            }
+        return AssertionError(
+            "$message (API ${Build.VERSION.SDK_INT}, foreground package " +
+                "${device.currentPackageName})\nWindow hierarchy:\n$dump",
+        )
+    }
 
     private fun labelMatches(label: String): BySelector =
         By.text(Regex("(?i)^${Regex.escape(label)}$").toPattern())
