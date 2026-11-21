@@ -32,7 +32,8 @@ states the common behavior, and the difference is listed under
   scheme and the literal host `127.0.0.1`, and must not contain a port, user
   information, or a fragment. `localhost`, `[::1]`, other addresses, and
   `https` are rejected before the listener is created. An empty path becomes
-  `/`.
+  `/`. The portable form has no port at all: Windows also accepts the
+  explicit default port `:80` (D11).
 - The listener binds TCP on `127.0.0.1` (IPv4 only) with a port chosen by the
   operating system, so each operation gets its own unused port.
 - The bound port is substituted into the template, and that URI is sent as
@@ -164,9 +165,11 @@ for a follow-up issue that aligns the implementations.
 | D8 | Winner among overlapping matching requests, and when the listener stops accepting | The connection whose handling (including writing its response) finished first wins; overlapping matching requests can all have received a response. The listener stops after the winner's response is written | The first matching request parsed wins and only it gets a response. The listener stops as soon as that request is parsed, before its response is written; cancellation during that send waits for it to complete |
 | D9 | Path comparison against the template | The template path as normalized by the `url` crate (dot segments removed, characters percent-encoded) | `URLComponents.percentEncodedPath` as written in the template, without normalization. A template path with `.` or `..` segments can therefore never match on macOS, because browsers remove dot segments before sending the request |
 | D10 | Loopback post-logout redirect | Supported: `end_session_with_browser` uses the same listener | Not provided by `MacOSAuthorizationAdapter` |
+| D11 | Template with the explicit default port, such as `http://127.0.0.1:80/callback` | Accepted: `Url::parse` drops the default port, so `redirect.port()` is `None`, and the OS-chosen port replaces it. The test rejects only a non-default port (`:8080`) | Rejected: `URLComponents.port` is `80` |
 
-Until they are aligned, use redirect URI templates whose path has no `.` or
-`..` segments and no characters that need percent-encoding.
+Until they are aligned, use redirect URI templates without a port, whose
+path has no `.` or `..` segments and no characters that need
+percent-encoding.
 
 Test coverage also differs: the Swift checks do not cover template
 validation, terminal handling of malformed matching requests (such as a
