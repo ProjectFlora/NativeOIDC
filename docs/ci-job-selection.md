@@ -20,8 +20,8 @@ script is what CI runs, and both must be updated together.
 2. Each path is matched against the rules in order; the first matching rule
    decides which job groups that path needs.
 3. The selected groups are the union over all changed paths. Each group is
-   one `changes` output (`true` or `false`), and each job runs unless its
-   output is exactly `false`.
+   one `changes` output (`true` or `false`). A job is skipped only when
+   `Select CI jobs` succeeded and set its output to `false`.
 
 The selector is conservative. It skips a job only when it can name why the
 change cannot affect it. Every job runs when:
@@ -30,8 +30,8 @@ change cannot affect it. Every job runs when:
 - the change touches `.github/**`, the selector or its tests, `Cargo.toml`,
   `Cargo.lock` or `.gitattributes`,
 - the diff cannot be computed (see below), or
-- the `Select CI jobs` job itself fails: its outputs are then empty, which is
-  not `false`, so every job runs.
+- the `Select CI jobs` job itself fails, even if it wrote some outputs before
+  failing.
 
 ### What is compared
 

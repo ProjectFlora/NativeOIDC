@@ -18,8 +18,8 @@ env:
 
 jobs:
   # Decides which jobs this change needs (docs/ci-job-selection.md). Each job
-  # below runs unless its output is exactly 'false', so a failed selection
-  # (empty outputs) runs everything instead of skipping it.
+  # below is skipped only when this job succeeded and set its output to
+  # 'false'; a failed selection runs everything instead of skipping it.
   changes:
     name: Select CI jobs
     runs-on: ubuntu-latest
@@ -47,7 +47,7 @@ jobs:
   msrv:
     name: MSRV
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.msrv != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.msrv != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -58,7 +58,7 @@ jobs:
   test:
     name: Tests
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.test != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.test != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -74,7 +74,7 @@ jobs:
   licenses:
     name: Dependency licenses
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.licenses != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.licenses != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -96,7 +96,7 @@ jobs:
   apple_adapters:
     name: Apple adapters validation (iOS ${{ matrix.ios_simulator }})
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.apple != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.apple != 'false') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -193,7 +193,7 @@ jobs:
   spm_bindings:
     name: Swift package bindings match
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.spm_bindings != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.spm_bindings != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -204,7 +204,7 @@ jobs:
   spm_manifest:
     name: Swift package manifest is consistent
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.spm_manifest != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.spm_manifest != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -213,7 +213,7 @@ jobs:
   windows_core:
     name: Windows core target validation
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.windows != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.windows != 'false') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -268,7 +268,7 @@ jobs:
   android_adapters:
     name: Android adapters validation
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.android != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.android != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -350,7 +350,7 @@ jobs:
   lint:
     name: Formatting and Clippy
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.lint != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.lint != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -364,7 +364,7 @@ jobs:
   coverage:
     name: Coverage
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.coverage != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.coverage != 'false') }}
     outputs:
       line_coverage: ${{ steps.coverage_summary.outputs.line_coverage }}
       function_coverage: ${{ steps.coverage_summary.outputs.function_coverage }}
