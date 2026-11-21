@@ -1429,8 +1429,10 @@ private fun formFields(body: ByteArray): List<List<String>> {
             val name = parts[0]
             val rawValue = if (parts.size > 1) parts[1] else ""
             // URLDecoder also maps '+' to a space; percent-decode only, to
-            // match the Swift test's removingPercentEncoding.
-            val value = URLDecoder.decode(rawValue.replace("+", "%2B"), StandardCharsets.UTF_8)
+            // match the Swift test's removingPercentEncoding. The (String,
+            // String) overload is used because the Charset overload requires
+            // API 31 and minSdk is 28.
+            val value = URLDecoder.decode(rawValue.replace("+", "%2B"), StandardCharsets.UTF_8.name())
             listOf(name, value)
         }
         .sortedWith(compareBy({ it[0] }, { it[1] }))
