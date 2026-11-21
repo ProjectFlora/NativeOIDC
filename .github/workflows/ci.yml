@@ -17,8 +17,37 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Decides which jobs this change needs (docs/ci-job-selection.md). Each job
+  # below is skipped only when this job succeeded and set its output to
+  # 'false'; a failed selection runs everything instead of skipping it.
+  changes:
+    name: Select CI jobs
+    runs-on: ubuntu-latest
+    outputs:
+      msrv: ${{ steps.select.outputs.msrv }}
+      test: ${{ steps.select.outputs.test }}
+      lint: ${{ steps.select.outputs.lint }}
+      coverage: ${{ steps.select.outputs.coverage }}
+      licenses: ${{ steps.select.outputs.licenses }}
+      spm_bindings: ${{ steps.select.outputs.spm_bindings }}
+      spm_manifest: ${{ steps.select.outputs.spm_manifest }}
+      apple: ${{ steps.select.outputs.apple }}
+      android: ${{ steps.select.outputs.android }}
+      windows: ${{ steps.select.outputs.windows }}
+      report: ${{ steps.select.outputs.report }}
+    steps:
+      # Full history: a push is compared with the commit it replaced, which
+      # may be several commits back.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: select
+        run: python3 scripts/select_ci_jobs.py select
+
   msrv:
     name: MSRV
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.msrv != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -28,6 +57,8 @@ jobs:
 
   test:
     name: Tests
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.test != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -42,6 +73,8 @@ jobs:
 
   licenses:
     name: Dependency licenses
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.licenses != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -62,6 +95,8 @@ jobs:
 
   apple_adapters:
     name: Apple adapters validation (iOS ${{ matrix.ios_simulator }})
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.apple != 'false') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -139,19 +174,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The required "Apple adapters validation" check. It passes when both iOS
+  # configurations pass, or when the selection skipped them because the
+  # change cannot affect Apple; a failure, a cancel, or a skip for any other
+  # reason fails it.
   apple_validation:
     name: Apple adapters validation
-    needs: apple_adapters
+    needs: [changes, apple_adapters]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
-      - name: Require both iOS configurations to pass
+      - uses: actions/checkout@v7
+      - name: Require both iOS configurations to pass, or an intended skip
         env:
-          APPLE_RESULT: ${{ needs.apple_adapters.result }}
-        run: test "$APPLE_RESULT" = success
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/select_ci_jobs.py verify
 
   spm_bindings:
     name: Swift package bindings match
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.spm_bindings != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -161,6 +203,8 @@ jobs:
 
   spm_manifest:
     name: Swift package manifest is consistent
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.spm_manifest != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -168,6 +212,8 @@ jobs:
 
   windows_core:
     name: Windows core target validation
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.windows != 'false') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -196,7 +242,8 @@ jobs:
 
   windows_client:
     name: Windows 11 client consumers (x64 emulation)
-    needs: windows_core
+    needs: [changes, windows_core]
+    if: ${{ !cancelled() && needs.windows_core.result == 'success' }}
     runs-on: windows-11-arm
     steps:
       - uses: actions/checkout@v7
@@ -220,6 +267,8 @@ jobs:
 
   android_adapters:
     name: Android adapters validation
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.android != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -300,6 +349,8 @@ jobs:
 
   lint:
     name: Formatting and Clippy
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.lint != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -312,6 +363,8 @@ jobs:
 
   coverage:
     name: Coverage
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.coverage != 'false') }}
     outputs:
       line_coverage: ${{ steps.coverage_summary.outputs.line_coverage }}
       function_coverage: ${{ steps.coverage_summary.outputs.function_coverage }}
@@ -366,35 +419,58 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # One check for the whole run: it passes only when every job passed or was
+  # skipped because the selection left it out, and names each job that
+  # failed, was cancelled, or was skipped although selected.
+  ci_result:
+    name: CI result
+    needs: [changes, msrv, test, licenses, apple_adapters, spm_bindings, spm_manifest, android_adapters, windows_core, windows_client, lint, coverage]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require every selected job to pass
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/select_ci_jobs.py verify
+
   # GITHUB_TOKEN is write-enabled only for same-repository PRs; fork PRs keep read-only checks.
   report:
     name: PR report
     if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-    needs: [test, licenses, apple_adapters, spm_bindings, spm_manifest, android_adapters, windows_core, windows_client, lint, coverage]
+    needs: [changes, msrv, test, licenses, apple_adapters, spm_bindings, spm_manifest, android_adapters, windows_core, windows_client, lint, coverage]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
     steps:
       - uses: actions/github-script@v9
+        env:
+          SELECTION_REPORT: ${{ needs.changes.outputs.report }}
         with:
           script: |
             const marker = '<!-- native-oidc-ci-report -->';
+            // [check, result, selection output]; a skip is intended only when
+            // the selection succeeded and set that output to 'false'.
+            const selectionKnown = '${{ needs.changes.result }}' === 'success';
             const checks = [
-              ['Tests', '${{ needs.test.result }}'],
-              ['Dependency licenses', '${{ needs.licenses.result }}'],
-              ['Apple adapters validation', '${{ needs.apple_adapters.result }}'],
-              ['Swift package bindings match', '${{ needs.spm_bindings.result }}'],
-              ['Swift package manifest is consistent', '${{ needs.spm_manifest.result }}'],
-              ['Android adapters validation', '${{ needs.android_adapters.result }}'],
-              ['Windows core target validation', '${{ needs.windows_core.result }}'],
-              ['Windows 11 client consumers (x64 emulation)', '${{ needs.windows_client.result }}'],
-              ['Formatting and Clippy', '${{ needs.lint.result }}'],
+              ['MSRV', '${{ needs.msrv.result }}', '${{ needs.changes.outputs.msrv }}'],
+              ['Tests', '${{ needs.test.result }}', '${{ needs.changes.outputs.test }}'],
+              ['Dependency licenses', '${{ needs.licenses.result }}', '${{ needs.changes.outputs.licenses }}'],
+              ['Apple adapters validation', '${{ needs.apple_adapters.result }}', '${{ needs.changes.outputs.apple }}'],
+              ['Swift package bindings match', '${{ needs.spm_bindings.result }}', '${{ needs.changes.outputs.spm_bindings }}'],
+              ['Swift package manifest is consistent', '${{ needs.spm_manifest.result }}', '${{ needs.changes.outputs.spm_manifest }}'],
+              ['Android adapters validation', '${{ needs.android_adapters.result }}', '${{ needs.changes.outputs.android }}'],
+              ['Windows core target validation', '${{ needs.windows_core.result }}', '${{ needs.changes.outputs.windows }}'],
+              ['Windows 11 client consumers (x64 emulation)', '${{ needs.windows_client.result }}', '${{ needs.changes.outputs.windows }}'],
+              ['Formatting and Clippy', '${{ needs.lint.result }}', '${{ needs.changes.outputs.lint }}'],
             ];
-            const resultLabel = result =>
+            const resultLabel = (result, selected) =>
               result === 'success' ? '✅ passed' :
               result === 'failure' ? '❌ failed' :
+              result === 'skipped' && selectionKnown && selected === 'false' ? '⏭️ skipped (not affected)' :
               `⚠️ ${result}`;
             const coverageResult = '${{ needs.coverage.result }}';
+            const coverageSelected = '${{ needs.changes.outputs.coverage }}';
             const formatCoverage = value =>
               /^\d{1,3}(?:\.\d+)?%$/.test(value) ? value : 'unavailable';
             const lineCoverage = formatCoverage('${{ needs.coverage.outputs.line_coverage }}');
@@ -406,8 +482,12 @@ jobs:
               '',
               '| Check | Result |',
               '| --- | --- |',
-              ...checks.map(([name, result]) => `| ${name} | ${resultLabel(result)} |`),
-              `| Coverage | ${resultLabel(coverageResult)} — lines ${lineCoverage}, functions ${functionCoverage} |`,
+              ...checks.map(([name, result, selected]) => `| ${name} | ${resultLabel(result, selected)} |`),
+              `| Coverage | ${resultLabel(coverageResult, coverageSelected)} — lines ${lineCoverage}, functions ${functionCoverage} |`,
+              '',
+              selectionKnown && process.env.SELECTION_REPORT
+                ? process.env.SELECTION_REPORT
+                : `⚠️ Job selection ${'${{ needs.changes.result }}'}: every job was required to run.`,
               '',
               `[View workflow run](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})`,
             ].join('\n');
