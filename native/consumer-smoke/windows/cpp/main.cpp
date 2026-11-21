@@ -1,6 +1,97 @@
+#include <cstdio>
+#include <cstring>
+#include <string>
+
 #include "native_oidc_windows.h"
 
-int main() {
+namespace {
+
+bool contains(const char* value, const char* expected) {
+    return std::strstr(value, expected) != nullptr;
+}
+
+// Refreshes and then revokes against the local mock provider at base_url,
+// reusing one cancellation handle for both successful operations and
+// freeing it afterwards.
+bool refresh_and_revoke(const std::string& base_url) {
+    NativeOidcWindowsCancellationHandle* cancellation =
+        native_oidc_windows_cancellation_new();
+    if (cancellation == nullptr) {
+        std::fprintf(stderr, "cancellation handle was not created\n");
+        return false;
+    }
+
+    const std::string endpoints =
+        "\"authorization_endpoint\":\"" + base_url + "/authorize\","
+        "\"token_endpoint\":\"" + base_url + "/token\","
+        "\"client_id\":\"consumer\"";
+    const std::string refresh_request =
+        "{" + endpoints +
+        ",\"state\":{\"token_response\":{\"access_token\":\"old\","
+        "\"token_type\":\"Bearer\",\"refresh_token\":\"old-refresh\"}}}";
+    const std::string revoke_request =
+        "{" + endpoints + ",\"revocation_endpoint\":\"" + base_url +
+        "/revoke\",\"token\":\"new-refresh\","
+        "\"token_type_hint\":\"refresh_token\"}";
+
+    bool succeeded = true;
+
+    NativeOidcWindowsRefreshResult* refresh =
+        native_oidc_windows_refresh(refresh_request.c_str(), cancellation);
+    if (refresh == nullptr) {
+        std::fprintf(stderr, "refresh returned no result\n");
+        succeeded = false;
+    } else {
+        const char* value = native_oidc_windows_authorization_result_value(refresh);
+        const bool refreshed =
+            native_oidc_windows_authorization_result_status(refresh) ==
+                NATIVE_OIDC_WINDOWS_AUTHORIZATION_SUCCESS &&
+            value != nullptr &&
+            contains(value, "\"access_token\":\"new-access\"") &&
+            contains(value, "\"refresh_token\":\"new-refresh\"") &&
+            contains(value, "\"expires_at\":");
+        if (!refreshed) {
+            std::fprintf(stderr, "unexpected refresh result: %s\n",
+                         value == nullptr ? "(null)" : value);
+            succeeded = false;
+        }
+        native_oidc_windows_authorization_result_free(refresh);
+    }
+
+    NativeOidcWindowsRevocationResult* revoke =
+        native_oidc_windows_revoke(revoke_request.c_str(), cancellation);
+    if (revoke == nullptr) {
+        std::fprintf(stderr, "revoke returned no result\n");
+        succeeded = false;
+    } else {
+        const char* value = native_oidc_windows_authorization_result_value(revoke);
+        const bool revoked =
+            native_oidc_windows_authorization_result_status(revoke) ==
+                NATIVE_OIDC_WINDOWS_AUTHORIZATION_SUCCESS &&
+            value != nullptr && value[0] == '\0';
+        if (!revoked) {
+            std::fprintf(stderr, "unexpected revoke result: %s\n",
+                         value == nullptr ? "(null)" : value);
+            succeeded = false;
+        }
+        native_oidc_windows_authorization_result_free(revoke);
+    }
+
+    native_oidc_windows_cancellation_free(cancellation);
+    return succeeded;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        std::fprintf(stderr, "usage: native_oidc_release_consumer <mock provider base URL>\n");
+        return 2;
+    }
+    if (!refresh_and_revoke(argv[1])) {
+        return 1;
+    }
+
     NativeOidcWindowsCancellationHandle* cancellation =
         native_oidc_windows_cancellation_new();
     if (cancellation == nullptr) {
