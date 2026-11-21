@@ -74,13 +74,14 @@ In manual mode, the flow follows the phases I request: all phases is end-to-end,
 | Pausing for input | Agent | `agent-in-progress` → `agent-needs-input` |
 | After answering | Me | `agent-needs-input` → the `resume-label` in the pause comment |
 | Final report | Agent | `agent-in-progress` → `agent-done` |
-| Asking for more work after the report | Me | Comment on the PR or the issue, then `agent-done` → `agent-ready` |
+| Asking for more work after the report | Me | Comment on the PR or the issue, then `agent-done` → `agent-in-progress` (the PR phase picks it up) |
 
 ### Choosing a target (handle only one per run)
 Check the following in order, skipping lines for phases this run does not handle, and handle the first match.
 
 1. **PR phase** (needs `pr`): an open PR labeled `agent-pr` whose linked issue is labeled `agent-in-progress`, and that meets any of the following
    - The issue's last agent-marker comment is a `needs-input` marker with `phase=pr` for this PR (I answered and set the label back)
+   - The issue or the PR has a comment from me posted after your last agent-marker post on either of them (for example, more work requested after the final report)
    - Has unhandled feedback (including new replies on threads you already replied to)
    - Has failing CI
    - Has conflicts with the base branch
@@ -91,7 +92,7 @@ Check the following in order, skipping lines for phases this run does not handle
 3. **End-to-end issue** (needs `plan` and `implement`): the oldest open issue labeled `agent-ready`
    - If it has no agent-marker comment: follow [phase-plan.md](phase-plan.md), then [phase-implement.md](phase-implement.md)
    - If its last agent-marker comment is a `needs-input` marker: resume from its `phase` and `step`, continuing its `pr` if one is recorded
-   - Otherwise, if it has a linked open `agent-pr`: resume that PR from step 6 (needs `pr`; otherwise skip this issue)
+   - Otherwise, if it has a linked open `agent-pr`: change the label to `agent-in-progress` and end the run, so that the PR phase picks it up
    - Otherwise: resume from the plan phase, reusing the latest plan comment unless my later comments ask for changes
 4. **Plan phase** (needs `plan`): the oldest open issue labeled `agent-plan`
    → Follow [phase-plan.md](phase-plan.md)
@@ -101,6 +102,14 @@ If nothing matches, end without doing anything.
 When resuming any issue, read the comments posted after your last agent-marker comment. Only comments identified as "Me" (see "Post Markers" in [common-rules.md](common-rules.md)) count as my answers or instructions. If there is none, treat the label change itself as "continue as is".
 
 Whenever you start working on a chosen issue, change its label to `agent-in-progress` first (to prevent duplicate work).
+
+### Pauses posted before the phase split
+Older `needs-input` markers have only `step` and `pr`, without `phase` or `resume-label`. Those issues were all in the end-to-end flow, and I resume them with `agent-ready`. When a target's last agent-marker comment is such a marker:
+
+- Take the phase from the marker: `pr` recorded or `step` 6–7 → `pr`; `step` 3–5 → `implement`; `step` 1–2 → `plan`
+- If the phase is `pr`: the PR phase handles it. A run with `pr` also treats an issue labeled `agent-ready` with such a marker as a "PR phase" target (line 1 above), and changes the label to `agent-in-progress` first
+- Otherwise: handle it as an "End-to-end issue" (line 3 above), resuming from that phase and `step`
+- New pauses always use the current marker format
 
 ### Ending each phase in scheduled mode
 
