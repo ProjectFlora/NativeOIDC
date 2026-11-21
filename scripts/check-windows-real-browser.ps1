@@ -71,9 +71,15 @@ try {
             throw "The mock provider did not report its address: '$baseUrl'"
         }
 
-        & (Join-Path $build "NativeOidcRealBrowserCheck.exe") $baseUrl $TimeoutSeconds |
+        # Keep the check's error output in check-output.txt as well. Merged
+        # stderr lines arrive as error records, so they must not stop the
+        # script, and they are written as plain text.
+        $ErrorActionPreference = "Continue"
+        & (Join-Path $build "NativeOidcRealBrowserCheck.exe") $baseUrl $TimeoutSeconds 2>&1 |
+            ForEach-Object { "$_" } |
             Tee-Object -FilePath (Join-Path $ResultDirectory "check-output.txt")
         $checkStatus = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
         if ($checkStatus -ne 0) {
             # The provider would otherwise wait for its own timeout.
             $provider.Kill()

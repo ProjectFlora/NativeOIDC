@@ -73,7 +73,7 @@ if [[ -z "$base_url" ]]; then
 fi
 
 check_status=0
-target/apple/mac-real-browser-check "$base_url" "$timeout" | tee "$result_dir/check-output.txt" || check_status=$?
+target/apple/mac-real-browser-check "$base_url" "$timeout" 2>&1 | tee "$result_dir/check-output.txt" || check_status=$?
 if [[ "$check_status" -ne 0 ]]; then
     # The provider would otherwise wait for its own timeout.
     kill "$provider_pid" 2>/dev/null || true
