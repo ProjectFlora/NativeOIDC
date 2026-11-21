@@ -232,6 +232,13 @@ to the GitHub Releases as `THIRD_PARTY_LICENSES-<version>.txt` and
 unchanged
 ([#161](https://github.com/ProjectFlora/NativeOIDC/issues/161)).
 
+Its Windows job checks out the release tag instead of the dispatched ref,
+so the Windows consumer script and fixtures match the package under test.
+The success-path fixtures added for
+[#165](https://github.com/ProjectFlora/NativeOIDC/issues/165) need a
+loopback HTTP revocation endpoint, which releases before that change
+reject.
+
 ## Why CI creates the tag
 
 Swift Package Manager reads `Package.swift` at the version tag, and that

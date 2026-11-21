@@ -406,7 +406,14 @@ jobs:
     name: Validate published Windows consumers
     runs-on: windows-latest
     steps:
+      # The Windows fixtures and consumer script come from the release tag,
+      # so each published package is checked against the fixtures it was
+      # released with. Newer fixtures may exercise behavior an older release
+      # does not have, such as the loopback HTTP revocation endpoint the
+      # success-path fixtures use (Issue #165).
       - uses: actions/checkout@v7
+        with:
+          ref: v${{ inputs.version }}
       - name: Download and verify Windows release archive
         shell: pwsh
         env:

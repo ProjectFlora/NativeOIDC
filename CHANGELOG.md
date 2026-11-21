@@ -14,6 +14,13 @@ interoperability testing and support policies are still evolving. Each release r
   discovered endpoints, and the end-session, registration and JWKS endpoints
   still require HTTPS
   ([#165](https://github.com/ProjectFlora/NativeOIDC/issues/165)).
+- The Windows C++ and .NET consumer fixtures now also check the success
+  paths: each refreshes and revokes through the C ABI or the P/Invoke
+  wrapper against a fresh local mock provider, checks the returned state
+  and the empty revocation value, and the provider checks the requests it
+  served. The published release consumer validation checks out the release
+  tag for its Windows job, so each package is validated with its own
+  fixtures ([#165](https://github.com/ProjectFlora/NativeOIDC/issues/165)).
 
 ## [0.7.1] - 2026-11-20
 

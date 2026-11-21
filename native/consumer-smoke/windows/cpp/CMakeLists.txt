@@ -6,9 +6,15 @@ if(NOT DEFINED NATIVE_OIDC_PACKAGE)
 endif()
 
 add_executable(native_oidc_release_consumer main.cpp)
-target_compile_features(native_oidc_release_consumer PRIVATE cxx_std_17)
+# C++20: C++/WinRT uses standard coroutines; under C++17 it falls back to
+# <experimental/coroutine>, which current MSVC rejects.
+target_compile_features(native_oidc_release_consumer PRIVATE cxx_std_20)
 target_include_directories(native_oidc_release_consumer PRIVATE "${NATIVE_OIDC_PACKAGE}/include")
-target_link_libraries(native_oidc_release_consumer PRIVATE "${NATIVE_OIDC_PACKAGE}/native_oidc.dll.lib")
+# windowsapp provides the Windows Runtime JSON parser used to check the
+# refreshed state (C++/WinRT headers ship with the Windows SDK).
+target_link_libraries(native_oidc_release_consumer PRIVATE
+    "${NATIVE_OIDC_PACKAGE}/native_oidc.dll.lib"
+    windowsapp)
 add_custom_command(TARGET native_oidc_release_consumer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${NATIVE_OIDC_PACKAGE}/native_oidc.dll"

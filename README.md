@@ -340,6 +340,8 @@ the repository's native build output:
   the AAR contains both `arm64-v8a` and `x86_64` libraries.
 - Windows builds and runs a C++ host linked with the import library, plus a
   .NET host that compiles the packaged P/Invoke wrapper and loads the DLL.
+  Each host refreshes and revokes against a local mock provider on
+  `127.0.0.1` and checks the returned values, then checks the error paths.
 
 For a downloaded candidate, verify its SHA-256 entry before using it, then run
 the corresponding consumer check on its host platform:
