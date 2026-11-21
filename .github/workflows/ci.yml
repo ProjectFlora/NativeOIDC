@@ -103,7 +103,12 @@ jobs:
       # Linux `test` job (which runs the rest of the suite) skips them.
       - name: Test the zip normalizer against real ditto
         run: python3 -m unittest discover -s scripts -p 'test_normalize_zip.py' -k RealDittoTestCase -v
-      - run: scripts/check-apple-targets.sh
+      # The four Apple targets are built only in release, by Package Apple
+      # XCFramework; the package, consumer and Swift package checks use
+      # those slices. A debug build of the same targets was dropped because
+      # no check used its output (#175). The host debug library that the
+      # smoke test in check-apple-adapters.sh links against is built by
+      # scripts/generate-bindings.sh.
       - run: scripts/check-apple-adapters.sh
       # The guard fires before any build step, so this regression-checks
       # it in seconds: it must refuse an existing output directory, name

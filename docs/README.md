@@ -65,3 +65,10 @@ Build checks, mock-provider tests, and real-provider/device verification are
 different kinds of evidence. Consult the [coverage matrix](api-coverage.md)
 and [interoperability limits](live-idp-interoperability.md) before treating an
 example or CI fixture as a compatibility guarantee.
+
+## Implementation specifications
+
+- [Loopback callback listener](loopback-callback.md): the shared behavior of
+  the Windows (Rust) and macOS (Swift) loopback listeners, where each item is
+  implemented and tested, the known differences between them, and the
+  iOS/iPadOS and Android redirect matching rules.

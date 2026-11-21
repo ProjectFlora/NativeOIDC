@@ -6,6 +6,15 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+### Security
+
+- Upgrade `jsonwebtoken` from 9.3.1 to 12.0.0 with the `rust_crypto`
+  backend, so the release libraries no longer ship a version affected by
+  GHSA-h395-gr6q-cpjc. NativeOIDC was not exploitable: ID Token validation
+  already rejected time claims with the wrong type. The RustCrypto crates it
+  brings include `rsa` 0.10, which is not affected by RUSTSEC-2023-0071
+  ([#197](https://github.com/ProjectFlora/NativeOIDC/issues/197)).
+
 ### Changed
 
 - Explicitly configured token revocation endpoints now accept loopback HTTP
@@ -26,6 +35,10 @@ interoperability testing and support policies are still evolving. Each release r
   `cargo deny check advisories`, every week and on pull requests that change
   `Cargo.toml`, `Cargo.lock`, or `deny.toml`
   ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
+- CI no longer builds the four Apple targets in debug before packaging. The
+  XCFramework packaging step builds the same targets in release, and every
+  Apple check uses those release slices or the host library
+  ([#175](https://github.com/ProjectFlora/NativeOIDC/issues/175)).
 
 ### Documentation
 
@@ -35,6 +48,12 @@ interoperability testing and support policies are still evolving. Each release r
   [docs/dependency-maintenance.md](docs/dependency-maintenance.md) lists the
   steps for re-evaluating the pin when a newer release is published
   ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
+- Add the [loopback callback listener specification](docs/loopback-callback.md):
+  the address, port, and template rules, routing, malformed, slow, and
+  duplicate requests, port release, and cancellation, with a map of the Rust
+  and Swift implementations and their tests, the differences between the two
+  listeners, and the iOS/iPadOS and Android redirect matching rules
+  ([#159](https://github.com/ProjectFlora/NativeOIDC/issues/159)).
 - Add a manual [real system-browser verification](docs/real-browser-verification.md)
   for macOS and Windows, run for each release from the release procedure: the
   default `MacOSAuthorizationAdapter` and the Windows `AuthorizeAsync` open
