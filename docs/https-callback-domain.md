@@ -4,6 +4,10 @@ This directory prepares the static association files required by issue #50.
 It is not a deployed callback domain. Do not publish either file while it
 contains a value enclosed in `<` and `>`.
 
+For how the iOS/iPadOS and Android adapters match a delivered callback to the
+pending operation, see
+[mobile redirect matching](loopback-callback.md#mobile-redirect-matching).
+
 ## Required configuration
 
 Choose a dedicated non-production subdomain, such as

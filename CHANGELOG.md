@@ -48,6 +48,12 @@ interoperability testing and support policies are still evolving. Each release r
   [docs/dependency-maintenance.md](docs/dependency-maintenance.md) lists the
   steps for re-evaluating the pin when a newer release is published
   ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
+- Add the [loopback callback listener specification](docs/loopback-callback.md):
+  the address, port, and template rules, routing, malformed, slow, and
+  duplicate requests, port release, and cancellation, with a map of the Rust
+  and Swift implementations and their tests, the differences between the two
+  listeners, and the iOS/iPadOS and Android redirect matching rules
+  ([#159](https://github.com/ProjectFlora/NativeOIDC/issues/159)).
 
 ## [0.7.1] - 2026-11-20
 
