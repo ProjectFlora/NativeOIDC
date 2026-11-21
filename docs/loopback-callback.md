@@ -143,25 +143,28 @@ the response.
 
 Rust tests are in the `tests` modules of `src/windows/loopback.rs` and
 `src/windows/ops.rs`, run by `cargo test --lib` on the
-`x86_64-pc-windows-msvc` CI job. Swift checks are in
+`x86_64-pc-windows-msvc` CI job. Swift checks are XCTest cases in
+[`SwiftTests/NativeOIDCTests/MacOSAuthorizationAdapterTests.swift`](../SwiftTests/NativeOIDCTests/MacOSAuthorizationAdapterTests.swift),
+run by `swift test` in [`scripts/check-spm-package.sh`](../scripts/check-spm-package.sh),
+and the full flow in
 [`native/apple/MacOSAuthorizationFlowSmoke.swift`](../native/apple/MacOSAuthorizationFlowSmoke.swift),
-run by [`scripts/check-apple-adapters.sh`](../scripts/check-apple-adapters.sh)
-on the macOS CI job.
+run by [`scripts/check-apple-adapters.sh`](../scripts/check-apple-adapters.sh).
+Both run on the macOS CI job.
 
 | Item | Rust implementation | Rust test | Swift implementation | Swift check |
 | --- | --- | --- | --- | --- |
 | Template validation | `parse_redirect_template` | `redirect_template_accepts_ipv4_loopback_and_rejects_other_hosts_or_ports` | `MacOSAuthorizationAdapter.loopbackRedirectComponents` | None |
-| Bind `127.0.0.1` with an OS-chosen port | `authorize_with_browser`, `end_session_with_browser` (`TcpListener::bind`) | `independent_loopback_operations_keep_callbacks_and_cancellation_separate` | `LoopbackHTTPListener.init` (`requiredLocalEndpoint`, `acceptLocalOnly`), `start` | `checkLoopbackListener` (two listeners get different ports) |
+| Bind `127.0.0.1` with an OS-chosen port | `authorize_with_browser`, `end_session_with_browser` (`TcpListener::bind`) | `independent_loopback_operations_keep_callbacks_and_cancellation_separate` | `LoopbackHTTPListener.init` (`requiredLocalEndpoint`, `acceptLocalOnly`), `start` | `testIndependentListenersBindDifferentPortsAndCancelSeparately` |
 | Port substituted into the redirect URI, listener ready before the browser opens | `authorize_with_browser`, `end_session_with_browser` | `authorization_opens_external_url_and_exchanges_validated_callback`, `end_session_with_redirect_validates_callback` | `MacOSAuthorizationAdapter.authorize` | `main` (full flow against `MacOSMockOAuthProvider`) |
 | Header read and size limit | `read_request_headers` (`MAX_REQUEST_SIZE`) | None | `LoopbackHTTPListener.receive`, `received` (`maximumRequestSize`) | None |
-| Unrelated path: `404`, keep waiting | `parse_callback_request` (`Unrelated`), `handle_callback_connection` | `ignores_unrelated_paths_then_accepts_matching_callback` | `LoopbackHTTPListener.received` (`respond(status: 404, ...)`) | `checkLoopbackListener` (`/favicon.ico`) |
+| Unrelated path: `404`, keep waiting | `parse_callback_request` (`Unrelated`), `handle_callback_connection` | `ignores_unrelated_paths_then_accepts_matching_callback` | `LoopbackHTTPListener.received` (`respond(status: 404, ...)`) | `testListenerDeliversCallbackDespiteStalledConnectionAndWrongPath` (`/favicon.ico`) |
 | Matching but malformed: terminal | `parse_callback_request` (`Malformed { matches_path: true }`), `handle_callback_connection` | `matching_callback_with_invalid_host_is_terminal` | `LoopbackHTTPListener.received` (`completeCallback(.failure(...))`) | None |
-| Matching callback: `200`, URL returned | `parse_callback_request` (`Matching`) | `ignores_unrelated_paths_then_accepts_matching_callback` | `LoopbackHTTPListener.received`, `completeCallback`, `resolveCallback` | `checkLoopbackListener` |
-| Core validation of the returned URL | `authorize_with_browser` (`parse_redirect`) | `authorization_opens_external_url_and_exchanges_validated_callback` | `MacOSAuthorizationAdapter.authorize` (`parseRedirect`) | `checkInvalidStateAndReuse` (state mismatch) |
-| Slow connection does not block | `wait_for_callback` (`JoinSet`, `CALLBACK_REQUEST_TIMEOUT`) | `stalled_connection_does_not_block_matching_callback` | Independent `NWConnection` per request | `checkLoopbackListener` (stalled socket) |
-| Duplicate connections: one callback, port released | `wait_for_callback` (`abort_all`, listener dropped on return) | `duplicate_connections_return_one_callback_and_release_the_port`, `stalled_connection_does_not_block_matching_callback` | `LoopbackHTTPListener.completeCallback` | `checkLoopbackListener` (second request after the callback fails to connect) |
-| Cancellation | `wait_for_callback`, `read_request_headers` (`cancellation.cancelled()`) | `cancellation_stops_the_loopback_callback_wait`, `independent_loopback_operations_keep_callbacks_and_cancellation_separate` | `LoopbackHTTPListener.cancel`, `MacOSAuthorizationAdapter.cancel`, `authorize` (`onCancel`, `isCancelled()` check) | `checkLoopbackListener` (cancel before start, cancel during wait) |
-| Cancellation isolated per operation | Separate `CancellationHandle` per call | `independent_loopback_operations_keep_callbacks_and_cancellation_separate` | One listener per `authorize` call; one active call per adapter | `checkLoopbackListener` (independent listener cancelled) |
+| Matching callback: `200`, URL returned | `parse_callback_request` (`Matching`) | `ignores_unrelated_paths_then_accepts_matching_callback` | `LoopbackHTTPListener.received`, `completeCallback`, `resolveCallback` | `testListenerDeliversCallbackDespiteStalledConnectionAndWrongPath` |
+| Core validation of the returned URL | `authorize_with_browser` (`parse_redirect`) | `authorization_opens_external_url_and_exchanges_validated_callback` | `MacOSAuthorizationAdapter.authorize` (`parseRedirect`) | `testStateMismatchIsRejectedAndAdapterCanBeReused` |
+| Slow connection does not block | `wait_for_callback` (`JoinSet`, `CALLBACK_REQUEST_TIMEOUT`) | `stalled_connection_does_not_block_matching_callback` | Independent `NWConnection` per request | `testListenerDeliversCallbackDespiteStalledConnectionAndWrongPath` (stalled socket) |
+| Duplicate connections: one callback, port released | `wait_for_callback` (`abort_all`, listener dropped on return) | `duplicate_connections_return_one_callback_and_release_the_port`, `stalled_connection_does_not_block_matching_callback` | `LoopbackHTTPListener.completeCallback` | `testCompletedListenerRefusesAnotherCallback` |
+| Cancellation | `wait_for_callback`, `read_request_headers` (`cancellation.cancelled()`) | `cancellation_stops_the_loopback_callback_wait`, `independent_loopback_operations_keep_callbacks_and_cancellation_separate` | `LoopbackHTTPListener.cancel`, `MacOSAuthorizationAdapter.cancel`, `authorize` (`onCancel`, `isCancelled()` check) | `testCancelledListenerRefusesToStart`, `testCancellingListenerFailsPendingCallbackWait` |
+| Cancellation isolated per operation | Separate `CancellationHandle` per call | `independent_loopback_operations_keep_callbacks_and_cancellation_separate` | One listener per `authorize` call; one active call per adapter | `testIndependentListenersBindDifferentPortsAndCancelSeparately` (the other listener still delivers its callback) |
 
 These checks drive the listener with a simulated browser (a closure or a
 direct HTTP client). They do not open the real system browser.

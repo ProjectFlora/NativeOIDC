@@ -4,5 +4,9 @@
             android:name="net.projectflora.nativeoidc.AndroidAuthorizationFlowTestActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
+            android:name="net.projectflora.nativeoidc.AndroidNoBrowserFlowTestActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 </manifest>

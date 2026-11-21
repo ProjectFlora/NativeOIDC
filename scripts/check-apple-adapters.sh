@@ -10,9 +10,10 @@ xcrun swift-format lint --strict \
     Sources/NativeOIDC/IOSAuthorizationAdapter.swift \
     native/apple/IOSAuthorizationFlowSmoke.swift \
     Sources/NativeOIDC/MacOSAuthorizationAdapter.swift \
-    native/apple/MacOSMockOAuthProvider.swift \
+    SwiftTests/NativeOIDCTests/MacOSMockOAuthProvider.swift \
     Sources/NativeOIDC/URLSessionNativeHttpTransport.swift \
     native/apple/MacOSAuthorizationFlowSmoke.swift \
+    SwiftTests/NativeOIDCTests/MacOSAuthorizationAdapterTests.swift \
     native/apple/MacOSRealBrowserCheck.swift
 
 swift_file="$output_dir/swift/native_oidc.swift"
@@ -24,7 +25,7 @@ swiftc \
     -typecheck \
     "$swift_file" \
     Sources/NativeOIDC/IOSAuthorizationAdapter.swift \
-    native/apple/MacOSMockOAuthProvider.swift \
+    SwiftTests/NativeOIDCTests/MacOSMockOAuthProvider.swift \
     Sources/NativeOIDC/MacOSAuthorizationAdapter.swift \
     Sources/NativeOIDC/URLSessionNativeHttpTransport.swift
 
@@ -35,7 +36,7 @@ swiftc \
     -typecheck \
     "$swift_file" \
     Sources/NativeOIDC/IOSAuthorizationAdapter.swift \
-    native/apple/MacOSMockOAuthProvider.swift \
+    SwiftTests/NativeOIDCTests/MacOSMockOAuthProvider.swift \
     Sources/NativeOIDC/MacOSAuthorizationAdapter.swift \
     Sources/NativeOIDC/URLSessionNativeHttpTransport.swift
 
@@ -73,7 +74,7 @@ swiftc \
     -Xlinker "$repo_root/target/debug" \
     -o target/apple/mac-authorization-flow-smoke \
     "$swift_file" \
-    native/apple/MacOSMockOAuthProvider.swift \
+    SwiftTests/NativeOIDCTests/MacOSMockOAuthProvider.swift \
     Sources/NativeOIDC/MacOSAuthorizationAdapter.swift \
     Sources/NativeOIDC/URLSessionNativeHttpTransport.swift \
     native/apple/MacOSAuthorizationFlowSmoke.swift

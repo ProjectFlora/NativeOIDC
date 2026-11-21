@@ -132,7 +132,7 @@ xcrun swiftc \
     -lnative_oidc_macos \
     -o "$repo_root/target/apple/mac-authorization-flow-smoke-static" \
     "$generated/swift/native_oidc.swift" \
-    "$repo_root/native/apple/MacOSMockOAuthProvider.swift" \
+    "$repo_root/SwiftTests/NativeOIDCTests/MacOSMockOAuthProvider.swift" \
     "$repo_root/Sources/NativeOIDC/MacOSAuthorizationAdapter.swift" \
     "$repo_root/Sources/NativeOIDC/URLSessionNativeHttpTransport.swift" \
     "$repo_root/native/apple/MacOSAuthorizationFlowSmoke.swift"
