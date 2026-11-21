@@ -22,6 +22,15 @@ interoperability testing and support policies are still evolving. Each release r
   tag for its Windows job, so each package is validated with its own
   fixtures ([#165](https://github.com/ProjectFlora/NativeOIDC/issues/165)).
 
+### Documentation
+
+- Add the [loopback callback listener specification](docs/loopback-callback.md):
+  the address, port, and template rules, routing, malformed, slow, and
+  duplicate requests, port release, and cancellation, with a map of the Rust
+  and Swift implementations and their tests, the differences between the two
+  listeners, and the iOS/iPadOS and Android redirect matching rules
+  ([#159](https://github.com/ProjectFlora/NativeOIDC/issues/159)).
+
 ## [0.7.1] - 2026-11-20
 
 ### Changed
