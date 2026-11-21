@@ -78,6 +78,17 @@
       let secondCallbackTask = Task {
         try await second.waitForCallback()
       }
+      // Creating the task does not run it, so wait until the second listener
+      // has registered its pending wait before cancelling the first.
+      let deadline = Date().addingTimeInterval(5)
+      while !(await second.isWaitingForCallback) {
+        guard Date() < deadline else {
+          await second.cancel()
+          XCTFail("second listener did not start waiting for its callback")
+          return
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+      }
       await first.cancel()
       let callbackURL = URL(string: "http://127.0.0.1:\(secondPort)/oauth/callback?code=c&state=s")!
       let (_, response) = try await callbackSession.data(from: callbackURL)

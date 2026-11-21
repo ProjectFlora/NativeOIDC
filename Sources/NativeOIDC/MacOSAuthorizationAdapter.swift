@@ -204,6 +204,12 @@
       }
     }
 
+    /// Whether a `waitForCallback()` call is suspended waiting for the
+    /// callback. Only tests read it, to act once a wait is pending.
+    var isWaitingForCallback: Bool {
+      callbackContinuation != nil
+    }
+
     func cancel() {
       guard !isStopped else {
         return
