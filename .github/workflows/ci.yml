@@ -244,6 +244,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
+          cache-workspace-crates: true
       - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - run: ./native/android/gradlew -p native/android assembleRelease
