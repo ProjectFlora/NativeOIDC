@@ -125,11 +125,18 @@ the response.
   wait selects on it first.
 - Cancellation before the wait starts ends the operation with the cancelled
   error without accepting a callback.
-- For authorization, cancellation that arrives after the callback was
-  received still results in the cancelled error: the code exchange observes
-  it, and macOS also checks it right after the callback. The Windows
-  end-session operation has no step after the callback, so cancellation at
-  that point does not change its result.
+- After the listener has returned a well-formed callback URL, the result
+  depends on the platform:
+  - macOS checks cancellation right after the callback, before core
+    validation (`parseRedirect`), so cancellation at that point returns the
+    cancelled error.
+  - Windows authorization validates the callback (`parse_redirect`) before
+    the cancellation-aware code exchange. If the callback fails core
+    validation (for example a state mismatch), that error is returned even
+    if cancellation arrived in between. Otherwise the code exchange observes
+    the cancellation and returns the cancelled error.
+  - The Windows end-session operation has no step after the callback
+    validation, so cancellation at that point does not change its result.
 - Cancelling one operation does not affect another operation's listener.
 
 ## Implementation and test map
