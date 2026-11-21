@@ -1,6 +1,9 @@
 package net.projectflora.nativeoidc
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.os.Bundle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -11,7 +14,7 @@ import uniffi.native_oidc.FfiAuthorizationOptions
 import uniffi.native_oidc.FfiServiceConfiguration
 import uniffi.native_oidc.NativeHttpTransport
 
-class AndroidAuthorizationFlowTestActivity : Activity() {
+open class AndroidAuthorizationFlowTestActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     fun authorize(
@@ -39,4 +42,12 @@ class AndroidAuthorizationFlowTestActivity : Activity() {
         scope.cancel()
         super.onDestroy()
     }
+}
+
+/** Behaves as if no browser is installed: every Custom Tab launch fails. */
+class AndroidNoBrowserFlowTestActivity : AndroidAuthorizationFlowTestActivity() {
+    override fun startActivity(
+        intent: Intent,
+        options: Bundle?,
+    ): Unit = throw ActivityNotFoundException("No browser is installed in this test")
 }
