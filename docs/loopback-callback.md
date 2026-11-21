@@ -102,8 +102,11 @@ the response.
 - On macOS, once a matching request has been parsed, the listener has
   already stopped and is sending that request's response; cancelling at
   that point does not interrupt the send, and the result is delivered when
-  the send completes. The adapter then checks the operation's cancellation
-  and returns the cancelled error (see the next items). On Windows,
+  the send completes. After a successful callback result, the adapter
+  checks cancellation and returns the cancelled error if it was requested
+  (see the next items). A malformed matching callback still fails with its
+  listener error (`malformedLoopbackRequest`), even if cancellation arrived
+  during the send. On Windows,
   cancellation is observed while a response is being written, because the
   wait selects on it first.
 - Cancellation before the wait starts ends the operation with the cancelled
