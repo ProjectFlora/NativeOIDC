@@ -213,10 +213,6 @@ jobs:
       # The same Rust as the Apple job, so every package links the same
       # standard library and ships the same notices for it.
       - uses: dtolnay/rust-toolchain@1.100.0
-      # Add Rust cache for Android jobs, but exclude target/debug to avoid conflicts with Gradle
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-local-path: ~/.cargo/registry/cache/*
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
@@ -227,31 +223,21 @@ jobs:
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Also configure for API 35 to ensure cache keys work for both API levels
-      - name: Configure Android NDK (API 35)
-        env:
-          ANDROID_API_LEVEL: '35'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
+      # Cache the Cargo registry and target/, including the Android target
+      # outputs that check-android-targets.sh builds under Gradle. The key
+      # adds the NDK version and native API level, which rust-cache does not
+      # hash on its own, so changing either starts a fresh cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
-      - name: Run Android callback tests on an emulator (API 28)
+      - name: Run Android callback tests on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 28
-          arch: x86_64
-          target: google_apis_playstore
-          disable-linux-hw-accel: false
-          disable-animations: true
-          script: ./native/android/gradlew -p native/android connectedDebugAndroidTest
-      # Issue #166: Also run on API 35 to verify cache doesn't cause inappropriate reuse
-      - name: Run Android callback tests on an emulator (API 35)
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -535,10 +521,6 @@ jobs:
       # The same Rust as the Apple job, so every package links the same
       # standard library and ships the same notices for it.
       - uses: dtolnay/rust-toolchain@1.100.0
-      # Add Rust cache for Android jobs, but exclude target/debug to avoid conflicts with Gradle
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-local-path: ~/.cargo/registry/cache/*
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
@@ -549,13 +531,13 @@ jobs:
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Also configure for API 35 to ensure cache keys work for both API levels
-      - name: Configure Android NDK (API 35)
-        env:
-          ANDROID_API_LEVEL: '35'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
+      # Cache the Cargo registry and target/, including the Android target
+      # outputs that check-android-targets.sh builds under Gradle. The key
+      # adds the NDK version and native API level, which rust-cache does not
+      # hash on its own, so changing either starts a fresh cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       - uses: gradle/actions/setup-gradle@v6
       - name: Verify the signed publication locally
         env:

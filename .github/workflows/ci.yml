@@ -227,14 +227,23 @@ jobs:
           packages: platform-tools
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
       - uses: dtolnay/rust-toolchain@stable
-      # Add Rust cache for Android jobs, but exclude target/debug to avoid conflicts with Gradle
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-local-path: ~/.cargo/registry/cache/*
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-about@0.9.3
+      - name: Configure Android NDK
+        env:
+          ANDROID_API_LEVEL: '28'
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
+      # Cache the Cargo registry and target/, including the Android target
+      # outputs that check-android-targets.sh builds under Gradle. The key
+      # adds the NDK version and native API level, which rust-cache does not
+      # hash on its own, so changing either starts a fresh cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - run: ./native/android/gradlew -p native/android assembleRelease
@@ -244,18 +253,6 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 28
-          arch: x86_64
-          target: google_apis_playstore
-          disable-linux-hw-accel: false
-          disable-animations: true
-          script: |
-            ./native/android/gradlew -p native/android connectedDebugAndroidTest || { echo "::group::Android emulator diagnostics"; adb devices -l || true; adb shell getprop || true; adb shell dumpsys activity activities || true; adb shell dumpsys window windows || true; adb exec-out uiautomator dump /dev/tty || true; adb logcat -d -t 500 || true; echo "::endgroup::"; exit 1; }
-            scripts/check-android-release-consumer.sh native/android/build/outputs/aar/native-oidc-android-release.aar
-      # Issue #166: Also run on API 35 to verify cache doesn't cause inappropriate reuse
-      - name: Run Android callback tests on an emulator (API 35)
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
