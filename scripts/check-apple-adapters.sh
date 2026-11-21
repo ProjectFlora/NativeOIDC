@@ -13,7 +13,8 @@ xcrun swift-format lint --strict \
     SwiftTests/NativeOIDCTests/MacOSMockOAuthProvider.swift \
     Sources/NativeOIDC/URLSessionNativeHttpTransport.swift \
     native/apple/MacOSAuthorizationFlowSmoke.swift \
-    SwiftTests/NativeOIDCTests/MacOSAuthorizationAdapterTests.swift
+    SwiftTests/NativeOIDCTests/MacOSAuthorizationAdapterTests.swift \
+    native/apple/MacOSRealBrowserCheck.swift
 
 swift_file="$output_dir/swift/native_oidc.swift"
 module_map="$output_dir/swift/native_oidcFFI.modulemap"
@@ -38,6 +39,19 @@ swiftc \
     SwiftTests/NativeOIDCTests/MacOSMockOAuthProvider.swift \
     Sources/NativeOIDC/MacOSAuthorizationAdapter.swift \
     Sources/NativeOIDC/URLSessionNativeHttpTransport.swift
+
+# The real system-browser check (docs/real-browser-verification.md) runs
+# manually; type-check it here so that it keeps building.
+swiftc \
+    -parse-as-library \
+    -target arm64-apple-macosx15.0 \
+    -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
+    -Xcc "-fmodule-map-file=$module_map" \
+    -typecheck \
+    "$swift_file" \
+    Sources/NativeOIDC/MacOSAuthorizationAdapter.swift \
+    Sources/NativeOIDC/URLSessionNativeHttpTransport.swift \
+    native/apple/MacOSRealBrowserCheck.swift
 
 mkdir -p target/apple
 case "$(uname -m)" in

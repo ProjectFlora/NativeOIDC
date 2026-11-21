@@ -66,14 +66,20 @@
       }
     }
 
-    func testIndependentListenersBindDifferentPorts() async throws {
+    func testIndependentListenersBindDifferentPortsAndCancelSeparately() async throws {
       let first = try LoopbackHTTPListener(callbackPath: "/oauth/callback")
       let second = try LoopbackHTTPListener(callbackPath: "/oauth/callback")
       let firstPort = try await first.start()
       let secondPort = try await second.start()
       XCTAssertNotEqual(firstPort, secondPort)
+
+      // Cancelling one listener leaves the other able to deliver its callback.
       await first.cancel()
-      await second.cancel()
+      let callbackURL = URL(string: "http://127.0.0.1:\(secondPort)/oauth/callback?code=c&state=s")!
+      let (_, response) = try await callbackSession.data(from: callbackURL)
+      XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+      let received = try await second.waitForCallback()
+      XCTAssertEqual(URLComponents(string: received)?.port, Int(secondPort))
     }
 
     func testCancelledListenerRefusesToStart() async throws {

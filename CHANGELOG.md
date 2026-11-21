@@ -35,6 +35,10 @@ interoperability testing and support policies are still evolving. Each release r
   `cargo deny check advisories`, every week and on pull requests that change
   `Cargo.toml`, `Cargo.lock`, or `deny.toml`
   ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
+- CI no longer builds the four Apple targets in debug before packaging. The
+  XCFramework packaging step builds the same targets in release, and every
+  Apple check uses those release slices or the host library
+  ([#175](https://github.com/ProjectFlora/NativeOIDC/issues/175)).
 
 ### Documentation
 
@@ -44,6 +48,29 @@ interoperability testing and support policies are still evolving. Each release r
   [docs/dependency-maintenance.md](docs/dependency-maintenance.md) lists the
   steps for re-evaluating the pin when a newer release is published
   ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
+- Add the [loopback callback listener specification](docs/loopback-callback.md):
+  the address, port, and template rules, routing, malformed, slow, and
+  duplicate requests, port release, and cancellation, with a map of the Rust
+  and Swift implementations and their tests, the differences between the two
+  listeners, and the iOS/iPadOS and Android redirect matching rules
+  ([#159](https://github.com/ProjectFlora/NativeOIDC/issues/159)).
+- Add a manual [real system-browser verification](docs/real-browser-verification.md)
+  for macOS and Windows, run for each release from the release procedure: the
+  default `MacOSAuthorizationAdapter` and the Windows `AuthorizeAsync` open
+  the authorization URL in the default browser, a local mock provider
+  (`scripts/real_browser_mock_provider.py`) redirects the browser to the
+  loopback callback, and the code exchange completes. Add
+  `scripts/check-macos-real-browser.sh` and
+  `scripts/check-windows-real-browser.ps1` to run it, and a result record
+  for the release tracking issue. The macOS check is type-checked in CI
+  ([#65](https://github.com/ProjectFlora/NativeOIDC/issues/65)).
+
+### Known limitations
+
+- macOS and Windows CI does not open a real system browser. The real
+  system-browser flow is checked by the manual verification above, and its
+  result is recorded for each release
+  ([#65](https://github.com/ProjectFlora/NativeOIDC/issues/65)).
 
 ## [0.7.1] - 2026-11-20
 

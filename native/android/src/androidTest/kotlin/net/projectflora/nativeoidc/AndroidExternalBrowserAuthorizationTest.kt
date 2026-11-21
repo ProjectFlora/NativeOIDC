@@ -1,6 +1,7 @@
 package net.projectflora.nativeoidc
 
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -86,16 +87,26 @@ class AndroidExternalBrowserAuthorizationTest {
                                 throw AssertionError("Authorization completed without opening the mock provider")
                             }
                         }
-                    } ?: throw AssertionError("External browser did not open the mock provider")
+                    } ?: throw uiFailure(device, "External browser did not open the mock provider")
                 assertEquals("code", authorizationParameters["response_type"])
                 assertEquals("mock-client", authorizationParameters["client_id"])
                 assertEquals(redirectUri, authorizationParameters["redirect_uri"])
                 assertEquals("S256", authorizationParameters["code_challenge_method"])
 
-                assertTrue(
-                    "Mock provider page did not load in the external browser",
-                    clickWhenAvailable(device, By.text("Authorize"), 20_000),
-                )
+                if (!clickWhenAvailable(device, By.text("Authorize"), 20_000)) {
+                    throw uiFailure(device, "Mock provider page did not load in the external browser")
+                }
+                // On the API 35 image, Chrome can drop a tap that lands right after the
+                // page appears. The page retitles itself when its handler runs, so tap
+                // again only while that marker, the token request and the result are absent.
+                val redirectStarted = {
+                    device.hasObject(By.text(REDIRECTING_TITLE)) ||
+                        server.tokenRequest.isCompleted ||
+                        result.isCompleted
+                }
+                if (!retapUntil(device, By.text("Authorize"), redirectStarted, 20_000)) {
+                    throw uiFailure(device, "Authorize tap did not reach the mock provider page")
+                }
                 confirmExternalAppLaunch(device)
 
                 val tokenParameters =
@@ -107,7 +118,7 @@ class AndroidExternalBrowserAuthorizationTest {
                                 throw AssertionError("Authorization completed before token exchange")
                             }
                         }
-                    } ?: throw AssertionError("Browser callback did not reach the token endpoint")
+                    } ?: throw uiFailure(device, "Browser callback did not reach the token endpoint")
                 assertEquals("authorization_code", tokenParameters["grant_type"])
                 assertEquals("mock-code", tokenParameters["code"])
                 assertEquals(redirectUri, tokenParameters["redirect_uri"])
@@ -134,6 +145,11 @@ class AndroidExternalBrowserAuthorizationTest {
     }
 
     private fun prepareChrome(device: UiDevice) {
+        // Android 13+ asks for Chrome's notification permission in a system dialog
+        // that covers the page. Grant it up front so the dialog never appears.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            device.executeShellCommand("pm grant com.android.chrome android.permission.POST_NOTIFICATIONS")
+        }
         device.executeShellCommand("am start -a android.intent.action.VIEW -d about:blank -p com.android.chrome")
         assertTrue(
             "Chrome did not open before the authorization flow",
@@ -149,10 +165,9 @@ class AndroidExternalBrowserAuthorizationTest {
             setupLabels.any { label -> clickIfPresent(device, labelMatches(label)) }
             Thread.sleep(500)
         }
-        assertTrue(
-            "Chrome first-run wizard was still showing when the authorization flow started",
-            device.wait(Until.gone(By.res("com.android.chrome:id/fre_pager")), 10_000),
-        )
+        if (!device.wait(Until.gone(By.res("com.android.chrome:id/fre_pager")), 10_000)) {
+            throw uiFailure(device, "Chrome first-run wizard was still showing when the authorization flow started")
+        }
         device.pressBack()
     }
 
@@ -174,6 +189,25 @@ class AndroidExternalBrowserAuthorizationTest {
         return false
     }
 
+    private fun retapUntil(
+        device: UiDevice,
+        selector: BySelector,
+        done: () -> Boolean,
+        timeoutMillis: Long,
+    ): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMillis
+        while (SystemClock.uptimeMillis() < deadline) {
+            // Give each tap time to run the handler before tapping again.
+            val settle = SystemClock.uptimeMillis() + 2_000
+            while (SystemClock.uptimeMillis() < settle) {
+                if (done()) return true
+                Thread.sleep(100)
+            }
+            clickIfPresent(device, selector)
+        }
+        return done()
+    }
+
     private fun clickIfPresent(device: UiDevice, selector: BySelector): Boolean =
         try {
             val button = device.findObject(selector)
@@ -189,9 +223,36 @@ class AndroidExternalBrowserAuthorizationTest {
             false
         }
 
+    // Records what is on screen when the browser flow stalls, before the
+    // scenario closes and the Custom Tab goes away.
+    private fun uiFailure(device: UiDevice, message: String): AssertionError {
+        val hierarchy = ByteArrayOutputStream()
+        val dump =
+            try {
+                device.dumpWindowHierarchy(hierarchy)
+                hierarchy.toString("UTF-8")
+            } catch (error: Exception) {
+                "unavailable: $error"
+            }
+        // Gradle prints only the first lines of a failure message, so keep the
+        // on-screen summary on the first line and the full dump after it.
+        val onScreen =
+            Regex("""(?:text|content-desc|resource-id)="([^"]+)"""")
+                .findAll(dump)
+                .map { it.groupValues[1] }
+                .joinToString(" | ")
+        return AssertionError(
+            "$message (API ${Build.VERSION.SDK_INT}, foreground package " +
+                "${device.currentPackageName}; on screen: $onScreen)\nWindow hierarchy:\n$dump",
+        )
+    }
+
     private fun labelMatches(label: String): BySelector =
         By.text(Regex("(?i)^${Regex.escape(label)}$").toPattern())
 }
+
+// The mock provider page sets this title when its Authorize handler runs.
+private const val REDIRECTING_TITLE = "Redirecting"
 
 private class MockAuthorizationServer : Closeable {
     private val serverSocket =
@@ -281,7 +342,7 @@ private class MockAuthorizationServer : Closeable {
                     .appendQueryParameter("state", parameters.getValue("state"))
                     .build()
                 val html =
-                    """<!doctype html><meta charset="utf-8"><button onclick="location.href='$redirect'">Authorize</button>"""
+                    """<!doctype html><meta charset="utf-8"><title>Mock provider</title><button onclick="document.title='$REDIRECTING_TITLE';location.href='$redirect'">Authorize</button>"""
                 respond(output, 200, "text/html; charset=utf-8", html.toByteArray())
             }
             "/token" -> {

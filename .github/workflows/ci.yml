@@ -103,7 +103,12 @@ jobs:
       # Linux `test` job (which runs the rest of the suite) skips them.
       - name: Test the zip normalizer against real ditto
         run: python3 -m unittest discover -s scripts -p 'test_normalize_zip.py' -k RealDittoTestCase -v
-      - run: scripts/check-apple-targets.sh
+      # The four Apple targets are built only in release, by Package Apple
+      # XCFramework; the package, consumer and Swift package checks use
+      # those slices. A debug build of the same targets was dropped because
+      # no check used its output (#175). The host debug library that the
+      # smoke test in check-apple-adapters.sh links against is built by
+      # scripts/generate-bindings.sh.
       - run: scripts/check-apple-adapters.sh
       # The guard fires before any build step, so this regression-checks
       # it in seconds: it must refuse an existing output directory, name
@@ -248,10 +253,15 @@ jobs:
           key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
-      - run: ./native/android/gradlew -p native/android assembleRelease
-      - name: Enable Android emulator hardware acceleration
+      - id: android_release_aar
+        run: ./native/android/gradlew -p native/android assembleRelease
+      - id: android_emulator_kvm
+        name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
-      - name: Run Android callback tests on an emulator
+      # The emulator tests run on the minSdk (API 28) and on the compileSdk and
+      # consumer targetSdk (API 35), one after the other in this job, so the
+      # required "Android adapters validation" check covers both (#166).
+      - name: Run Android callback tests on an emulator (API 28)
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 28
@@ -259,9 +269,21 @@ jobs:
           target: google_apis_playstore
           disable-linux-hw-accel: false
           disable-animations: true
-          script: |
+          script: &android-emulator-tests |
             ./native/android/gradlew -p native/android connectedDebugAndroidTest || { echo "::group::Android emulator diagnostics"; adb devices -l || true; adb shell getprop || true; adb shell dumpsys activity activities || true; adb shell dumpsys window windows || true; adb exec-out uiautomator dump /dev/tty || true; adb logcat -d -t 500 || true; echo "::endgroup::"; exit 1; }
             scripts/check-android-release-consumer.sh native/android/build/outputs/aar/native-oidc-android-release.aar
+      # Runs even when the API 28 step fails, so each level reports its own
+      # result. It still needs the release AAR and KVM from the steps above.
+      - name: Run Android callback tests on an emulator (API 35)
+        if: ${{ !cancelled() && steps.android_release_aar.outcome == 'success' && steps.android_emulator_kvm.outcome == 'success' }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis_playstore
+          disable-linux-hw-accel: false
+          disable-animations: true
+          script: *android-emulator-tests
       - name: Verify Android native libraries in AAR
         run: |
           aar=native/android/build/outputs/aar/native-oidc-android-release.aar
