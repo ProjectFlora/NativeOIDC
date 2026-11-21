@@ -584,7 +584,8 @@ that may not match the newer Swift sources.
   `native-oidc-android-release.aar` and expires after 14 days. The versioned
   GitHub Release AAR and `SHA256SUMS` are the persistent distribution artifacts.
 - Android authorization through a Custom Tab, callback activity, and code
-  exchange is exercised against a local mock provider on an API 28 emulator.
+  exchange is exercised against a local mock provider on API 28 and API 35
+  emulators.
   Live identity-provider interoperability is not yet tested end-to-end.
 
 ## Windows adapter
