@@ -78,17 +78,34 @@ the response.
 
 - Connections are handled concurrently. A connection that sends nothing, or
   only part of its headers, does not block a later matching callback.
-- Only the first matching request completes the wait. Other connections
-  that are still open at that point are closed without a response, and no
-  later connection is accepted.
-- The port is released once the first matching request has been handled,
-  before the callback is validated and before the code exchange. A second
+- Exactly one matching request completes the wait. Other connections that
+  are still open at that point are closed, and no later connection is
+  accepted. Which request wins when matching requests overlap differs (D8):
+  - Windows: each connection writes its response before it reports its
+    result, and `wait_for_callback` takes the first result it collects from
+    its `JoinSet`. Overlapping matching requests can each have received a
+    response by then, and the winner is the connection whose handling
+    finished first, not necessarily the one parsed first.
+  - macOS: the listener actor handles parsed requests one at a time. The
+    first matching request parsed wins: the listener stops, the other
+    connections are closed without a response, and only the winner gets a
+    response.
+- The port is released once the winning request has been handled, before
+  the callback is validated and before the code exchange. A second
   identical callback, for example from a browser retry, cannot connect.
 
 ### Cancellation
 
-- Cancelling the operation stops the wait immediately with the cancelled
-  error, closes every open connection, and releases the port.
+- Cancelling the operation while it is waiting for a matching request stops
+  the wait immediately with the cancelled error, closes every open
+  connection, and releases the port.
+- On macOS, once a matching request has been parsed, the listener has
+  already stopped and is sending that request's response; cancelling at
+  that point does not interrupt the send, and the result is delivered when
+  the send completes. The adapter then checks the operation's cancellation
+  and returns the cancelled error (see the next items). On Windows,
+  cancellation is observed while a response is being written, because the
+  wait selects on it first.
 - Cancellation before the wait starts ends the operation with the cancelled
   error without accepting a callback.
 - For authorization, cancellation that arrives after the callback was
@@ -141,7 +158,7 @@ for a follow-up issue that aligns the implementations.
 | D5 | Request-line separators | Any whitespace (`split_whitespace`) | Space only |
 | D6 | Target that does not start with `/` (for example the absolute form `http://127.0.0.1:<port>/callback`), or that contains `#` | `400`, keep waiting | Not starting with `/`: treated as an unrelated path (`404`). Matching path with `#`: returned as the callback, which the core rejects because of the fragment, so the operation fails |
 | D7 | Header encoding | Must be UTF-8, otherwise `400`, keep waiting | Decoded as ASCII, otherwise `400`, keep waiting |
-| D8 | When the listener stops accepting after the first matching request | After the response is written | As soon as the request is parsed, before the response is written |
+| D8 | Winner among overlapping matching requests, and when the listener stops accepting | The connection whose handling (including writing its response) finished first wins; overlapping matching requests can all have received a response. The listener stops after the winner's response is written | The first matching request parsed wins and only it gets a response. The listener stops as soon as that request is parsed, before its response is written; cancellation during that send waits for it to complete |
 | D9 | Path comparison against the template | The template path as normalized by the `url` crate (dot segments removed, characters percent-encoded) | `URLComponents.percentEncodedPath` as written in the template, without normalization. A template path with `.` or `..` segments can therefore never match on macOS, because browsers remove dot segments before sending the request |
 | D10 | Loopback post-logout redirect | Supported: `end_session_with_browser` uses the same listener | Not provided by `MacOSAuthorizationAdapter` |
 
