@@ -1,0 +1,52 @@
+name: Dependency audit
+
+# Checks the dependency graph of the release libraries against the RustSec
+# advisory database (deny.toml, [advisories]). It runs on a schedule rather
+# than in Rust CI, because a new advisory appears without any change to this
+# repository: in Rust CI it would fail every unrelated pull request. It also
+# runs on pull requests that change the dependency graph or its policy, so a
+# dependency change is audited before it merges.
+on:
+  schedule:
+    # Every Monday at 03:17 UTC.
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - deny.toml
+      - .github/workflows/dependency-audit.yml
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - deny.toml
+      - .github/workflows/dependency-audit.yml
+
+concurrency:
+  group: dependency-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  advisories:
+    name: Security advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # The same pinned cargo-deny as the license check in Rust CI, so a new
+      # release of the tool cannot change the result. The advisory database
+      # itself is fetched fresh on every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny check advisories
