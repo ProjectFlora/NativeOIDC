@@ -109,13 +109,14 @@ Each run writes these files to the result directory:
 | --- | --- |
 | `environment.txt` | Date, commit, OS version, and architecture (and the package on Windows) |
 | `check-output.txt` | The default browser (macOS: the application `NSWorkspace` opens for `http` URLs; Windows: the `http` `UserChoice` ProgId) and the outcome |
-| `provider-result.json` | `completed`, the browser's `authorization_user_agent`, the `redirect_uri` it was given, and any `errors` |
+| `provider-result.json` | `completed`, the browser's `authorization_user_agent`, the `redirect_uri` it was given, and any `errors`. It is rewritten as the flow progresses, so it is kept even when the script stops the provider early; `"final": false` marks such a partial result |
 | `provider-log.txt` | The provider's request log |
 
 A run passes when all of the following hold:
 
 - The script ends with `Real system-browser check passed`.
-- `provider-result.json` has `"completed": true` and an empty `errors` list.
+- `provider-result.json` has `"final": true`, `"completed": true`, and an
+  empty `errors` list.
 - `authorization_user_agent` is the default browser's user agent (for
   example one that names Safari, Edg, Chrome, or Firefox), not a
   non-browser HTTP client such as `CFNetwork` or `curl`.

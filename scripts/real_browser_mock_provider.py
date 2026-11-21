@@ -13,8 +13,9 @@ The provider serves one authorization code flow for a loopback redirect
 
 The provider prints its base URL on the first standard output line, then
 serves until the token request has been answered or `--timeout` seconds have
-passed. It writes a JSON result to `--result-file` and exits with 0 only when
-the flow completed. See docs/real-browser-verification.md.
+passed. It keeps a JSON result in `--result-file`, rewritten on every change
+and marked `"final": true` when the provider exits normally, and exits with 0
+only when the flow completed. See docs/real-browser-verification.md.
 """
 
 import argparse
@@ -38,14 +39,16 @@ MAX_BODY_SIZE = 16 * 1024
 class Provider(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address=("127.0.0.1", 0)):
+    def __init__(self, address=("127.0.0.1", 0), result_file=None):
         super().__init__(address, Handler)
         self.lock = threading.Lock()
         self.completed = threading.Event()
+        self.result_file = result_file
         self.authorization = None
         self.authorization_user_agent = None
         self.token_served = False
         self.errors = []
+        self.save()
 
     @property
     def base_url(self):
@@ -54,17 +57,40 @@ class Provider(ThreadingHTTPServer):
     def record_error(self, message):
         with self.lock:
             self.errors.append(message)
+        self.save()
 
-    def result(self):
+    def save(self, final=False):
+        """Writes the current result to the result file, if there is one.
+
+        The file is rewritten on every change, so a provider that is killed
+        before its deadline (as the run scripts do when the check fails
+        first) still leaves the evidence it collected, with `final` false.
+        """
+        if self.result_file is None:
+            return
         with self.lock:
-            return {
-                "completed": self.token_served and not self.errors,
-                "authorization_requested": self.authorization is not None,
-                "authorization_user_agent": self.authorization_user_agent,
-                "redirect_uri": (self.authorization or {}).get("redirect_uri"),
-                "token_served": self.token_served,
-                "errors": list(self.errors),
-            }
+            path = Path(self.result_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(path.name + ".tmp")
+            temporary.write_text(
+                json.dumps(self._result(final), indent=2) + "\n", encoding="utf-8"
+            )
+            temporary.replace(path)
+
+    def result(self, final=False):
+        with self.lock:
+            return self._result(final)
+
+    def _result(self, final):
+        return {
+            "final": final,
+            "completed": self.token_served and not self.errors,
+            "authorization_requested": self.authorization is not None,
+            "authorization_user_agent": self.authorization_user_agent,
+            "redirect_uri": (self.authorization or {}).get("redirect_uri"),
+            "token_served": self.token_served,
+            "errors": list(self.errors),
+        }
 
 
 def is_loopback_callback(redirect_uri):
@@ -131,6 +157,7 @@ class Handler(BaseHTTPRequestHandler):
             self.server.record_error("duplicate authorization request")
             self.respond(400, b"Duplicate authorization request")
             return
+        self.server.save()
 
         callback = urlsplit(redirect_uri)._replace(
             query=urlencode({"code": AUTHORIZATION_CODE, "state": state})
@@ -185,6 +212,7 @@ class Handler(BaseHTTPRequestHandler):
         )
         with self.server.lock:
             self.server.token_served = True
+        self.server.save()
         self.server.completed.set()
 
     def respond(self, status, body, headers=None):
@@ -211,7 +239,7 @@ def main(argv=None):
     parser.add_argument("--timeout", type=float, default=300.0)
     args = parser.parse_args(argv)
 
-    provider = Provider()
+    provider = Provider(result_file=args.result_file)
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
     print(provider.base_url, flush=True)
@@ -221,12 +249,10 @@ def main(argv=None):
         provider.shutdown()
         provider.server_close()
 
-    result = provider.result()
     if not provider.completed.is_set():
-        result["errors"].append(f"no token request within {args.timeout:g} seconds")
-        result["completed"] = False
-    args.result_file.parent.mkdir(parents=True, exist_ok=True)
-    args.result_file.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        provider.record_error(f"no token request within {args.timeout:g} seconds")
+    provider.save(final=True)
+    result = provider.result(final=True)
     print(json.dumps(result), file=sys.stderr, flush=True)
     return 0 if result["completed"] else 1
 

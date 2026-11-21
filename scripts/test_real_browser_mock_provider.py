@@ -109,7 +109,8 @@ class ProviderTestCase(unittest.TestCase):
         status, headers, body = self.token()
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["access_token"], provider_module.ACCESS_TOKEN)
-        self.assertTrue(self.provider.completed.is_set())
+        # The handler records completion after it has written the response.
+        self.assertTrue(self.provider.completed.wait(timeout=5))
         result = self.provider.result()
         self.assertTrue(result["completed"])
         self.assertEqual(result["authorization_user_agent"], "TestBrowser/1.0")
@@ -178,6 +179,66 @@ class CommandLineTestCase(unittest.TestCase):
                 result = json.load(file)
             self.assertFalse(result["completed"])
             self.assertIn("no token request within 0.2 seconds", result["errors"])
+
+    def start(self, result_file, timeout):
+        process = subprocess.Popen(
+            [sys.executable, SCRIPT, "--result-file", result_file, "--timeout", str(timeout)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(self.stop, process)
+        return process, urlsplit(process.stdout.readline().strip())
+
+    @staticmethod
+    def stop(process):
+        if process.poll() is None:
+            process.kill()
+        process.communicate()
+
+    @staticmethod
+    def authorize(base):
+        connection = http.client.HTTPConnection(base.hostname, base.port, timeout=5)
+        try:
+            connection.request(
+                "GET",
+                "/authorize?" + authorization_query(),
+                headers={"User-Agent": "TestBrowser/1.0"},
+            )
+            return connection.getresponse().status
+        finally:
+            connection.close()
+
+    def test_keeps_the_evidence_when_the_callback_never_arrives(self):
+        # The browser reached /authorize, but the token request never came.
+        with tempfile.TemporaryDirectory() as directory:
+            result_file = os.path.join(directory, "result.json")
+            process, base = self.start(result_file, 1)
+            self.assertEqual(self.authorize(base), 302)
+            self.assertEqual(process.wait(timeout=30), 1)
+            with open(result_file, encoding="utf-8") as file:
+                result = json.load(file)
+            self.assertTrue(result["final"])
+            self.assertFalse(result["completed"])
+            self.assertTrue(result["authorization_requested"])
+            self.assertEqual(result["authorization_user_agent"], "TestBrowser/1.0")
+            self.assertEqual(result["redirect_uri"], CALLBACK)
+            self.assertIn("no token request within 1 seconds", result["errors"])
+
+    def test_keeps_the_evidence_when_the_provider_is_killed(self):
+        # The run scripts kill the provider when the check fails first.
+        with tempfile.TemporaryDirectory() as directory:
+            result_file = os.path.join(directory, "result.json")
+            process, base = self.start(result_file, 30)
+            self.assertEqual(self.authorize(base), 302)
+            process.kill()
+            process.wait(timeout=30)
+            with open(result_file, encoding="utf-8") as file:
+                result = json.load(file)
+            self.assertFalse(result["final"])
+            self.assertFalse(result["completed"])
+            self.assertEqual(result["authorization_user_agent"], "TestBrowser/1.0")
+            self.assertEqual(result["redirect_uri"], CALLBACK)
 
     def test_completes_from_the_command_line(self):
         with tempfile.TemporaryDirectory() as directory:
