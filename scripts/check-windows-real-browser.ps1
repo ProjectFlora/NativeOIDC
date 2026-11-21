@@ -20,7 +20,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Package = (Resolve-Path $Package).Path
 New-Item -ItemType Directory -Force $ResultDirectory | Out-Null
 $ResultDirectory = (Resolve-Path $ResultDirectory).Path
-foreach ($name in "provider-result.json", "check-output.txt") {
+foreach ($name in "provider-result.json", "provider-result.json.tmp", "check-output.txt", "environment.txt", "provider-log.txt") {
     Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $ResultDirectory $name)
 }
 $workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("native-oidc-real-browser-" + [guid]::NewGuid())

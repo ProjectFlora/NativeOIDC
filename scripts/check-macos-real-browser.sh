@@ -15,7 +15,11 @@ cd "$repo_root"
 result_dir=${1:-target/real-browser/macos}
 timeout=${REAL_BROWSER_TIMEOUT:-120}
 mkdir -p "$result_dir"
-rm -f "$result_dir"/provider-result.json "$result_dir"/check-output.txt
+# Clear every file of the previous run, so that a run that stops before the
+# provider starts cannot leave older evidence behind.
+rm -f "$result_dir"/provider-result.json "$result_dir"/provider-result.json.tmp \
+    "$result_dir"/check-output.txt "$result_dir"/environment.txt \
+    "$result_dir"/provider-log.txt "$result_dir"/provider-stdout.txt
 
 output_dir=target/uniffi
 scripts/generate-bindings.sh "$output_dir"

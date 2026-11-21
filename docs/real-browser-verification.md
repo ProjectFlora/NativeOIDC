@@ -103,7 +103,11 @@ if that is how Python is installed).
 
 ## Check the result
 
-Each run writes these files to the result directory:
+Each run first deletes these files from the result directory, then writes
+them again. A file is missing when the run stopped before the step that
+writes it: if the build fails, all of them are missing, and if the
+provider does not start, `provider-result.json` and `check-output.txt` are
+missing.
 
 | File | Content |
 | --- | --- |
