@@ -58,6 +58,21 @@ class AndroidRedirectSelectorTest {
     }
 
     @Test
+    fun customSchemeWithoutRegisteredCallbackActivityFails() {
+        assertThrows(AndroidAuthorizationAdapterException.CallbackActivityNotRegistered::class.java) {
+            AndroidRedirectSelector.select(
+                redirects =
+                    AndroidRedirectConfiguration(
+                        appLinkUri = null,
+                        customSchemeUri = "com.example.app:/oauth/callback",
+                    ),
+                isVerifiedAppLink = { true },
+                resolvesToCallbackActivity = { false },
+            )
+        }
+    }
+
+    @Test
     fun redirectTargetIgnoresResponseQueryButRequiresExactRoute() {
         val expected =
             RedirectTarget.parse(

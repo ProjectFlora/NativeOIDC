@@ -55,9 +55,9 @@
       }
     }
 
-    func verifyTransportChecks() {
-      precondition(transportCacheRequests == 2)
-      precondition(transportRedirectTargets == 0)
+    /// Requests that reached `/transport-cache` and `/transport-final`.
+    func transportRequestCounts() -> (cacheRequests: Int, redirectTargets: Int) {
+      (transportCacheRequests, transportRedirectTargets)
     }
 
     private func update(_ state: NWListener.State) {
