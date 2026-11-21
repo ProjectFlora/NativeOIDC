@@ -22,7 +22,9 @@ This roadmap tracks work remaining for the initial scope in
   proc-macros, keeping protocol implementation behind that interface. Pin the
   UniFFI runtime and binding generator to 0.32.2; generate bindings
   reproducibly and do not hand-edit generated files. Implement explicit
-  cancellation separately from UniFFI.
+  cancellation separately from UniFFI. The upgrade evaluation and the
+  conditions for re-evaluating the pin are recorded in
+  [docs/dependency-maintenance.md](docs/dependency-maintenance.md).
 - **Initial binding distribution:** Pin UniFFI generation to 0.32.2, matching
   the validated spike, and generate bindings reproducibly from the Rust
   interface. Publish versioned Apple XCFramework, Android AAR, and Windows

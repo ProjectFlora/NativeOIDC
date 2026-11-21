@@ -21,6 +21,20 @@ interoperability testing and support policies are still evolving. Each release r
   served. The published release consumer validation checks out the release
   tag for its Windows job, so each package is validated with its own
   fixtures ([#165](https://github.com/ProjectFlora/NativeOIDC/issues/165)).
+- A new Dependency audit workflow checks the dependencies of the release
+  libraries against the RustSec advisory database with
+  `cargo deny check advisories`, every week and on pull requests that change
+  `Cargo.toml`, `Cargo.lock`, or `deny.toml`
+  ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
+
+### Documentation
+
+- Record the decision to keep UniFFI pinned to 0.32.2, the latest release:
+  the fix for the Swift 6 `SendingClosureRisksDataRace` error in the async
+  foreign-trait helpers is merged upstream but not released. The record in
+  [docs/dependency-maintenance.md](docs/dependency-maintenance.md) lists the
+  steps for re-evaluating the pin when a newer release is published
+  ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
 
 ## [0.7.1] - 2026-11-20
 
