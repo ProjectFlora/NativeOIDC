@@ -230,14 +230,31 @@ jobs:
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
+      # Also configure for API 35 to ensure cache keys work for both API levels
+      - name: Configure Android NDK (API 35)
+        env:
+          ANDROID_API_LEVEL: '35'
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
-      - name: Run Android callback tests on an emulator
+      - name: Run Android callback tests on an emulator (API 28)
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 28
+          arch: x86_64
+          target: google_apis_playstore
+          disable-linux-hw-accel: false
+          disable-animations: true
+          script: ./native/android/gradlew -p native/android connectedDebugAndroidTest
+      # Issue #166: Also run on API 35 to verify cache doesn't cause inappropriate reuse
+      - name: Run Android callback tests on an emulator (API 35)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -535,6 +552,13 @@ jobs:
       - name: Configure Android NDK
         env:
           ANDROID_API_LEVEL: '28'
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
+      # Also configure for API 35 to ensure cache keys work for both API levels
+      - name: Configure Android NDK (API 35)
+        env:
+          ANDROID_API_LEVEL: '35'
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"

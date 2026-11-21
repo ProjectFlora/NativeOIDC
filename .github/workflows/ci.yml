@@ -261,6 +261,18 @@ jobs:
           script: |
             ./native/android/gradlew -p native/android connectedDebugAndroidTest || { echo "::group::Android emulator diagnostics"; adb devices -l || true; adb shell getprop || true; adb shell dumpsys activity activities || true; adb shell dumpsys window windows || true; adb exec-out uiautomator dump /dev/tty || true; adb logcat -d -t 500 || true; echo "::endgroup::"; exit 1; }
             scripts/check-android-release-consumer.sh native/android/build/outputs/aar/native-oidc-android-release.aar
+      # Issue #166: Also run on API 35 to verify cache doesn't cause inappropriate reuse
+      - name: Run Android callback tests on an emulator (API 35)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis_playstore
+          disable-linux-hw-accel: false
+          disable-animations: true
+          script: |
+            ./native/android/gradlew -p native/android connectedDebugAndroidTest || { echo "::group::Android emulator diagnostics"; adb devices -l || true; adb shell getprop || true; adb shell dumpsys activity activities || true; adb shell dumpsys window windows || true; adb exec-out uiautomator dump /dev/tty || true; adb logcat -d -t 500 || true; echo "::endgroup::"; exit 1; }
+            scripts/check-android-release-consumer.sh native/android/build/outputs/aar/native-oidc-android-release.aar
       - name: Verify Android native libraries in AAR
         run: |
           aar=native/android/build/outputs/aar/native-oidc-android-release.aar
