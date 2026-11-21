@@ -205,9 +205,16 @@ class AndroidExternalBrowserAuthorizationTest {
             } catch (error: Exception) {
                 "unavailable: $error"
             }
+        // Gradle prints only the first lines of a failure message, so keep the
+        // on-screen summary on the first line and the full dump after it.
+        val onScreen =
+            Regex("""(?:text|content-desc|resource-id)="([^"]+)"""")
+                .findAll(dump)
+                .map { it.groupValues[1] }
+                .joinToString(" | ")
         return AssertionError(
             "$message (API ${Build.VERSION.SDK_INT}, foreground package " +
-                "${device.currentPackageName})\nWindow hierarchy:\n$dump",
+                "${device.currentPackageName}; on screen: $onScreen)\nWindow hierarchy:\n$dump",
         )
     }
 
