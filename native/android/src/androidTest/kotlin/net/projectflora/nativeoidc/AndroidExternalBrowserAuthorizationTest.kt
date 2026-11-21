@@ -96,6 +96,17 @@ class AndroidExternalBrowserAuthorizationTest {
                 if (!clickWhenAvailable(device, By.text("Authorize"), 20_000)) {
                     throw uiFailure(device, "Mock provider page did not load in the external browser")
                 }
+                // On the API 35 image, Chrome can drop a tap that lands right after the
+                // page appears. The page retitles itself when its handler runs, so tap
+                // again only while that marker, the token request and the result are absent.
+                val redirectStarted = {
+                    device.hasObject(By.text(REDIRECTING_TITLE)) ||
+                        server.tokenRequest.isCompleted ||
+                        result.isCompleted
+                }
+                if (!retapUntil(device, By.text("Authorize"), redirectStarted, 20_000)) {
+                    throw uiFailure(device, "Authorize tap did not reach the mock provider page")
+                }
                 confirmExternalAppLaunch(device)
 
                 val tokenParameters =
@@ -178,6 +189,25 @@ class AndroidExternalBrowserAuthorizationTest {
         return false
     }
 
+    private fun retapUntil(
+        device: UiDevice,
+        selector: BySelector,
+        done: () -> Boolean,
+        timeoutMillis: Long,
+    ): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMillis
+        while (SystemClock.uptimeMillis() < deadline) {
+            // Give each tap time to run the handler before tapping again.
+            val settle = SystemClock.uptimeMillis() + 2_000
+            while (SystemClock.uptimeMillis() < settle) {
+                if (done()) return true
+                Thread.sleep(100)
+            }
+            clickIfPresent(device, selector)
+        }
+        return done()
+    }
+
     private fun clickIfPresent(device: UiDevice, selector: BySelector): Boolean =
         try {
             val button = device.findObject(selector)
@@ -220,6 +250,9 @@ class AndroidExternalBrowserAuthorizationTest {
     private fun labelMatches(label: String): BySelector =
         By.text(Regex("(?i)^${Regex.escape(label)}$").toPattern())
 }
+
+// The mock provider page sets this title when its Authorize handler runs.
+private const val REDIRECTING_TITLE = "Redirecting"
 
 private class MockAuthorizationServer : Closeable {
     private val serverSocket =
@@ -309,7 +342,7 @@ private class MockAuthorizationServer : Closeable {
                     .appendQueryParameter("state", parameters.getValue("state"))
                     .build()
                 val html =
-                    """<!doctype html><meta charset="utf-8"><title>Mock provider</title><button onclick="document.title='Redirecting';location.href='$redirect'">Authorize</button>"""
+                    """<!doctype html><meta charset="utf-8"><title>Mock provider</title><button onclick="document.title='$REDIRECTING_TITLE';location.href='$redirect'">Authorize</button>"""
                 respond(output, 200, "text/html; charset=utf-8", html.toByteArray())
             }
             "/token" -> {
