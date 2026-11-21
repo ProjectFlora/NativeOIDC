@@ -104,8 +104,8 @@ The check covers the same graph as the license check (`[graph]` in
 [deny.toml](../deny.toml)): the dependencies linked into the release
 libraries for the release targets. It excludes the dev-dependencies and the
 `uniffi-cli` feature, which only builds the binding generator. A
-vulnerability, unmaintained, or unsound advisory fails the check; a yanked
-crate is a warning.
+vulnerability, unmaintained, or unsound advisory against any crate in that
+graph, direct or transitive, fails the check; a yanked crate is a warning.
 
 When the scheduled run fails, update the affected dependency in a pull
 request. If the advisory does not affect the release libraries, add it to

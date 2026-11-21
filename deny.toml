@@ -51,8 +51,10 @@ exceptions = [
 ignore = true
 
 [advisories]
-# The defaults apply: a vulnerability, unmaintained, or unsound advisory
-# against a crate in the graph above fails the check, and a yanked crate is a
-# warning. Ignore an advisory only with a comment that says why it does not
-# affect the release libraries and when to revisit it.
+# A vulnerability, unmaintained, or unsound advisory against any crate in the
+# graph above, direct or transitive, fails the check, and a yanked crate is a
+# warning. `unsound` is set because its default (`workspace`) checks only the
+# direct dependencies. Ignore an advisory only with a comment that says why it
+# does not affect the release libraries and when to revisit it.
+unsound = "all"
 ignore = []
