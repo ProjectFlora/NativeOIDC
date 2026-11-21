@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Runs one authorization through the real Windows system browser. See docs/real-browser-verification.md. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <NativeOidcPackage Condition="'$(NativeOidcPackage)' == ''">missing</NativeOidcPackage>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(NativeOidcPackage)/dotnet/NativeOidcWindows.cs" Link="NativeOidcWindows.cs" />
+    <None Include="$(NativeOidcPackage)/native_oidc.dll" Link="native_oidc.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

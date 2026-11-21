@@ -704,7 +704,9 @@ GitHub's hosted Windows runners (a Windows Server release), which is not one
 of the supported client editions. Regular CI additionally runs the x64
 C++/.NET package consumers on a `windows-11-arm` client runner under x64
 emulation and records the actual OS/build. Native x64 client-hardware execution
-and real system-browser interaction remain unverified. See the
+remains unverified. CI does not open a real system browser; the manual
+[real system-browser verification](docs/real-browser-verification.md) covers
+it on macOS and Windows for each release. See the
 [release support matrix](docs/support-matrix.md) for coverage limits and
 [live identity-provider coverage](docs/live-idp-interoperability.md).
 

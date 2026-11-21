@@ -12,7 +12,7 @@ creates the tag itself (see [Why CI creates the tag](#why-ci-creates-the-tag)).
 | 1. Prepare | Pull request to `main` | Version, changelog, and docs updated |
 | 2. Candidate run | Release workflow, `publish: false` | All packages built and consumer-validated; nothing published |
 | 3. Publish run | Release workflow from `main`, `publish: true` | Release commit, `vX.Y.Z` tag, GitHub Release with assets and `SHA256SUMS`, and the Android library on Maven Central |
-| 4. Verify | Published release consumer validation workflow | Published assets and the Swift package resolve and build |
+| 4. Verify | Published release consumer validation workflow; real system-browser verification on a Mac and a Windows machine | Published assets and the Swift package resolve and build; the real-browser result is recorded |
 
 Every release run — a candidate or a publish — starts with a key server
 check: it derives the fingerprint of every primary key in the
@@ -171,6 +171,12 @@ dependencies, and the full consumer smoke on an emulator (Issue #137).
 Its `spm` job resolves the `vX.Y.Z` tag through Swift Package Manager by URL, which also verifies the
 manifest's checksum against the published archive. Record the run URL in
 the release tracking issue.
+
+CI does not open a real system browser on macOS or Windows. Run the
+[real system-browser verification](real-browser-verification.md) on a Mac
+and a Windows machine at the `vX.Y.Z` tag (on Windows, with the published
+`native-oidc-windows-X.Y.Z.zip`), and record the result in the release
+tracking issue in the format that document gives.
 
 ## License notices
 

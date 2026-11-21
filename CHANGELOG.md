@@ -22,6 +22,26 @@ interoperability testing and support policies are still evolving. Each release r
   tag for its Windows job, so each package is validated with its own
   fixtures ([#165](https://github.com/ProjectFlora/NativeOIDC/issues/165)).
 
+### Documentation
+
+- Add a manual [real system-browser verification](docs/real-browser-verification.md)
+  for macOS and Windows, run for each release from the release procedure: the
+  default `MacOSAuthorizationAdapter` and the Windows `AuthorizeAsync` open
+  the authorization URL in the default browser, a local mock provider
+  (`scripts/real_browser_mock_provider.py`) redirects the browser to the
+  loopback callback, and the code exchange completes. Add
+  `scripts/check-macos-real-browser.sh` and
+  `scripts/check-windows-real-browser.ps1` to run it, and a result record
+  for the release tracking issue. The macOS check is type-checked in CI
+  ([#65](https://github.com/ProjectFlora/NativeOIDC/issues/65)).
+
+### Known limitations
+
+- macOS and Windows CI does not open a real system browser. The real
+  system-browser flow is checked by the manual verification above, and its
+  result is recorded for each release
+  ([#65](https://github.com/ProjectFlora/NativeOIDC/issues/65)).
+
 ## [0.7.1] - 2026-11-20
 
 ### Changed
