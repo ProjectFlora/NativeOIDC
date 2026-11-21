@@ -310,7 +310,7 @@ private class MockAuthorizationServer : Closeable {
                     .appendQueryParameter("state", parameters.getValue("state"))
                     .build()
                 val html =
-                    """<!doctype html><meta charset="utf-8"><button onclick="location.href='$redirect'">Authorize</button>"""
+                    """<!doctype html><meta charset="utf-8"><title>Mock provider</title><button onclick="document.title='Redirecting';location.href='$redirect'">Authorize</button>"""
                 respond(output, 200, "text/html; charset=utf-8", html.toByteArray())
             }
             "/token" -> {
