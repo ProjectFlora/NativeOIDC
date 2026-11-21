@@ -1166,13 +1166,30 @@ class UniFfiOperationCoverageTest {
     fun testC5() = runBlocking {
         // The UnresponsiveTransport never answers after the handle fires, so
         // a Cancelled outcome can only be produced by the Rust core racing
-        // the handle against the transport. Both revoke and refresh must
+        // the handle against the transport. Every network operation
+        // (discover, revoke, register_public_client, and refresh) must
         // complete, within a deadline, with FfiException.Cancelled from the
-        // core. discover and register_public_client lack this mechanism (it
-        // is tracked in issue #183), so they are out of scope here.
+        // core.
         val baseConfig = FfiServiceConfiguration(IDP_AUTHORIZE, IDP_TOKEN)
         val revocationConfig = baseConfig.withRevocationEndpoint(IDP_REVOKE)
+        val registrationConfig = baseConfig.withRegistrationEndpoint(IDP_REGISTER)
         try {
+            val discoverTransport = UnresponsiveTransport()
+            val discoverCancellation = FfiCancellationHandle()
+            try {
+                val result =
+                    runCancellationProbe(discoverTransport.started, discoverCancellation) {
+                        FfiServiceConfiguration.discover(
+                            "https://idp.example/",
+                            discoverTransport,
+                            it,
+                        )
+                    }
+                assertCancelled("C5", "discover", result)
+            } finally {
+                discoverCancellation.close()
+            }
+
             val revokeTransport = UnresponsiveTransport()
             val revokeCancellation = FfiCancellationHandle()
             try {
@@ -1183,6 +1200,27 @@ class UniFfiOperationCoverageTest {
                 assertCancelled("C5", "revoke", result)
             } finally {
                 revokeCancellation.close()
+            }
+
+            val registerTransport = UnresponsiveTransport()
+            val registerCancellation = FfiCancellationHandle()
+            try {
+                val result =
+                    runCancellationProbe(registerTransport.started, registerCancellation) {
+                        registerPublicClient(
+                            registrationConfig,
+                            FfiRegistrationOptions(
+                                redirectUris = listOf("https://app.example/callback"),
+                                clientName = null,
+                                initialAccessToken = null,
+                            ),
+                            registerTransport,
+                            it,
+                        )
+                    }
+                assertCancelled("C5", "register_public_client", result)
+            } finally {
+                registerCancellation.close()
             }
 
             val state = FfiAuthenticationState.fromJson(STATE_JSON)
@@ -1199,6 +1237,7 @@ class UniFfiOperationCoverageTest {
                 refreshCancellation.close()
             }
         } finally {
+            registrationConfig.close()
             revocationConfig.close()
             baseConfig.close()
         }
