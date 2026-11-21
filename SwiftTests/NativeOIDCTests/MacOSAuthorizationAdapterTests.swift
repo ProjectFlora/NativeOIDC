@@ -73,12 +73,16 @@
       let secondPort = try await second.start()
       XCTAssertNotEqual(firstPort, secondPort)
 
-      // Cancelling one listener leaves the other able to deliver its callback.
+      // Cancelling one listener while the other is waiting leaves the other
+      // able to deliver its callback.
+      let secondCallbackTask = Task {
+        try await second.waitForCallback()
+      }
       await first.cancel()
       let callbackURL = URL(string: "http://127.0.0.1:\(secondPort)/oauth/callback?code=c&state=s")!
       let (_, response) = try await callbackSession.data(from: callbackURL)
       XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-      let received = try await second.waitForCallback()
+      let received = try await secondCallbackTask.value
       XCTAssertEqual(URLComponents(string: received)?.port, Int(secondPort))
     }
 
