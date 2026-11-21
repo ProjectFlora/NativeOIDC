@@ -79,7 +79,9 @@ trap cleanup EXIT
 
 # Record what the app and the simulator saw when the flow did not pass. The
 # app logs its scene and window state on failure and carries it in the result
-# file; the simulator state is read back from simctl.
+# file; the simulator state is read back from simctl. The app log starts at
+# launch time, not a fixed recent window, so an app that traps early (for
+# example in a lifecycle precondition) still leaves its failure context.
 diagnostics() {
     echo "--- simulator state ---" >&2
     xcrun simctl list devices available -j 2>/dev/null |
@@ -91,9 +93,9 @@ for runtime, devices in json.load(sys.stdin).get("devices", {}).items():
         if device.get("udid") == target:
             print(device["name"] + " (" + runtime + "): " + str(device.get("state")))
 ' "$simulator_id" || echo "simulator state unavailable" >&2
-    echo "--- app log (last 3m) ---" >&2
+    echo "--- app log (since launch) ---" >&2
     xcrun simctl spawn "$simulator_id" log show \
-        --last 3m \
+        --start "$log_start" \
         --style compact \
         --predicate "process == \"$executable\"" |
         tail -n 40 || true
@@ -125,6 +127,10 @@ if [[ ! -s "$provider_port_file" ]]; then
 fi
 provider_port=$(<"$provider_port_file")
 xcrun simctl install "$simulator_id" "$app_bundle"
+# Anchor the diagnostics log window at launch, not a fixed recent span, so an
+# app that dies early still leaves its failure context (see diagnostics). The
+# in-simulator `log` tool does not parse ISO 8601, so use a local timestamp.
+log_start=$(date '+%Y-%m-%d %H:%M:%S')
 xcrun simctl launch "$simulator_id" "$bundle_id" --oauth-provider-port "$provider_port"
 
 data_container=$(xcrun simctl get_app_container "$simulator_id" "$bundle_id" data)
