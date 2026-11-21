@@ -1,7 +1,7 @@
 # Dependency Maintenance
 
-This page records how NativeOIDC decides on UniFFI upgrades and how the
-dependency graph is audited for security advisories
+This page records how NativeOIDC decides on UniFFI upgrades and on its JWT
+library, and how the dependency graph is audited for security advisories
 ([Issue #66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
 
 ## UniFFI version
@@ -90,6 +90,32 @@ updates the version references in [ROADMAP.md](../ROADMAP.md) and
    language-mode pin continues in
    [#133](https://github.com/ProjectFlora/NativeOIDC/issues/133).
 
+## JWT library
+
+**Decision (2026-11-22): use `jsonwebtoken` 12 with the `rust_crypto`
+backend**
+([Issue #197](https://github.com/ProjectFlora/NativeOIDC/issues/197)).
+
+`jsonwebtoken` 9.3.1 was affected by
+[GHSA-h395-gr6q-cpjc](https://github.com/advisories/GHSA-h395-gr6q-cpjc)
+(CVE-2026-25537, fixed in 10.3.0): an `exp` or `nbf` claim with the wrong
+JSON type was treated as absent. NativeOIDC was not exploitable, because
+[src/id_token.rs](../src/id_token.rs) deserializes the time claims into typed
+fields and checks them itself, but the shipped graph should not contain a
+known affected version.
+
+From 10.0 the crate requires a crypto backend. The options were:
+
+| Option | Benefit | Cost |
+|---|---|---|
+| **`rust_crypto` (chosen)** | Pure Rust, so no new C code is built for the release targets; with 12.0.0 it uses `rsa` 0.10, which fixes RUSTSEC-2023-0071, so no advisory is ignored | Adds RustCrypto crates (`rsa`, `p256`, `p384`, `ed25519-dalek`, `hmac`, `sha2` 0.11, and their dependencies) to the shipped graph, all under licenses `deny.toml` already allows |
+| `aws_lc_rs` | One C library, maintained by AWS, for every algorithm | Builds C and assembly for every release target (iOS, Android, macOS, Windows) and changes the license inventory |
+| A custom `CryptoProvider` on `ring` | `ring` is already shipped through `rustls` | NativeOIDC maintains its own RS256/ES256 glue, and `CryptoProvider::install_default` is process-wide, so it can conflict with a host that installs its own |
+
+The `rust_crypto` provider is selected from the crate feature, so
+NativeOIDC never calls `CryptoProvider::install_default`. Only `RS256` and
+`ES256` signatures are verified, always with public keys from the JWKS.
+
 ## Security advisory audit
 
 The [Dependency audit](../.github/workflows/dependency-audit.yml) workflow
@@ -114,6 +140,8 @@ request. If the advisory does not affect the release libraries, add it to
 Limits:
 
 - Only advisories in the RustSec database are checked. An advisory published
-  only as a GitHub Security Advisory is not reported.
+  only as a GitHub Security Advisory is not reported. For example,
+  GHSA-h395-gr6q-cpjc (see [JWT library](#jwt-library)) was found only by
+  checking `Cargo.lock` against [OSV](https://osv.dev/) by hand.
 - The Android build tools (Gradle and its plugins) and the Swift and .NET
   tooling are not audited.

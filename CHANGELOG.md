@@ -6,6 +6,15 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+### Security
+
+- Upgrade `jsonwebtoken` from 9.3.1 to 12.0.0 with the `rust_crypto`
+  backend, so the release libraries no longer ship a version affected by
+  GHSA-h395-gr6q-cpjc. NativeOIDC was not exploitable: ID Token validation
+  already rejected time claims with the wrong type. The RustCrypto crates it
+  brings include `rsa` 0.10, which is not affected by RUSTSEC-2023-0071
+  ([#197](https://github.com/ProjectFlora/NativeOIDC/issues/197)).
+
 ### Changed
 
 - Explicitly configured token revocation endpoints now accept loopback HTTP
