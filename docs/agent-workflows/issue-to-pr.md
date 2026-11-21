@@ -75,6 +75,35 @@ Replying to feedback and resolving it are different. A reply records that you re
 
 ---
 
+## Verification Rules
+
+CI results, reviews, and thread states decide whether the work is done, so they must come from what GitHub actually returns.
+
+- Never assume, simulate, or infer the result of CI, reviews, or thread states. Only results you actually retrieved count
+- If you cannot retrieve a result (API error, permission error, unsupported endpoint, timeout, or empty response), treat it as **not passed**, never as passed
+- Pending, queued, or in-progress checks are **not passed**
+- If a result is still unavailable after trying every method below, stop and report the situation
+  - Manual mode: report in this session
+  - Scheduled mode: follow "Pausing for input" under "Scheduled Mode Rules"
+- Never write "assumed", "simulated", "should pass", or similar in a report or a GitHub post. If you could not confirm something, say "could not confirm" and stop
+
+### How to retrieve results
+Try another method if one fails, before concluding that a result is unavailable.
+
+| What | Methods |
+|---|---|
+| PR head SHA | `gh pr view {PR} --json headRefOid` / `gh api repos/{owner}/{repo}/pulls/{PR}` |
+| CI | `gh pr checks {PR}` / `gh api repos/{owner}/{repo}/commits/{head_sha}/check-runs` |
+| Reviews | `gh api repos/{owner}/{repo}/pulls/{PR}/reviews` |
+| Review comments | `gh api repos/{owner}/{repo}/pulls/{PR}/comments` |
+| PR comments | `gh api repos/{owner}/{repo}/issues/{PR}/comments` |
+| Thread states | `gh api graphql` (`reviewThreads` on the pull request) |
+
+### Before starting work
+- Run `gh auth status` and retrieve the issue (and the PR, if resuming one). If either fails, stop and report before making any changes
+
+---
+
 ## Steps
 
 ### 1. Understand the issue
@@ -110,6 +139,7 @@ Check the following. If anything fails, go back to step 3 (or to steps 1–2 if 
 - After creating it, wait for CI and review results according to "Review Waiting Rules"
 
 ### 6. Handle CI and reviews
+- Retrieve CI results and feedback according to "Verification Rules"
 - If CI fails: identify the cause and fix it
 - For each unhandled comment from me (see "Post Markers"), regardless of when it was posted:
   - Treat it as an instruction and follow it. If the intent is unclear, ask me (in scheduled mode, follow "Pausing for input")
@@ -127,7 +157,7 @@ Check the following. If anything fails, go back to step 3 (or to steps 1–2 if 
   - Scheduled mode: follow "Pausing for input" under "Scheduled Mode Rules"
 
 ### 7. Final report (do not merge)
-When all of the following are true, report without merging and end the work.
+When all of the following are true, report without merging and end the work. Each condition must be confirmed with results you actually retrieved (see "Verification Rules"). If any condition could not be confirmed, it is not met.
 - All CI checks pass on the current PR head
 - At least one review from Copilot or Orca Bot was submitted on the current head commit (the review's commit ID equals the PR's head SHA)
 - Every feedback comment is handled (its ID is listed on a `Handled:` line), including comments in resolved threads
@@ -141,6 +171,13 @@ Report contents:
 - Feedback you did not apply, and why
   - List unresolved Copilot threads separately with their links, as "Needs your decision before merging"
 - Points you were unsure about, and remaining issues
+- Evidence, copied from the actual command output and retrieved right before reporting:
+  - PR head SHA
+  - Every check run name and its conclusion for that SHA
+  - The ID and commit SHA of the review on the current head
+  - Number of unresolved threads and of unhandled feedback comments (must be 0, except the listed Copilot threads)
+
+A report without this evidence, or with evidence for an older SHA, is not a valid final report.
 
 Where to report:
 - Manual mode: in this session
@@ -184,6 +221,7 @@ How the two reviewers interact:
 - Deleting or skipping tests, or changing CI configuration, to make CI pass
 - Force pushing, or pushing directly to the base branch
 - Changes beyond the scope of the issue
+- Reporting CI, reviews, or thread states as passed without retrieving them (see "Verification Rules")
 
 ## When Handling Multiple Issues in Parallel
 - Do not touch any branch or PR other than the one for your assigned issue
