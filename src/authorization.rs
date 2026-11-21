@@ -132,18 +132,17 @@ impl ServiceConfiguration {
         let discovery_url = oidc_discovery_url(&issuer)?;
         let mut headers = HeaderMap::new();
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
-
-        let response = transport
-            .execute(
-                HttpRequest {
-                    method: Method::GET,
-                    url: discovery_url,
-                    headers,
-                    body: Vec::new(),
-                },
-                cancellation,
-            )
-            .await?;
+        let request = HttpRequest {
+            method: Method::GET,
+            url: discovery_url,
+            headers,
+            body: Vec::new(),
+        };
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(AuthError::Cancelled),
+            response = transport.execute(request, cancellation.clone()) => response,
+        }?;
         if !response.status.is_success() {
             return Err(AuthError::HttpStatus(response.status));
         }
@@ -667,17 +666,17 @@ impl ClientRegistrationRequest {
             headers.insert(header::AUTHORIZATION, authorization);
         }
 
-        let response = transport
-            .execute(
-                HttpRequest {
-                    method: Method::POST,
-                    url: self.registration_endpoint,
-                    headers,
-                    body,
-                },
-                cancellation,
-            )
-            .await?;
+        let request = HttpRequest {
+            method: Method::POST,
+            url: self.registration_endpoint,
+            headers,
+            body,
+        };
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(AuthError::Cancelled),
+            response = transport.execute(request, cancellation.clone()) => response,
+        }?;
         if !response.status.is_success() {
             if let Ok(value) = serde_json::from_slice::<Value>(&response.body) {
                 if let Some(code) = value.get("error").and_then(Value::as_str) {
@@ -3685,6 +3684,89 @@ mod tests {
             } else {
                 assert!(matches!(
                     send_token_request(&endpoint, Vec::new(), &transport, cancellation.clone())
+                        .await,
+                    Err(AuthError::Cancelled)
+                ));
+            }
+            assert!(transport.request.lock().unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn discover_and_registration_cancel_even_if_transport_ignores_the_handle() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct BlockingTransport {
+            started: tokio::sync::Notify,
+            dropped: AtomicBool,
+        }
+        struct DropSignal<'a>(&'a AtomicBool);
+        impl Drop for DropSignal<'_> {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        #[async_trait]
+        impl HttpTransport for BlockingTransport {
+            async fn execute(&self, _: HttpRequest, _: CancellationHandle) -> Result<HttpResponse> {
+                let _drop = DropSignal(&self.dropped);
+                self.started.notify_one();
+                std::future::pending().await
+            }
+        }
+        let issuer = Url::parse("https://issuer.example/").unwrap();
+        let configuration = service_configuration()
+            .with_registration_endpoint(Url::parse("https://issuer.example/register").unwrap())
+            .unwrap();
+        let registration = || {
+            ClientRegistrationRequest::new(
+                &configuration,
+                vec![Url::parse("com.example.app:/oauth2redirect").unwrap()],
+            )
+            .unwrap()
+        };
+        for discover in [true, false] {
+            let transport = BlockingTransport {
+                started: tokio::sync::Notify::new(),
+                dropped: AtomicBool::new(false),
+            };
+            let cancellation = CancellationHandle::new();
+            let operation = async {
+                if discover {
+                    ServiceConfiguration::discover(issuer.clone(), &transport, cancellation.clone())
+                        .await
+                        .map(|_| ())
+                } else {
+                    registration()
+                        .register(&transport, cancellation.clone())
+                        .await
+                        .map(|_| ())
+                }
+            };
+            tokio::pin!(operation);
+            tokio::select! { _ = transport.started.notified() => {}, result = &mut operation => panic!("request should block: {result:?}") }
+            cancellation.cancel();
+            assert!(matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(2), operation)
+                    .await
+                    .unwrap(),
+                Err(AuthError::Cancelled)
+            ));
+            assert!(transport.dropped.load(Ordering::SeqCst));
+            let transport = test_transport(StatusCode::OK, b"unused");
+            if discover {
+                assert!(matches!(
+                    ServiceConfiguration::discover(
+                        issuer.clone(),
+                        &transport,
+                        cancellation.clone()
+                    )
+                    .await,
+                    Err(AuthError::Cancelled)
+                ));
+            } else {
+                assert!(matches!(
+                    registration()
+                        .register(&transport, cancellation.clone())
                         .await,
                     Err(AuthError::Cancelled)
                 ));
