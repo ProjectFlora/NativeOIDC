@@ -3,6 +3,10 @@
 # of the licenses below. Before allowing a new license, check that it is
 # compatible with Apache-2.0 and that THIRD_PARTY_LICENSES.txt
 # (about.toml) still covers what it requires.
+#
+# The Dependency audit workflow runs `cargo deny check advisories` weekly and
+# on pull requests that change the dependency graph
+# (docs/dependency-maintenance.md).
 
 [graph]
 # The same targets as about.toml: the release packages' targets.
@@ -46,3 +50,9 @@ exceptions = [
 # native-oidc itself (publish = false) is Apache-2.0 and ships its own LICENSE.
 ignore = true
 
+[advisories]
+# The defaults apply: a vulnerability, unmaintained, or unsound advisory
+# against a crate in the graph above fails the check, and a yanked crate is a
+# warning. Ignore an advisory only with a comment that says why it does not
+# affect the release libraries and when to revisit it.
+ignore = []
