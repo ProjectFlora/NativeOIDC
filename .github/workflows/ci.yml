@@ -227,20 +227,11 @@ jobs:
           packages: platform-tools
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
       - uses: dtolnay/rust-toolchain@stable
-      # Configure Android NDK cache for both API levels (28 and 35)
-      - name: Configure Android NDK
-        env:
-          ANDROID_API_LEVEL: '28'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           cache-local-path: ~/.cargo/registry/cache/*
-          cache-target-dir: target/debug
           restore-keys: |
-            # Restore for each NDK/API/toolchain combination to avoid stale builds
-            ${{ env.ANDROID_NDK_HOME }}-${{ env.ANDROID_API_LEVEL }}-*
+            ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}-${{ env.ANDROID_NDK_HOME }}-${{ env.ANDROID_API_LEVEL }}-*
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
