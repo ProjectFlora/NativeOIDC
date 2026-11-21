@@ -54,7 +54,10 @@ is available from v0.7.0
 ([#81](https://github.com/ProjectFlora/NativeOIDC/issues/81)); earlier
 versions use the documented GitHub Release installation for Android.
 
-Maintainers publishing a version follow the [release procedure](releasing.md).
+Maintainers publishing a version follow the [release procedure](releasing.md),
+which includes the manual
+[real system-browser verification](real-browser-verification.md) on macOS
+and Windows.
 The UniFFI version decision and the dependency security audit are recorded
 in [dependency maintenance](dependency-maintenance.md).
 
