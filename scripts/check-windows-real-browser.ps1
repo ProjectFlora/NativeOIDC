@@ -17,12 +17,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$Package = (Resolve-Path $Package).Path
 New-Item -ItemType Directory -Force $ResultDirectory | Out-Null
 $ResultDirectory = (Resolve-Path $ResultDirectory).Path
+# Clear every file of the previous run first, so that a run that stops
+# early (even on an invalid -Package path) cannot leave older evidence.
 foreach ($name in "provider-result.json", "provider-result.json.tmp", "check-output.txt", "environment.txt", "provider-log.txt") {
     Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $ResultDirectory $name)
 }
+$Package = (Resolve-Path $Package).Path
 $workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("native-oidc-real-browser-" + [guid]::NewGuid())
 
 try {
