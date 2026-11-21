@@ -237,14 +237,15 @@ jobs:
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Cache the Cargo registry and target/, including the Android target
-      # outputs that check-android-targets.sh builds under Gradle. The key
-      # adds the NDK version and native API level, which rust-cache does not
-      # hash on its own, so changing either starts a fresh cache.
+      # Cache compiled Cargo dependencies for the host and both Android ABIs
+      # that check-android-targets.sh builds under Gradle. The workspace's own
+      # crates are rebuilt each run: caching them too (cache-workspace-crates)
+      # did not shorten warm runs and grew the cache by about 40% (#190).
+      # The key adds the NDK version and native API level, which rust-cache
+      # does not hash on its own, so changing either starts a fresh cache.
       - uses: Swatinem/rust-cache@v2
         with:
           key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
-          cache-workspace-crates: true
       - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - run: ./native/android/gradlew -p native/android assembleRelease
