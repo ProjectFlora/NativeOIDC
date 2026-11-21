@@ -26,6 +26,10 @@ interoperability testing and support policies are still evolving. Each release r
   `cargo deny check advisories`, every week and on pull requests that change
   `Cargo.toml`, `Cargo.lock`, or `deny.toml`
   ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
+- CI no longer builds the four Apple targets in debug before packaging. The
+  XCFramework packaging step builds the same targets in release, and every
+  Apple check uses those release slices or the host library
+  ([#175](https://github.com/ProjectFlora/NativeOIDC/issues/175)).
 
 ### Documentation
 

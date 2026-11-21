@@ -54,8 +54,7 @@ Configuration evidence:
   advance. The Xcode 27 hosted image is currently a public preview; failures
   remain visible and are not ignored.
 - Apple targets and deployment settings:
-  [target builds](../scripts/check-apple-targets.sh),
-  [XCFramework packaging and slice assertions](../scripts/package-apple-xcframework.sh),
+  [target builds, XCFramework packaging and slice assertions](../scripts/package-apple-xcframework.sh),
   [simulator selection](../scripts/check-ios-authorization-flow.sh).
 - Android minimums: [library Gradle configuration](../native/android/build.gradle.kts),
   [consumer Gradle configuration](../native/consumer-smoke/android/app/build.gradle.kts),
