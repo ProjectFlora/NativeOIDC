@@ -115,3 +115,4 @@ Before tagging 1.0.0, complete this record against one release-candidate commit:
 Recheck Windows client support at every release. Recheck the whole matrix
 immediately before 1.0.0, and whenever a lifecycle change, native dependency,
 toolchain, or runner change may invalidate a minimum or its verification.
+
