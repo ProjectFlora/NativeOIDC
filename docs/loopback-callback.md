@@ -29,11 +29,12 @@ states the common behavior, and the difference is listed under
 
 - The caller supplies a redirect URI template of the form
   `http://127.0.0.1/<path>[?<query>]`. The template must use the `http`
-  scheme and the literal host `127.0.0.1`, and must not contain a port, user
+  scheme and the host `127.0.0.1`, and must not contain a port, user
   information, or a fragment. `localhost`, `[::1]`, other addresses, and
   `https` are rejected before the listener is created. An empty path becomes
-  `/`. The portable form has no port at all: Windows also accepts the
-  explicit default port `:80` (D11).
+  `/`. The portable form spells the host exactly `127.0.0.1` and has no port
+  at all: Windows also accepts the explicit default port `:80` (D11) and
+  other IPv4 spellings of the same address, such as `127.1` (D12).
 - The listener binds TCP on `127.0.0.1` (IPv4 only) with a port chosen by the
   operating system, so each operation gets its own unused port.
 - The bound port is substituted into the template, and that URI is sent as
@@ -166,9 +167,10 @@ for a follow-up issue that aligns the implementations.
 | D9 | Path comparison against the template | The template path as normalized by the `url` crate (dot segments removed, characters percent-encoded) | `URLComponents.percentEncodedPath` as written in the template, without normalization. A template path with `.` or `..` segments can therefore never match on macOS, because browsers remove dot segments before sending the request |
 | D10 | Loopback post-logout redirect | Supported: `end_session_with_browser` uses the same listener | Not provided by `MacOSAuthorizationAdapter` |
 | D11 | Template with the explicit default port, such as `http://127.0.0.1:80/callback` | Accepted: `Url::parse` drops the default port, so `redirect.port()` is `None`, and the OS-chosen port replaces it. The test rejects only a non-default port (`:8080`) | Rejected: `URLComponents.port` is `80` |
+| D12 | Template host spelled differently from `127.0.0.1`, such as `127.1` or `0x7f.0.0.1` | Accepted: `Url::parse` canonicalizes the IPv4 address before `parse_redirect_template` compares `host_str()`, and the redirect URI sent uses `127.0.0.1`. No test covers it | Rejected: `URLComponents.host` is compared as written |
 
-Until they are aligned, use redirect URI templates without a port, whose
-path has no `.` or `..` segments and no characters that need
+Until they are aligned, use redirect URI templates with the host spelled
+`127.0.0.1` and without a port, whose path has no `.` or `..` segments and no characters that need
 percent-encoding.
 
 Test coverage also differs: the Swift checks do not cover template
