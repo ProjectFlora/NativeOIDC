@@ -89,7 +89,7 @@ package.
 | Apple CI scripts (`check-apple-*`, `check-ios-*`, `check-spm-package.sh`, `install-ios-simulator-runtime.sh`, `ios-mock-oauth-provider.py`, `normalize_*.py`, `package-apple-xcframework.sh`, `select_ios_simulator.py`) | `test`, `apple` | |
 | Android CI scripts (`check-android-targets.sh`, `check-android-release-consumer.sh`, `check-android-maven-publication.sh`) | `test`, `android` | |
 | Windows CI scripts (`package-windows.ps1`, `check-windows-release-consumer.ps1`) | `test`, `windows` | |
-| Release-only scripts (`check-android-maven-consumer.sh`, `check-android-maven-publication-status.sh`, `verify-android-maven-consumer.sh`, `check-gpg-keyserver.sh`) and other `scripts/test_*.py` | `test` | The release workflows run them; the Tests job runs their unit tests. |
+| Release-only scripts (`check-android-maven-consumer.sh`, `check-android-maven-publication-status.sh`, `verify-android-maven-consumer.sh`, `check-gpg-keyserver.sh`), manual real-browser scripts (`check-macos-real-browser.sh`, `check-windows-real-browser.ps1`, `real_browser_mock_provider.py`) and other `scripts/test_*.py` | `test` | The release workflows or a maintainer run them; the Tests job runs their unit tests. The real-browser check sources (`native/apple/MacOSRealBrowserCheck.swift`, `native/consumer-smoke/windows/real-browser/**`) follow their platform's rule: the Apple job type-checks the Swift file, and the Windows project is kept under the Windows consumer rule. |
 | Any other file under `scripts/` | all | Unclassified. |
 | `README.md`, `CHANGELOG.md`, `ROADMAP.md`, `FEATURE_MATRIX.md`, `docs/**` (except `docs/swift-xcframework.md`), `.gitignore` | none | No build, package or check reads them. |
 | Anything else | all | Unclassified. |

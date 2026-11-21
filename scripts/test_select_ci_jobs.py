@@ -69,6 +69,8 @@ class SharedInputTests(unittest.TestCase):
     def test_scripts_also_run_script_unit_tests(self):
         self.assertEqual(selected("scripts/package-windows.ps1"), {"test", "windows"})
         self.assertEqual(selected("scripts/test_select_ios_simulator.py"), {"test"})
+        self.assertEqual(selected("scripts/check-macos-real-browser.sh"), {"test"})
+        self.assertEqual(selected("native/apple/MacOSRealBrowserCheck.swift"), {"apple"})
         self.assertEqual(selected("scripts/generate-bindings.sh"), {"test", "apple", "android", "spm_bindings"})
 
     def test_unknown_paths_run_everything(self):

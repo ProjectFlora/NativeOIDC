@@ -95,12 +95,14 @@ RULES = (
      {"test", "android"}, "Android CI script"),
     (("scripts/package-windows.ps1", "scripts/check-windows-release-consumer.ps1"),
      {"test", "windows"}, "Windows CI script"),
-    # Used only by the release workflows, which keep their full checks;
-    # the Tests job runs their unit tests.
+    # Used only by the release workflows, which keep their full checks, or
+    # by the manual real-browser verification; the Tests job runs their
+    # unit tests.
     (("scripts/check-android-maven-consumer.sh", "scripts/check-android-maven-publication-status.sh",
       "scripts/verify-android-maven-consumer.sh", "scripts/check-gpg-keyserver.sh",
-      "scripts/test_*.py"),
-     {"test"}, "release-only script or script unit test"),
+      "scripts/check-macos-real-browser.sh", "scripts/check-windows-real-browser.ps1",
+      "scripts/real_browser_mock_provider.py", "scripts/test_*.py"),
+     {"test"}, "release-only or manual script, or script unit test"),
     # Documentation that no build, package or check reads.
     (("README.md", "CHANGELOG.md", "ROADMAP.md", "FEATURE_MATRIX.md", "docs/**", ".gitignore"),
      frozenset(), "documentation"),
