@@ -1,13 +1,31 @@
 #include <cstdio>
-#include <cstring>
 #include <string>
+#include <string_view>
+
+#include <winrt/Windows.Data.Json.h>
 
 #include "native_oidc_windows.h"
 
 namespace {
 
-bool contains(const char* value, const char* expected) {
-    return std::strstr(value, expected) != nullptr;
+// Parses the refreshed state with the Windows JSON parser and checks the
+// rotated tokens under token_response and a numeric top-level expires_at.
+bool is_expected_refreshed_state(const char* value) {
+    using winrt::Windows::Data::Json::JsonObject;
+    using winrt::Windows::Data::Json::JsonValueType;
+    try {
+        JsonObject state{nullptr};
+        if (!JsonObject::TryParse(winrt::to_hstring(std::string_view(value)), state)) {
+            return false;
+        }
+        const JsonObject token_response = state.GetNamedObject(L"token_response");
+        return token_response.GetNamedString(L"access_token") == L"new-access" &&
+               token_response.GetNamedString(L"refresh_token") == L"new-refresh" &&
+               state.GetNamedValue(L"expires_at").ValueType() == JsonValueType::Number;
+    } catch (const winrt::hresult_error&) {
+        // A missing member or a member of the wrong type.
+        return false;
+    }
 }
 
 // Refreshes and then revokes against the local mock provider at base_url,
@@ -46,10 +64,7 @@ bool refresh_and_revoke(const std::string& base_url) {
         const bool refreshed =
             native_oidc_windows_authorization_result_status(refresh) ==
                 NATIVE_OIDC_WINDOWS_AUTHORIZATION_SUCCESS &&
-            value != nullptr &&
-            contains(value, "\"access_token\":\"new-access\"") &&
-            contains(value, "\"refresh_token\":\"new-refresh\"") &&
-            contains(value, "\"expires_at\":");
+            value != nullptr && is_expected_refreshed_state(value);
         if (!refreshed) {
             std::fprintf(stderr, "unexpected refresh result: %s\n",
                          value == nullptr ? "(null)" : value);
