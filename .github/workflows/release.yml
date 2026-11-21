@@ -213,6 +213,13 @@ jobs:
       # The same Rust as the Apple job, so every package links the same
       # standard library and ships the same notices for it.
       - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-local-path: ~/.cargo/registry/cache/*
+          cache-target-dir: target/debug
+          restore-keys: |
+            # Restore for each NDK/API/toolchain combination to avoid stale builds
+            ${{ env.ANDROID_NDK_HOME }}-${{ env.ANDROID_API_LEVEL }}-*
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
@@ -514,6 +521,13 @@ jobs:
       # The same Rust as the Apple job, so every package links the same
       # standard library and ships the same notices for it.
       - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-local-path: ~/.cargo/registry/cache/*
+          cache-target-dir: target/debug
+          restore-keys: |
+            # Restore for each NDK/API/toolchain combination to avoid stale builds
+            ${{ env.ANDROID_NDK_HOME }}-${{ env.ANDROID_API_LEVEL }}-*
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
