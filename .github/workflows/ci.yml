@@ -329,8 +329,30 @@ jobs:
       - name: Report coverage summary
         id: coverage_summary
         run: |
+          # Generate the raw text report; the conversions below read it.
           cargo llvm-cov report | tee coverage-summary.txt
-          cat coverage-summary.txt >> "$GITHUB_STEP_SUMMARY"
+
+          # Render the report as a Markdown table in the job summary. The raw
+          # output is fixed-width text, whose columns misalign in the summary's
+          # proportional font. Each file row and the TOTAL row have 13 fields
+          # (Filename, Regions, Missed Regions, Cover, Functions, Missed
+          # Functions, Executed, Lines, Missed Lines, Cover, Branches, Missed
+          # Branches, Cover); the header row has 17 because its multi-word names
+          # split on whitespace, and the separator rows are bare dashes, so
+          # NF == 13 selects exactly the data rows. The three "Cover" columns
+          # are disambiguated in the Markdown header.
+          {
+            echo "# Coverage Summary"
+            echo
+            echo "| Filename | Regions | Missed Regions | Region Cover | Functions | Missed Functions | Executed | Lines | Missed Lines | Line Cover | Branches | Missed Branches | Branch Cover |"
+            echo "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+            awk 'NF == 13 && $1 != "TOTAL" { printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 }' coverage-summary.txt
+            awk 'NF == 13 && $1 == "TOTAL" { printf "| **%s** | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 }' coverage-summary.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Publish the totals the PR report job reads from the step outputs.
+          # In the raw TOTAL row, field 10 is the line Cover and field 7 the
+          # function Executed %, matching the report's expected format.
           line_coverage=$(awk '$1 == "TOTAL" { print $10; exit }' coverage-summary.txt)
           function_coverage=$(awk '$1 == "TOTAL" { print $7; exit }' coverage-summary.txt)
           test -n "$line_coverage"
