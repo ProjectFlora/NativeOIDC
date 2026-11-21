@@ -35,9 +35,6 @@ interoperability testing and support policies are still evolving. Each release r
   [docs/dependency-maintenance.md](docs/dependency-maintenance.md) lists the
   steps for re-evaluating the pin when a newer release is published
   ([#66](https://github.com/ProjectFlora/NativeOIDC/issues/66)).
-
-### Documentation
-
 - Add the [loopback callback listener specification](docs/loopback-callback.md):
   the address, port, and template rules, routing, malformed, slow, and
   duplicate requests, port release, and cancellation, with a map of the Rust
