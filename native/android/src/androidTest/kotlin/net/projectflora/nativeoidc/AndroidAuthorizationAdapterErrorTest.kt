@@ -1,5 +1,6 @@
 package net.projectflora.nativeoidc
 
+import android.content.ActivityNotFoundException
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CompletableDeferred
@@ -13,7 +14,7 @@ import uniffi.native_oidc.FfiAuthorizationOptions
 import uniffi.native_oidc.FfiServiceConfiguration
 
 /**
- * Adapter errors raised before the browser opens. Both run against the real
+ * Adapter errors raised before a browser opens. They run against the real
  * package manager and host activity, so no browser or provider is needed.
  */
 @RunWith(AndroidJUnit4::class)
@@ -28,6 +29,29 @@ class AndroidAuthorizationAdapterErrorTest {
         assertTrue(
             "Expected CallbackActivityNotRegistered, got $error",
             error is AndroidAuthorizationAdapterException.CallbackActivityNotRegistered,
+        )
+    }
+
+    @Test
+    fun missingBrowserFailsWithBrowserUnavailableAndReleasesCallback() {
+        val redirectUri = "com.example.app:/oauth/callback"
+        val error =
+            authorizeAndAwaitFailure(
+                redirectUri,
+                activityClass = AndroidNoBrowserFlowTestActivity::class.java,
+            )
+
+        assertTrue(
+            "Expected BrowserUnavailable, got $error",
+            error is AndroidAuthorizationAdapterException.BrowserUnavailable,
+        )
+        assertTrue(
+            "Expected the ActivityNotFoundException as the cause, got ${error.cause}",
+            error.cause is ActivityNotFoundException,
+        )
+        // The failed operation must not keep the callback route registered.
+        AndroidAuthorizationCallbackRegistry.unregister(
+            AndroidAuthorizationCallbackRegistry.register(redirectUri),
         )
     }
 
@@ -49,9 +73,11 @@ class AndroidAuthorizationAdapterErrorTest {
     private fun authorizeAndAwaitFailure(
         redirectUri: String,
         finishActivityFirst: Boolean = false,
+        activityClass: Class<out AndroidAuthorizationFlowTestActivity> =
+            AndroidAuthorizationFlowTestActivity::class.java,
     ): Throwable =
         runBlocking {
-            val scenario = ActivityScenario.launch(AndroidAuthorizationFlowTestActivity::class.java)
+            val scenario = ActivityScenario.launch(activityClass)
             try {
                 val result = CompletableDeferred<Result<FfiAuthenticationState>>()
                 scenario.onActivity { activity ->
