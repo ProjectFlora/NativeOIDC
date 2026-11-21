@@ -1039,16 +1039,52 @@ final class NativeOIDCTests: XCTestCase {
     func testC5() async throws {
         // The `UnresponsiveTransport` never answers after the handle
         // fires, so a `.Cancelled` outcome can only be produced by the
-        // Rust core racing the handle against the transport. Both revoke
-        // and refresh must complete, within a deadline, with `.Cancelled`
+        // Rust core racing the handle against the transport. Every
+        // network operation (discover, revoke, registerPublicClient, and
+        // refresh) must complete, within a deadline, with `.Cancelled`
         // from the core.
         let config = try FfiServiceConfiguration(authorizationEndpoint: "https://idp.example/authorize", tokenEndpoint: "https://idp.example/token")
+        let revocation = try config.withRevocationEndpoint(endpoint: "https://idp.example/revoke")
+        let registration = try config.withRegistrationEndpoint(endpoint: "https://idp.example/register")
 
         do {
             let transport = UnresponsiveTransport()
             let cancellation = FfiCancellationHandle()
             let outcome = OutcomeBox()
-            let revocation = try config.withRevocationEndpoint(endpoint: "https://idp.example/revoke")
+
+            let task = Task {
+                do {
+                    _ = try await FfiServiceConfiguration.discover(issuer: "https://idp.example/", transport: transport, cancellation: cancellation)
+                    outcome.recordSuccess("discover")
+                } catch let error as FfiError {
+                    outcome.recordFailure(error)
+                } catch {
+                    outcome.recordFailure(FfiError.Internal("unexpected Swift error: \(error)"))
+                }
+            }
+
+            guard await awaitFlag(.seconds(10), { transport.started.fired }) else {
+                task.cancel()
+                XCTFail("C5: discover transport.execute was not entered within 10 seconds")
+                return
+            }
+            cancellation.cancel()
+
+            guard let result = await outcome.wait(.seconds(10)) else {
+                task.cancel()
+                XCTFail("C5: discover did not complete within 10 seconds after cancellation; the core is waiting on the unresponsive transport")
+                return
+            }
+            guard case .failure(FfiError.Cancelled) = result else {
+                XCTFail("C5: expected .Cancelled from the core for discover, got \(result)")
+                return
+            }
+        }
+
+        do {
+            let transport = UnresponsiveTransport()
+            let cancellation = FfiCancellationHandle()
+            let outcome = OutcomeBox()
 
             let task = Task {
                 do {
@@ -1075,6 +1111,41 @@ final class NativeOIDCTests: XCTestCase {
             }
             guard case .failure(FfiError.Cancelled) = result else {
                 XCTFail("C5: expected .Cancelled from the core for revoke, got \(result)")
+                return
+            }
+        }
+
+        do {
+            let transport = UnresponsiveTransport()
+            let cancellation = FfiCancellationHandle()
+            let outcome = OutcomeBox()
+            let options = FfiRegistrationOptions(redirectUris: ["https://app.example/callback"], clientName: nil, initialAccessToken: nil)
+
+            let task = Task {
+                do {
+                    _ = try await NativeOIDC.registerPublicClient(configuration: registration, options: options, transport: transport, cancellation: cancellation)
+                    outcome.recordSuccess("register_public_client")
+                } catch let error as FfiError {
+                    outcome.recordFailure(error)
+                } catch {
+                    outcome.recordFailure(FfiError.Internal("unexpected Swift error: \(error)"))
+                }
+            }
+
+            guard await awaitFlag(.seconds(10), { transport.started.fired }) else {
+                task.cancel()
+                XCTFail("C5: register_public_client transport.execute was not entered within 10 seconds")
+                return
+            }
+            cancellation.cancel()
+
+            guard let result = await outcome.wait(.seconds(10)) else {
+                task.cancel()
+                XCTFail("C5: register_public_client did not complete within 10 seconds after cancellation; the core is waiting on the unresponsive transport")
+                return
+            }
+            guard case .failure(FfiError.Cancelled) = result else {
+                XCTFail("C5: expected .Cancelled from the core for register_public_client, got \(result)")
                 return
             }
         }
