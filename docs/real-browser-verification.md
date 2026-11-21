@@ -150,7 +150,13 @@ passes.
 
 ## Automation status
 
-Running this procedure on GitHub-hosted `macos` and `windows` runners is
-being evaluated in [#65](https://github.com/ProjectFlora/NativeOIDC/issues/65).
-Until a CI job exists, this manual procedure is the only check of the real
-system-browser path.
+A feasibility trial in [#65](https://github.com/ProjectFlora/NativeOIDC/issues/65)
+ran these scripts unchanged on GitHub-hosted runners in November 2026. The
+runners have a logged-in desktop session, and the default browser loaded
+the authorization URL and followed the redirect without first-run prompts:
+Safari on `macos-15` (macOS 15.8) and `macos-26` (macOS 26.7), and
+Microsoft Edge on `windows-latest` (Windows Server 2025) and
+`windows-11-arm` (Windows 11, x64 emulation). Whether to add a CI job is decided in #65. Until one exists,
+this manual procedure is the only regular check of the real system-browser
+path, and a CI job would not replace a run on a client machine with a
+user-chosen default browser.
