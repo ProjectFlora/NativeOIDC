@@ -154,10 +154,9 @@ class AndroidExternalBrowserAuthorizationTest {
             setupLabels.any { label -> clickIfPresent(device, labelMatches(label)) }
             Thread.sleep(500)
         }
-        assertTrue(
-            "Chrome first-run wizard was still showing when the authorization flow started",
-            device.wait(Until.gone(By.res("com.android.chrome:id/fre_pager")), 10_000),
-        )
+        if (!device.wait(Until.gone(By.res("com.android.chrome:id/fre_pager")), 10_000)) {
+            throw uiFailure(device, "Chrome first-run wizard was still showing when the authorization flow started")
+        }
         device.pressBack()
     }
 
