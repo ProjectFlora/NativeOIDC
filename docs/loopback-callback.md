@@ -45,8 +45,20 @@ states the common behavior, and the difference is listed under
 
 ### Routing a request
 
-- The listener reads the request line and headers, up to the first
-  `\r\n\r\n`, and at most about 16 KiB. The request body is never read.
+- The listener reads until the received bytes contain `\r\n\r\n`, and only
+  the bytes before the first `\r\n\r\n` (the request line and headers) are
+  parsed. 16 KiB (16384 bytes) is a read threshold, not an exact size limit:
+  after each read, the listener first looks for the terminator in
+  everything received so far, and only reads again while the total is below
+  16 KiB. A final read can therefore take the total past 16 KiB and still be
+  parsed, and bytes after the terminator that arrived in the same read (such
+  as a body) are ignored.
+  - Windows reads at most 1 KiB at a time, so it receives at most
+    17407 bytes (`MAX_REQUEST_SIZE` + 1023) before it gives up.
+  - macOS reads up to 16 KiB at a time (`maximumRequestSize`), so it can
+    receive up to 32767 bytes before it gives up.
+  - When the threshold is reached without a terminator, the request is
+    answered with `400 Bad Request` and the wait continues.
 - The request target's path (the part before `?`) is compared with the
   template's path. The comparison is exact and case-sensitive on the
   percent-encoded form; the query is not part of routing.
@@ -61,7 +73,7 @@ A request is handled according to whether its path matches.
 
 | Request | Response | Effect on the operation |
 | --- | --- | --- |
-| No `\r\n\r\n` within the size limit, or the peer closes or fails before sending complete headers | `400 Bad Request` (if the peer is still connected) | None; keep waiting |
+| No `\r\n\r\n` once the read threshold is reached, or the peer closes or fails before sending complete headers | `400 Bad Request` (if the peer is still connected) | None; keep waiting |
 | Unreadable request line (see differences for what each implementation rejects here) | `400 Bad Request` | None; keep waiting |
 | Path does not match | `404 Not Found` | None; keep waiting |
 | Path matches, but the method is not `GET` or the version is not `HTTP/1.0` / `HTTP/1.1` | `400 Bad Request` | **Terminal**: the operation fails with a malformed-callback error |
