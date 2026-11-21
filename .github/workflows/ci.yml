@@ -227,11 +227,10 @@ jobs:
           packages: platform-tools
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
       - uses: dtolnay/rust-toolchain@stable
+      # Add Rust cache for Android jobs, but exclude target/debug to avoid conflicts with Gradle
       - uses: Swatinem/rust-cache@v2
         with:
           cache-local-path: ~/.cargo/registry/cache/*
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}-${{ env.ANDROID_NDK_HOME }}-${{ env.ANDROID_API_LEVEL }}-*
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
