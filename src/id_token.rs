@@ -20,6 +20,9 @@ use crate::{AuthError, CancellationHandle, HttpRequest, HttpTransport, Result};
 
 const JWKS_CACHE_MAX_AGE: Duration = Duration::from_secs(300);
 const CLOCK_SKEW_LEEWAY_SECONDS: u64 = 60;
+// RFC 7518 section 3.3: RS256 keys must be at least 2048 bits. The RustCrypto
+// verifier accepts moduli from 1024 bits, so the minimum is enforced here.
+const MIN_RSA_MODULUS_BITS: usize = 2048;
 
 #[derive(Clone, Default)]
 pub(crate) struct JwksCache(Arc<JwksCacheState>);
@@ -180,6 +183,16 @@ async fn validate_id_token_with_clock(
     let jwk = jwk.ok_or(AuthError::InvalidIdToken(
         "no matching trusted signing key was found",
     ))?;
+    if let AlgorithmParameters::RSA(parameters) = &jwk.algorithm {
+        let bits = rsa_modulus_bits(&parameters.n).ok_or(AuthError::InvalidJwks(
+            "signing key is malformed or unsupported",
+        ))?;
+        if bits < MIN_RSA_MODULUS_BITS {
+            return Err(AuthError::InvalidJwks(
+                "RSA signing key is shorter than 2048 bits",
+            ));
+        }
+    }
     let decoding_key = DecodingKey::from_jwk(jwk)
         .map_err(|_| AuthError::InvalidJwks("signing key is malformed or unsupported"))?;
 
@@ -380,6 +393,14 @@ fn jwks_cache_max_age(headers: &HeaderMap) -> Duration {
     )
 }
 
+// The bit length of a JWK RSA modulus (`n`), ignoring leading zero bytes, or
+// `None` if it is not base64url or is zero.
+fn rsa_modulus_bits(modulus: &str) -> Option<usize> {
+    let bytes = URL_SAFE_NO_PAD.decode(modulus).ok()?;
+    let first = bytes.iter().position(|&byte| byte != 0)?;
+    Some((bytes.len() - first) * 8 - bytes[first].leading_zeros() as usize)
+}
+
 fn find_jwk<'a>(jwks: &'a JwkSet, kid: Option<&str>, algorithm: Algorithm) -> Option<&'a Jwk> {
     let mut matches = jwks.keys.iter().filter(|jwk| {
         kid.is_none_or(|kid| jwk.common.key_id.as_deref() == Some(kid))
@@ -461,7 +482,11 @@ mod tests {
 
     impl TestKey {
         fn rs256() -> Self {
-            let private_key = RsaPrivateKey::new(&mut rand::rngs::OsRng, 2048).unwrap();
+            Self::rs256_with_bits(2048)
+        }
+
+        fn rs256_with_bits(bits: usize) -> Self {
+            let private_key = RsaPrivateKey::new(&mut rand::rngs::OsRng, bits).unwrap();
             let jwk = json!({
                 "kty": "RSA",
                 "kid": "test-key",
@@ -877,6 +902,34 @@ mod tests {
             ));
             assert_eq!(transport.request_count(), 0);
         }
+    }
+
+    #[tokio::test]
+    async fn rejects_correctly_signed_tokens_from_rsa_keys_below_2048_bits() {
+        let key = TestKey::rs256_with_bits(1024);
+        let token = key.sign(claims(
+            "https://issuer.example/",
+            json!("native-client"),
+            None,
+        ));
+        let transport = TestTransport::new([jwks(&[&key])]);
+
+        assert!(matches!(
+            validate(&token, &JwksCache::default(), &transport, None, false).await,
+            Err(AuthError::InvalidJwks(
+                "RSA signing key is shorter than 2048 bits"
+            ))
+        ));
+    }
+
+    #[test]
+    fn rsa_modulus_bits_ignores_leading_zero_bytes() {
+        let bits = |bytes: &[u8]| rsa_modulus_bits(&URL_SAFE_NO_PAD.encode(bytes));
+        assert_eq!(bits(&[0x00, 0x01, 0xff]), Some(9));
+        assert_eq!(bits(&[0x80; 256]), Some(2048));
+        assert_eq!(bits(&[0x7f; 256]), Some(2047));
+        assert_eq!(bits(&[0x00; 4]), None);
+        assert_eq!(rsa_modulus_bits("not base64url!"), None);
     }
 
     #[tokio::test]

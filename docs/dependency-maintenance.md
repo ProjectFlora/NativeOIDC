@@ -114,7 +114,10 @@ From 10.0 the crate requires a crypto backend. The options were:
 
 The `rust_crypto` provider is selected from the crate feature, so
 NativeOIDC never calls `CryptoProvider::install_default`. Only `RS256` and
-`ES256` signatures are verified, always with public keys from the JWKS.
+`ES256` signatures are verified, always with public keys from the JWKS. The
+RustCrypto verifier accepts RSA moduli from 1024 bits, while `ring` required
+2048, so [src/id_token.rs](../src/id_token.rs) rejects RSA keys shorter than
+2048 bits (RFC 7518 section 3.3) before verifying.
 
 ## Security advisory audit
 
