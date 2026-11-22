@@ -28,12 +28,16 @@ class NativeOIDCWrapper(private val adapter: AuthorizationAdapter) {
         viewModelScope.launch {
             try {
                 val result = adapter.authorize(
-                    configuration = configuration,
+                    serviceConfiguration = AuthorizationConfiguration(
+                        issuerURL = URI("https://your-idp.example/.well-known/openid-configuration").toURL()
+                    ),
                     options = Options(timeout = 30.seconds)
                 )
                 callback(null, result)
             } catch (e: OAuthException) {
                 callback(e, null)
+            } catch (e: Exception) {
+                callback(OAuthException("Authorization failed", e), null)
             }
         }
     }
@@ -45,6 +49,67 @@ class NativeOIDCWrapper(private val adapter: AuthorizationAdapter) {
 ```
 
 See [Android installation and adapter](../README.md#android-adapter) for setup details.
+
+## Kotlin wrapper guidance
+
+For Android developers using Kotlin directly with the native binding:
+
+```kotlin
+// Initialize in your Activity or ViewModel
+val adapter = AuthorizationAdapter(
+    serviceConfiguration = FfiServiceConfiguration(issuerURL = URI("https://your-idp.example/.well-known/openid-configuration").toURL()),
+    options = Options(timeout = 30.seconds)
+)
+
+// Authorize with callback that receives state for refresh/exchange
+viewModelScope.launch {
+    try {
+        val result = adapter.authorize(
+            serviceConfiguration = FfiServiceConfiguration(issuerURL = URI("https://your-idp.example/.well-known/openid-configuration").toURL()),
+            options = Options(timeout = 30.seconds),
+            transport = NativeHttpTransport()
+        )
+        
+        // Use result for access token, refresh tokens, and state
+        handleAuthorizationResult(result)
+    } catch (e: OAuthException) {
+        // Handle provider errors
+        handleOAuthError(e)
+    } catch (e: Exception) {
+        // Handle transport/configuration errors
+        handleError(e)
+    }
+}
+
+// Cancel active authorization if needed
+fun cancelAuthorization() {
+    adapter.cancel()
+}
+
+// Refresh tokens using the state from previous authorization
+fun refreshToken(stateJson: String): AuthenticationState? {
+    return try {
+        adapter.refresh(stateJson)
+    } catch (e: Exception) {
+        // Handle refresh failure - old tokens may still be valid
+        null
+    }
+}
+
+// Logout via provider end-session endpoint
+suspend fun logout(issuerURL: URI?, redirectURI: URI?): Boolean {
+    return try {
+        adapter.logout(serviceConfiguration = FfiServiceConfiguration(issuerURL = issuerURL?.toURL() ?: null))
+        true
+    } catch (e: Exception) {
+        false
+    }
+}
+```
+
+The wrapper manages lifecycle concerns and keeps the native API clean. See the
+[Android installation](../README.md#android-adapter) for complete setup including
+activity configuration, callback handling, and state persistence.
 
 ## Configure a native public client
 

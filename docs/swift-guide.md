@@ -29,13 +29,10 @@ Example pattern (iOS/iPadOS):
 
 ```swift
 @objc class NativeOIDCWrapper: NSObject {
-    // iOS initializer needs a presentation context provider and platform configuration
+    // iOS requires presentation context provider in initializer and authorize call
     private let adapter = IOSAuthorizationAdapter(
-        configuration: .init(
-            issuer: "https://your-idp.example/.well-known/openid-configuration",
-            clientId: "your-client-id"
-        ),
-        options: .init(timeout: 30.0) // seconds
+        serviceConfiguration: .init(issuerURL: URL(string: "https://your-idp.example/.well-known/openid-configuration")!),
+        options: .init(timeout: 30.0) // seconds, or nil for default
     )
     
     @objc func authorizeWithCompletion(state: String, callbackURLScheme: String?, 
@@ -43,10 +40,7 @@ Example pattern (iOS/iPadOS):
         Task { @MainActor in
             do {
                 let result = try await adapter.authorize(
-                    configuration: .init(
-                        issuer: "https://your-idp.example/.well-known/openid-configuration",
-                        clientId: "your-client-id"
-                    ),
+                    serviceConfiguration: .init(issuerURL: URL(string: "https://your-idp.example/.well-known/openid-configuration")!),
                     options: .init(timeout: 30.0),
                     transport: NativeHttpTransport() // or your custom transport
                 )
@@ -71,10 +65,7 @@ Example pattern (macOS):
 @objc class NativeOIDCWrapper: NSObject {
     // macOS uses loopback redirect; configure ephemeral port or fixed URL
     private let adapter = MacOSAuthorizationAdapter(
-        configuration: .init(
-            issuer: "https://your-idp.example/.well-known/openid-configuration",
-            clientId: "your-client-id"
-        ),
+        serviceConfiguration: .init(issuerURL: URL(string: "https://your-idp.example/.well-known/openid-configuration")!),
         options: .init(timeout: 30.0)
     )
     
@@ -83,10 +74,7 @@ Example pattern (macOS):
         Task { @MainActor in
             do {
                 let result = try await adapter.authorize(
-                    configuration: .init(
-                        issuer: "https://your-idp.example/.well-known/openid-configuration",
-                        clientId: "your-client-id"
-                    ),
+                    serviceConfiguration: .init(issuerURL: URL(string: "https://your-idp.example/.well-known/openid-configuration")!),
                     options: .init(timeout: 30.0),
                     transport: NativeHttpTransport() // or your custom transport
                 )
@@ -113,34 +101,43 @@ events are managed.
 For iOS/iPadOS and macOS applications that call the native adapters directly (not through a wrapper),
 follow this complete path from installation through refresh operations. See the full documentation below.
 
-### Configuration
+### Installation
 
-Register your public client with the provider and configure transport:
+Install via Swift Package Manager or XCFramework:
 
 ```swift
-let configuration = AuthorizationConfiguration(
-    issuer: "https://your-idp.example/.well-known/openid-configuration",
-    clientId: "your-client-id"
-)
-
-// For mobile, use verified HTTPS callback or custom scheme fallback
-let transport = URLSessionNativeHttpTransport()
+// SPM - add https://github.com/ProjectFlora/NativeOIDC.git as package
+// or
+// XCFramework - drag NativeOIDC.xcframework into Xcode project, set to "Do Not Embed"
 ```
 
-### Authorization and state retention
+See [Swift XCFramework installation](swift-xcframework.md) for detailed setup.
 
-Start the platform callback handler or loopback listener before opening the browser.
-The adapters manage this for authorization.
+### Configuration and authorization
 
 ```swift
-try await adapter.authorize(
-    configuration: configuration,
+import NativeOIDC
+
+let configuration = AuthorizationConfiguration(
+    issuerURL: URL(string: "https://your-idp.example/.well-known/openid-configuration")!
+)
+
+let transport = URLSessionNativeHttpTransport() // or custom URLSession-based transport
+
+// iOS requires presentation context provider
+let iosAdapter = IOSAuthorizationAdapter(
+    serviceConfiguration: configuration,
+    options: .init(timeout: 30.0)
+)
+
+let result = try await iosAdapter.authorize(
+    serviceConfiguration: configuration,
     options: .init(timeout: 30.0),
     transport: transport
 )
-```
 
-Read token values from state to call the resource server. Access-token expiry is an optional Unix timestamp in seconds. An unknown expiry is not proof that a token is valid indefinitely. The library does not automatically refresh tokens or retry resource-server calls. ID Tokens are identity assertions; use the access token for resource-server authorization.
+// Access tokens from result can be used to call protected resources
+```
 
 ### Save, restore, and refresh
 

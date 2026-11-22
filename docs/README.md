@@ -24,8 +24,8 @@ completion; [#89](https://github.com/ProjectFlora/NativeOIDC/issues/89) tracks
 distribution of the complete, version-matched documentation set. Apple and
 Android public APIs target Swift and Kotlin only; Objective-C and Java hosts
 should use an app-side wrapper, as described in the
-[Swift guide](swift-guide.md#objective-c-interoperability) (Objective-C) and the
-shared user guide for Java ([user-guide.md](user-guide.md)).
+[Swift guide](swift-guide.md#objective-c-interoperability) (Objective-C) or the
+shared user guide for Java/Kotlin ([user-guide.md](user-guide.md)).
 
 ## API reference
 
