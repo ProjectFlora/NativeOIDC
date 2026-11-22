@@ -9,6 +9,8 @@ This is the entry point for handling development work based on a GitHub Issue. I
 
 If the request does not explicitly say "scheduled mode", treat it as manual mode.
 
+If the request names no issue or PR number, do not ask for one: choose the target yourself, following "Choosing a target" below. In manual mode, still ask questions and report in this session.
+
 ## Phases
 
 The work is split into three phases, so that each can run in its own session, with its own model.
@@ -74,11 +76,13 @@ In manual mode, the flow follows the phases I request: all phases is end-to-end,
 | Pausing for input | Agent | `agent-in-progress` → `agent-needs-input` |
 | After answering | Me | `agent-needs-input` → the `resume-label` in the pause comment |
 | Final report | Agent | `agent-in-progress` → `agent-done` |
+| A reported PR no longer meets the final-report criteria | Agent | `agent-done` → `agent-in-progress` (see "Rechecking reported PRs") |
 | Asking for more work after the report | Me | Comment on the PR or the issue, then `agent-done` → `agent-in-progress` (the PR phase picks it up) |
 
 ### Choosing a target (handle only one per run)
 Check the following in order, skipping lines for phases this run does not handle, and handle the first match.
 
+0. **Reported PR that regressed** (needs `pr`): see "Rechecking reported PRs" below
 1. **PR phase** (needs `pr`): an open PR labeled `agent-pr` whose linked issue is labeled `agent-in-progress`, and that meets any of the following
    - The issue's last agent-marker comment is a `needs-input` marker with `phase=pr` for this PR (I answered and set the label back)
    - The issue or the PR has a comment from me posted after your last agent-marker post on either of them (for example, more work requested after the final report)
@@ -98,6 +102,23 @@ Check the following in order, skipping lines for phases this run does not handle
    → Follow [phase-plan.md](phase-plan.md)
 
 If nothing matches, end without doing anything.
+
+### Rechecking reported PRs
+A final report can stop being true before I merge: a review arrives late, CI starts failing after `main` moves, or a conflict appears. A run with `pr` checks open PRs labeled `agent-pr` whose linked issue is labeled `agent-done`, oldest first.
+
+- Retrieve the PR state according to "Verification Rules" in [common-rules.md](common-rules.md), and compare it with the final-report criteria (step 7 in [phase-pr.md](phase-pr.md))
+- The PR has **regressed** if any of the following is true:
+  - A check on the current head failed
+  - There is unhandled feedback, or an unresolved Orca Bot thread
+  - It conflicts with the base branch
+  - The head SHA differs from the one in your last final report (the PR changed after the report)
+- Checks still pending are not a regression. Leave the PR for a later run
+- If the PR regressed:
+  1. Post a PR comment (with an agent marker) listing what no longer holds, with the retrieved evidence
+  2. Change the issue label from `agent-done` to `agent-in-progress`
+  3. Continue with [phase-pr.md](phase-pr.md) from step 6 in the same run, and post a new final report when the criteria hold again
+- If a result cannot be retrieved, change no label. Post a PR comment saying what could not be confirmed, unless you already posted the same note for the same head SHA
+- If nothing regressed, change nothing and continue with line 1 of "Choosing a target"
 
 When resuming any issue, read the comments posted after your last agent-marker comment. Only comments identified as "Me" (see "Post Markers" in [common-rules.md](common-rules.md)) count as my answers or instructions. If there is none, treat the label change itself as "continue as is".
 
