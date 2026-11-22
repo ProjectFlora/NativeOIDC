@@ -44,9 +44,28 @@
       window.makeKeyAndVisible()
       self.window = window
       Task { @MainActor in
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        await runAuthorizationFlow()
+        // `ASWebAuthenticationSession.start()` succeeds only while the scene
+        // is foreground active (the failure surfaces as AuthenticationServices
+        // error 3). A freshly booted simulator can connect the scene before
+        // its window is key, so wait for activation instead of a fixed delay.
+        if await waitForForegroundActive(windowScene) {
+          await runAuthorizationFlow()
+        } else {
+          writeResult("failure: sceneDidNotBecomeActive [\(sceneDiagnostics())]")
+        }
       }
+    }
+
+    private func waitForForegroundActive(_ windowScene: UIWindowScene) async -> Bool {
+      let deadline = ContinuousClock.now + .seconds(90)
+      while windowScene.activationState != .foregroundActive {
+        if ContinuousClock.now > deadline {
+          NSLog("smoke scene not foreground active: %@", sceneDiagnostics())
+          return false
+        }
+        try? await Task.sleep(for: .milliseconds(500))
+      }
+      return true
     }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
@@ -90,8 +109,32 @@
         }
         writeResult("success")
       } catch {
-        writeResult("failure: \(String(describing: error))")
+        let diagnostics = sceneDiagnostics()
+        NSLog("authorization flow failed: %@ [%@]", String(describing: error), diagnostics)
+        writeResult("failure: \(String(describing: error)) [\(diagnostics)]")
       }
+    }
+
+    // The scene and window state as UIKit reports it, recorded with the result
+    // so a `start()` failure can be tied to the state it ran in (#203).
+    private func sceneDiagnostics() -> String {
+      let state = window?.windowScene?.activationState ?? UIScene.ActivationState.unattached
+      let activation: String
+      switch state {
+      case .unattached:
+        activation = "unattached"
+      case .foregroundActive:
+        activation = "foregroundActive"
+      case .foregroundInactive:
+        activation = "foregroundInactive"
+      case .background:
+        activation = "background"
+      @unknown default:
+        activation = "unknown(\(state.rawValue))"
+      }
+      let key = window?.isKeyWindow ?? false
+      let visible = !(window?.isHidden ?? true)
+      return "scene=\(activation) key=\(key) visible=\(visible)"
     }
 
     private func checkBrowserLifecycle(

@@ -77,6 +77,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Record what the app and the simulator saw when the flow did not pass. The
+# app logs its scene and window state on failure and carries it in the result
+# file; the simulator state is read back from simctl. The app log starts at
+# launch time, not a fixed recent window, so an app that traps early (for
+# example in a lifecycle precondition) still leaves its failure context.
+diagnostics() {
+    echo "--- simulator state ---" >&2
+    xcrun simctl list devices available -j 2>/dev/null |
+        python3 -c '
+import json, sys
+target = sys.argv[1]
+for runtime, devices in json.load(sys.stdin).get("devices", {}).items():
+    for device in devices:
+        if device.get("udid") == target:
+            print(device["name"] + " (" + runtime + "): " + str(device.get("state")))
+' "$simulator_id" || echo "simulator state unavailable" >&2
+    echo "--- app log (since launch) ---" >&2
+    xcrun simctl spawn "$simulator_id" log show \
+        --start "$log_start" \
+        --style compact \
+        --predicate "process == \"$executable\"" |
+        tail -n 40 || true
+    echo "--- mock provider log ---" >&2
+    cat "$provider_log" >&2
+}
+
 xcrun simctl bootstatus "$simulator_id" -b
 xcrun simctl uninstall "$simulator_id" "$bundle_id" >/dev/null 2>&1 || true
 rm -f "$provider_port_file"
@@ -101,11 +127,21 @@ if [[ ! -s "$provider_port_file" ]]; then
 fi
 provider_port=$(<"$provider_port_file")
 xcrun simctl install "$simulator_id" "$app_bundle"
-xcrun simctl launch "$simulator_id" "$bundle_id" --oauth-provider-port "$provider_port"
+# Anchor the diagnostics log window at launch, not a fixed recent span, so an
+# app that dies early still leaves its failure context (see diagnostics). The
+# in-simulator `log` tool does not parse ISO 8601, so use a local timestamp.
+log_start=$(date '+%Y-%m-%d %H:%M:%S')
+if ! xcrun simctl launch "$simulator_id" "$bundle_id" --oauth-provider-port "$provider_port"; then
+    diagnostics
+    exit 1
+fi
 
 data_container=$(xcrun simctl get_app_container "$simulator_id" "$bundle_id" data)
 result_file="$data_container/Documents/authorization-flow-result"
-for ((attempt = 0; attempt < 90; attempt++)); do
+# The app waits up to 90s for its scene to be foreground active before
+# starting the session (#203), on top of a slow simulator boot and launch, so
+# the window must cover that before the result file can appear: 150 x 2s = 300s.
+for ((attempt = 0; attempt < 150; attempt++)); do
     if [[ -f "$result_file" ]]; then
         result=$(<"$result_file")
         if [[ "$result" == success ]]; then
@@ -113,16 +149,12 @@ for ((attempt = 0; attempt < 90; attempt++)); do
             exit 0
         fi
         echo "iOS authorization flow failed: $result" >&2
+        diagnostics
         exit 1
     fi
     sleep 2
 done
 
-xcrun simctl spawn "$simulator_id" log show \
-    --last 3m \
-    --style compact \
-    --predicate "process == \"$executable\"" |
-    tail -n 40 || true
-cat "$provider_log" >&2
+diagnostics
 echo "timed out waiting for iOS authorization flow result" >&2
 exit 1
