@@ -9,21 +9,10 @@ The public API targets Swift on Apple platforms and Kotlin on Android.
 Windows desktop hosts use the C ABI, callable from C++ and from .NET through
 P/Invoke, and Rust callers use the core crate directly.
 
-Objective-C and Java applications have no library-provided entry point.
-UniFFI generates Swift and Kotlin bindings only, and the platform adapters
-expose their central operations as Swift `async` and Kotlin `suspend`, with
-cancellation and error types built around those idioms. Such applications
-should place a small wrapper (binding class) in the app:
-
-- Objective-C hosts wrap the Swift API, for example in an `@objc` class with
-  completion-handler methods that run the `async` work in a Swift task.
-- Java hosts wrap the Kotlin API, for example in a Kotlin function that
-  returns a `CompletableFuture` or accepts a Java callback.
-
-The wrapper is where main-thread hops, Activity lifecycle handling, and
-timeout policy belong, because the application knows those best. The decision
-and rationale are recorded in [ROADMAP.md](../ROADMAP.md)
-([#144](https://github.com/ProjectFlora/NativeOIDC/issues/144)).
+- Objective-C and Java applications have no library-provided entry point.
+  See the [Swift guide](swift-guide.md#objective-c-interoperability) for how to
+  wrap the Swift API in an `@objc` class with completion-handler methods, and the
+  [Kotlin guide](../README.md#kotlin-wrapper) for Java hosts.
 
 ## Configure a native public client
 
@@ -160,5 +149,6 @@ construction, and compilable examples for their language:
 9. Example verification commands, evidence and known limits.
 
 Common behavior is documented here; platform-specific setup and executable
-examples remain in #85–#88. Sample storage abstractions must say which work
-the application still needs to implement.
+examples remain in the language guides ([swift-guide.md](swift-guide.md) for
+Swift on Apple, and similar for Kotlin and other platforms). Sample storage
+abstractions must say which work the application still needs to implement.

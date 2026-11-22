@@ -12,7 +12,7 @@ by each language and the examples and checks available today.
 
 | Audience | Installation and current usage | Remaining guide work |
 | --- | --- | --- |
-| Swift: iOS/iPadOS and macOS | [XCFramework installation](swift-xcframework.md), [Apple adapters](../README.md#apple-adapters) | [#85](https://github.com/ProjectFlora/NativeOIDC/issues/85) |
+| Swift: iOS/iPadOS and macOS | [XCFramework installation](swift-xcframework.md), [Swift guide](swift-guide.md#objective-c-interoperability), [Apple adapters](../README.md#apple-adapters) | [#85](https://github.com/ProjectFlora/NativeOIDC/issues/85) |
 | Kotlin: Android | [Android installation and adapter](../README.md#android-adapter) | [#86](https://github.com/ProjectFlora/NativeOIDC/issues/86) |
 | C++: Windows | [Windows usage](../native/windows/README.md), [ABI reference](windows-api.md) | [#87](https://github.com/ProjectFlora/NativeOIDC/issues/87) |
 | .NET: Windows | [Windows usage](../native/windows/README.md#net-interop), [wrapper contract](windows-api.md#net-wrapper) | [#88](https://github.com/ProjectFlora/NativeOIDC/issues/88) |
@@ -24,7 +24,7 @@ completion; [#89](https://github.com/ProjectFlora/NativeOIDC/issues/89) tracks
 distribution of the complete, version-matched documentation set. Apple and
 Android public APIs target Swift and Kotlin only; Objective-C and Java hosts
 should use an app-side wrapper, as described in the
-[shared user guide](user-guide.md#supported-application-languages).
+[Swift guide](swift-guide.md#objective-c-interoperability).
 
 ## API reference
 
