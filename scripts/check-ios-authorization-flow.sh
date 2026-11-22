@@ -131,7 +131,10 @@ xcrun simctl install "$simulator_id" "$app_bundle"
 # app that dies early still leaves its failure context (see diagnostics). The
 # in-simulator `log` tool does not parse ISO 8601, so use a local timestamp.
 log_start=$(date '+%Y-%m-%d %H:%M:%S')
-xcrun simctl launch "$simulator_id" "$bundle_id" --oauth-provider-port "$provider_port"
+if ! xcrun simctl launch "$simulator_id" "$bundle_id" --oauth-provider-port "$provider_port"; then
+    diagnostics
+    exit 1
+fi
 
 data_container=$(xcrun simctl get_app_container "$simulator_id" "$bundle_id" data)
 result_file="$data_container/Documents/authorization-flow-result"
