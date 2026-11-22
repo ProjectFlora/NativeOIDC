@@ -11,8 +11,40 @@ P/Invoke, and Rust callers use the core crate directly.
 
 - Objective-C and Java applications have no library-provided entry point.
   See the [Swift guide](swift-guide.md#objective-c-interoperability) for how to
-  wrap the Swift API in an `@objc` class with completion-handler methods, and the
-  [Kotlin guide](../README.md#kotlin-wrapper) for Java hosts.
+  wrap the Swift API in an `@objc` class with completion-handler methods.
+
+Java hosts wrap the Kotlin API using callbacks or `CompletableFuture`. The pattern
+is similar to Objective-C: place a small binding class in the app that manages
+main-thread hops, Activity lifecycle handling, and timeout policy. Example:
+
+```kotlin
+class NativeOIDCWrapper(private val adapter: AuthorizationAdapter) {
+
+    fun authorize(
+        state: String,
+        redirectIntentUri: Intent?,
+        callback: (OAuthException? , AuthenticationState?) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = adapter.authorize(
+                    configuration = configuration,
+                    options = Options(timeout = 30.seconds)
+                )
+                callback(null, result)
+            } catch (e: OAuthException) {
+                callback(e, null)
+            }
+        }
+    }
+
+    fun cancel() {
+        adapter.cancel()
+    }
+}
+```
+
+See [Android installation and adapter](../README.md#android-adapter) for setup details.
 
 ## Configure a native public client
 
