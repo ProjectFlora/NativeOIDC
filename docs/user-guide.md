@@ -15,29 +15,60 @@ P/Invoke, and Rust callers use the core crate directly.
 
 Java hosts wrap the Kotlin API using callbacks or `CompletableFuture`. The pattern
 is similar to Objective-C: place a small binding class in the app that manages
-main-thread hops, Activity lifecycle handling, and timeout policy. Example:
+lifecycle, cancellation, and error reporting. The adapter is bound to the
+`Activity` it was created with, so construct it with a live activity. Example:
 
 ```kotlin
-class NativeOIDCWrapper(private val adapter: AuthorizationAdapter) {
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import net.projectflora.nativeoidc.AndroidAuthorizationAdapter
+import net.projectflora.nativeoidc.AndroidAuthorizationAdapterException
+import net.projectflora.nativeoidc.AndroidRedirectConfiguration
+import net.projectflora.nativeoidc.UrlConnectionNativeHttpTransport
+import uniffi.native_oidc.FfiAuthorizationOptions
+import uniffi.native_oidc.FfiException
+import uniffi.native_oidc.FfiServiceConfiguration
 
+/** Java-callable result callback (a SAM interface). */
+fun interface AuthorizationCallback {
+    fun onResult(stateJson: String?, error: Throwable?)
+}
+
+class NativeOIDCWrapper(
+    private val adapter: AndroidAuthorizationAdapter,
+    // Host-owned scope tied to the screen's lifecycle; cancel it when the
+    // screen goes away.
+    private val scope: CoroutineScope,
+) {
     fun authorize(
-        state: String,
-        redirectIntentUri: Intent?,
-        callback: (OAuthException? , AuthenticationState?) -> Unit
+        configuration: FfiServiceConfiguration,
+        options: FfiAuthorizationOptions,
+        redirectConfiguration: AndroidRedirectConfiguration,
+        callback: AuthorizationCallback,
     ) {
-        viewModelScope.launch {
+        scope.launch(Dispatchers.Main) {
             try {
-                val result = adapter.authorize(
-                    serviceConfiguration = AuthorizationConfiguration(
-                        issuerURL = URI("https://your-idp.example/.well-known/openid-configuration").toURL()
-                    ),
-                    options = Options(timeout = 30.seconds)
+                val state = adapter.authorize(
+                    configuration = configuration,
+                    options = options,
+                    redirectConfiguration = redirectConfiguration,
+                    transport = UrlConnectionNativeHttpTransport(),
                 )
-                callback(null, result)
-            } catch (e: OAuthException) {
-                callback(e, null)
-            } catch (e: Exception) {
-                callback(OAuthException("Authorization failed", e), null)
+                // FfiAuthenticationState is a Kotlin class; hand the Java caller
+                // the serialized state for persistence and later refresh.
+                callback.onResult(state.toJson(), null)
+            } catch (error: CancellationException) {
+                // The host cancelled; report it as cancellation, not a provider
+                // failure. Do not swallow it in a broader catch.
+                callback.onResult(null, error)
+            } catch (error: AndroidAuthorizationAdapterException) {
+                // Browser and callback setup failures.
+                callback.onResult(null, error)
+            } catch (error: FfiException) {
+                // Configuration, provider, and transport failures.
+                callback.onResult(null, error)
             }
         }
     }
@@ -50,66 +81,148 @@ class NativeOIDCWrapper(private val adapter: AuthorizationAdapter) {
 
 See [Android installation and adapter](../README.md#android-adapter) for setup details.
 
-## Kotlin wrapper guidance
+## Kotlin usage
 
-For Android developers using Kotlin directly with the native binding:
+For Android developers using the Kotlin API directly. The host must register
+`AndroidAuthorizationCallbackActivity` and its redirect URI intent filters in
+the manifest, and keep the `Activity` passed to the adapter alive for the
+duration of the authorization. See
+[Android installation and adapter](../README.md#android-adapter) for the
+complete setup.
 
 ```kotlin
-// Initialize in your Activity or ViewModel
-val adapter = AuthorizationAdapter(
-    serviceConfiguration = FfiServiceConfiguration(issuerURL = URI("https://your-idp.example/.well-known/openid-configuration").toURL()),
-    options = Options(timeout = 30.seconds)
-)
+import android.app.Activity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import net.projectflora.nativeoidc.AndroidAuthorizationAdapter
+import net.projectflora.nativeoidc.AndroidRedirectConfiguration
+import net.projectflora.nativeoidc.UrlConnectionNativeHttpTransport
+import uniffi.native_oidc.FfiAuthorizationOptions
+import uniffi.native_oidc.FfiCancellationHandle
+import uniffi.native_oidc.FfiServiceConfiguration
 
-// Authorize with callback that receives state for refresh/exchange
-viewModelScope.launch {
-    try {
-        val result = adapter.authorize(
-            serviceConfiguration = FfiServiceConfiguration(issuerURL = URI("https://your-idp.example/.well-known/openid-configuration").toURL()),
-            options = Options(timeout = 30.seconds),
-            transport = NativeHttpTransport()
-        )
-        
-        // Use result for access token, refresh tokens, and state
-        handleAuthorizationResult(result)
-    } catch (e: OAuthException) {
-        // Handle provider errors
-        handleOAuthError(e)
-    } catch (e: Exception) {
-        // Handle transport/configuration errors
-        handleError(e)
-    }
-}
+// A host-owned scope ties the operation to the screen's lifecycle.
+val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-// Cancel active authorization if needed
-fun cancelAuthorization() {
-    adapter.cancel()
-}
+// The adapter is bound to the live activity that opens the Custom Tab.
+val adapter = AndroidAuthorizationAdapter(activity = activity)
 
-// Refresh tokens using the state from previous authorization
-fun refreshToken(stateJson: String): AuthenticationState? {
-    return try {
-        adapter.refresh(stateJson)
-    } catch (e: Exception) {
-        // Handle refresh failure - old tokens may still be valid
-        null
-    }
-}
+scope.launch {
+    val transport = UrlConnectionNativeHttpTransport()
+    val cancellation = FfiCancellationHandle()
 
-// Logout via provider end-session endpoint
-suspend fun logout(issuerURL: URI?, redirectURI: URI?): Boolean {
-    return try {
-        adapter.logout(serviceConfiguration = FfiServiceConfiguration(issuerURL = issuerURL?.toURL() ?: null))
-        true
-    } catch (e: Exception) {
-        false
-    }
+    // Discovers and validates the provider's OIDC metadata. For an
+    // explicit-configuration provider, construct instead:
+    // FfiServiceConfiguration(authorizationEndpoint, tokenEndpoint)
+    val configuration = FfiServiceConfiguration.discover(
+        issuer = "https://your-idp.example",
+        transport = transport,
+        cancellation = cancellation,
+    )
+
+    val options = FfiAuthorizationOptions(
+        clientId = "native-public-client",
+        // Must exactly match the redirect registered with the provider.
+        redirectUri = "https://your-app.example/oidc/callback",
+        scopes = listOf("openid", "profile"),
+        additionalParameters = emptyList(),
+        additionalTokenParameters = emptyList(),
+    )
+
+    // authorize takes the four shipped arguments: service configuration,
+    // options, redirect routing, and transport.
+    val state = adapter.authorize(
+        configuration = configuration,
+        options = options,
+        redirectConfiguration = AndroidRedirectConfiguration(
+            appLinkUri = "https://your-app.example/oidc/callback",
+            customSchemeUri = "exampleapp://oidc/callback",
+        ),
+        transport = transport,
+    )
+
+    // Persist the complete state in host-managed secure storage, then use
+    // state.tokenResponse() to call the resource server.
 }
 ```
 
-The wrapper manages lifecycle concerns and keeps the native API clean. See the
-[Android installation](../README.md#android-adapter) for complete setup including
-activity configuration, callback handling, and state persistence.
+Cancelling the surrounding coroutine or calling `adapter.cancel()` stops the
+callback wait and any in-flight core request. `CancellationException`
+propagates out of the coroutine: report it as a cancellation rather than
+swallowing it in a broad `catch (Exception)`.
+
+### Post-authorization operations
+
+`secureStore` below is a host-supplied abstraction (for example
+`EncryptedSharedPreferences`); the application chooses the backend and its
+security properties.
+
+```kotlin
+import android.net.Uri
+import uniffi.native_oidc.FfiAuthenticationState
+import uniffi.native_oidc.FfiEndSessionOptions
+import uniffi.native_oidc.beginEndSession
+
+// On the next launch: restore the state before any operation that needs it.
+val state = FfiAuthenticationState.fromJson(
+    serialized = secureStore.getString("native-oidc/state")!!
+)
+
+scope.launch {
+    // Refresh requires a non-empty refresh token and updates `state` in place
+    // after a successful response.
+    state.refresh(
+        configuration = configuration,
+        clientId = "native-public-client",
+        additionalParameters = emptyList(),
+        transport = UrlConnectionNativeHttpTransport(),
+        cancellation = FfiCancellationHandle(),
+    )
+    // Refresh tokens may rotate; persist the updated complete state.
+    secureStore.putString("native-oidc/state", state.toJson())
+}
+
+// Provider logout: the authorization adapter has no logout method. Prepare
+// the end-session URL with the UniFFI API, and the host manages the browser
+// and any post-logout callback.
+val endSession = beginEndSession(
+    configuration = configuration, // requires an end-session endpoint
+    options = FfiEndSessionOptions(
+        clientId = "native-public-client",
+        // Optional hint: the current ID Token, read inside a coroutine with
+        // state.tokenResponse().idToken.
+        idTokenHint = null,
+        // Optional; when set, a post-logout callback state is validated.
+        postLogoutRedirectUri = null,
+    ),
+)
+val logoutUrl = Uri.parse(endSession.endSessionUrl())
+// Open the Custom Tab or browser with `logoutUrl`. With a post-logout
+// redirect configured, validate the callback when it returns:
+// val response = endSession.parseRedirect(callbackUri.toString())
+
+// Local sign-out is independent of provider cleanup: clear the stored state
+// and any in-memory copies.
+secureStore.remove("native-oidc/state")
+```
+
+Dynamic registration and token revocation use the same pattern as the Swift
+guide: `registerPublicClient` with `FfiRegistrationOptions`, and `revoke`
+with the chosen token, type hint, transport, and a fresh
+`FfiCancellationHandle`. Failures surface as `FfiException` subclasses
+(`AuthorizationServer`, `ClientRegistrationServer`, `HttpStatus`,
+`Transport`, `TransportFailure`, `Cancelled`, `InvalidRequest`,
+`InvalidResponse`, `Clock`, `Randomness`); the adapter adds its own
+`AndroidAuthorizationAdapterException` types for browser and callback setup
+failures.
+
+The Kotlin examples above were compile-verified against the v0.8.0 Android
+module and its generated bindings
+(`./native/android/gradlew compileDebugUnitTestKotlin`), with the module's
+unit tests passing in the same run.
 
 ## Configure a native public client
 
@@ -245,7 +358,10 @@ construction, and compilable examples for their language:
 8. Cancellation, timeout policy, errors and platform lifecycle constraints.
 9. Example verification commands, evidence and known limits.
 
-Common behavior is documented here; platform-specific setup and executable
-examples remain in the language guides ([swift-guide.md](swift-guide.md) for
-Swift on Apple, and similar for Kotlin and other platforms). Sample storage
-abstractions must say which work the application still needs to implement.
+Common behavior is documented here. The [Swift guide](swift-guide.md) carries
+the platform-specific Apple setup, callbacks, and extended examples, and the
+standalone Android guide tracked in
+[#86](https://github.com/ProjectFlora/NativeOIDC/issues/86) will do the same
+for Kotlin; the [Kotlin usage](#kotlin-usage) section above documents the core
+Android lifecycle in the meantime. Sample storage abstractions must say which
+work the application still needs to implement.
