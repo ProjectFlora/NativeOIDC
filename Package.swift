@@ -26,8 +26,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "NativeOIDCBinary",
-            url: "https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.7.0/NativeOIDC-Apple-0.7.0.zip",
-            checksum: "185e099716ea5a7f74c91d7f82e2036d6ade0d33f759c079b15635d49777d127"
+            url: "https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.8.0/NativeOIDC-Apple-0.8.0.zip",
+            checksum: "2d2fe395a767759a3b1d35378822968fefdb54fe3c5d0cb93fe3a02a2ab22bc4"
         ),
         .target(
             name: "NativeOIDC",
