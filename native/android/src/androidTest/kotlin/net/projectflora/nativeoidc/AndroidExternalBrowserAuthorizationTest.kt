@@ -158,6 +158,7 @@ class AndroidExternalBrowserAuthorizationTest {
         device.executeShellCommand("pm disable-user com.android.vending")
         device.executeShellCommand("am start -a android.intent.action.VIEW -d about:blank -p com.android.chrome")
         assertTrue(
+
             "Chrome did not open before the authorization flow",
             device.wait(Until.hasObject(By.pkg("com.android.chrome")), 20_000),
         )
