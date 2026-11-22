@@ -162,14 +162,21 @@ security properties.
 
 ```kotlin
 import android.net.Uri
+import kotlinx.coroutines.Job
 import uniffi.native_oidc.FfiAuthenticationState
 import uniffi.native_oidc.FfiEndSessionOptions
+import uniffi.native_oidc.FfiException
 import uniffi.native_oidc.beginEndSession
 
 // On the next launch: restore the state before any operation that needs it.
 val state = FfiAuthenticationState.fromJson(
     serialized = secureStore.getString("native-oidc/state")!!
 )
+
+// Serialize the refresh write against local sign-out so a late refresh
+// cannot restore state after deletion.
+val sessionLock = Any()
+var signedOut = false
 
 scope.launch {
     // Refresh requires a non-empty refresh token and updates `state` in place
@@ -181,13 +188,18 @@ scope.launch {
         transport = UrlConnectionNativeHttpTransport(),
         cancellation = FfiCancellationHandle(),
     )
-    // Refresh tokens may rotate; persist the updated complete state.
-    secureStore.putString("native-oidc/state", state.toJson())
+    // Refresh tokens may rotate; persist the updated complete state, guarded
+    // by the sign-out flag.
+    val stateJson = state.toJson()
+    synchronized(sessionLock) {
+        if (signedOut) return@launch
+        secureStore.putString("native-oidc/state", stateJson)
+    }
 }
 
-// Provider logout: the authorization adapter has no logout method. Prepare
-// the end-session URL with the UniFFI API, and the host manages the browser
-// and any post-logout callback.
+// Provider logout: the authorization adapter has no logout method. Register
+// the app's post-logout redirect with the provider; a random state is then
+// generated and validated on return.
 val endSession = beginEndSession(
     configuration = configuration, // requires an end-session endpoint
     options = FfiEndSessionOptions(
@@ -195,19 +207,32 @@ val endSession = beginEndSession(
         // Optional hint: the current ID Token, read inside a coroutine with
         // state.tokenResponse().idToken.
         idTokenHint = null,
-        // Optional; when set, a post-logout callback state is validated.
-        postLogoutRedirectUri = null,
+        // Must exactly match the registered post-logout redirect.
+        postLogoutRedirectUri = "https://your-app.example/oidc/post-logout",
     ),
 )
 val logoutUrl = Uri.parse(endSession.endSessionUrl())
-// Open the Custom Tab or browser with `logoutUrl`. With a post-logout
-// redirect configured, validate the callback when it returns:
-// val response = endSession.parseRedirect(callbackUri.toString())
+// Open the Custom Tab or browser with `logoutUrl`. Retain the prepared
+// `endSession` until the callback returns, then validate it:
+try {
+    endSession.parseRedirect(callbackUri.toString())
+    // The callback's state matched; the provider completed the logout.
+} catch (error: FfiException) {
+    // The callback did not validate (missing or mismatched state): report
+    // the provider logout as unverified.
+}
 
-// Local sign-out is independent of provider cleanup: clear the stored state
-// and any in-memory copies.
-secureStore.remove("native-oidc/state")
+// Local sign-out is independent of provider cleanup: flag sign-out, cancel
+// in-flight work, then clear the stored state and any in-memory copies.
+synchronized(sessionLock) {
+    signedOut = true
+    scope.coroutineContext[Job]?.cancel()
+    secureStore.remove("native-oidc/state")
+}
 ```
+
+With `postLogoutRedirectUri = null` there is no callback to validate:
+opening the browser is not confirmation that the provider completed logout.
 
 Dynamic registration and token revocation use the same pattern as the Swift
 guide: `registerPublicClient` with `FfiRegistrationOptions`, and `revoke`
@@ -219,10 +244,22 @@ with the chosen token, type hint, transport, and a fresh
 `AndroidAuthorizationAdapterException` types for browser and callback setup
 failures.
 
-The Kotlin examples above were compile-verified against the v0.8.0 Android
-module and its generated bindings
-(`./native/android/gradlew compileDebugUnitTestKotlin`), with the module's
-unit tests passing in the same run.
+The Kotlin examples above are mirrored in the release consumer app
+(`native/consumer-smoke/android`): the main sources compile the wrapper, the
+"Kotlin usage" flow, and the post-authorization operations, and the
+instrumented tests run the representative state-update, cancellation, and
+error branches (#85) with scripted transports, without a network
+connection. `scripts/check-android-release-consumer.sh` builds the consumer
+app against the release AAR and runs the instrumented tests on an emulator,
+so the examples are verified against the distributed artifact — against the
+AAR built from the branch in pull request CI, and against the published
+release AAR in the release consumer workflow — rather than against the
+module sources. The generated bindings were additionally verified from the
+`v0.8.0` tag, where the module's unit tests pass
+(`./native/android/gradlew -p native/android testDebugUnitTest`). The
+examples are build-verified but not exercised against a real IdP, consistent
+with the repository's [live IdP interoperability](live-idp-interoperability.md)
+policy.
 
 ## Configure a native public client
 

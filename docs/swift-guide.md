@@ -63,7 +63,11 @@ and add its `NativeOIDC.xcframework` and `Swift/` sources to the app target,
 both from the same release. See
 [Swift XCFramework installation](swift-xcframework.md).
 
-The examples below work with either installation method.
+The examples below work with either installation method, except the
+`import NativeOIDC` lines: the module exists only in the Swift Package
+Manager installation. If you integrated the archive's Swift sources directly
+into the app target, omit that import; every other line of the examples is
+unchanged.
 
 ## Configuration, transport, and callbacks
 
@@ -377,23 +381,35 @@ UniFFI end-session API, and the host manages the browser and any post-logout
 callback:
 
 ```swift
+// Register the app's post-logout redirect with the provider; a random state
+// is then generated and validated on return.
 let endSession = try beginEndSession(
     configuration: configuration, // requires an end-session endpoint
     options: FfiEndSessionOptions(
         clientId: "native-public-client",
         idTokenHint: await state.tokenResponse().idToken,
-        // Optional; when set, a random state is validated on return.
-        postLogoutRedirectUri: nil
+        postLogoutRedirectUri: "https://your-app.example/oidc/post-logout"
     )
 )
 
 let logoutURL = URL(string: endSession.endSessionUrl())!
 // Open `logoutURL` in the external browser: ASWebAuthenticationSession on
-// iOS/iPadOS, NSWorkspace on macOS. Opening the browser is not confirmation
-// that the provider completed logout.
-// With a post-logout redirect, the host captures the callback and validates:
-// let response = endSession.parseRedirect(redirectUri: callbackURL.absoluteString)
+// iOS/iPadOS, NSWorkspace on macOS. Retain the prepared `endSession` until
+// the callback returns.
+// When the provider returns the app to the registered redirect, validate the
+// callback it carried:
+do {
+    let response = endSession.parseRedirect(redirectUri: callbackURL.absoluteString)
+    // `response.state` matched the generated state; the provider completed
+    // the logout.
+} catch {
+    // The callback did not validate (missing or mismatched state): report
+    // the provider logout as unverified.
+}
 ```
+
+With `postLogoutRedirectUri: nil` there is no callback to validate: opening
+the browser is not confirmation that the provider completed logout.
 
 Token revocation requests invalidation of the supplied token. HTTP 200
 completes the operation even for an already-invalid token; it does not delete
@@ -482,6 +498,11 @@ lifecycle handling belong:
 - Both adapters are `@MainActor`. A `@objc` entry point on a `@MainActor`
   class traps when called off the main thread, so call the wrapper from the
   main thread.
+- Discovery is a core request, not an adapter operation: `cancel()` on the
+  adapter alone would not stop a suspended discovery, and the task would
+  still open the browser when it resumes. The wrapper therefore retains the
+  discovery cancellation handle and the task, signals both from `cancel()`,
+  and checks for cancellation before starting the adapter.
 
 ### iOS/iPadOS wrapper
 
@@ -505,6 +526,8 @@ final class PresentationProvider: NSObject,
 @MainActor
 @objc public final class NativeOIDCService: NSObject {
     private let adapter: IOSAuthorizationAdapter
+    private var activeCancellation: FfiCancellationHandle?
+    private var activeTask: Task<Void, Never>?
 
     @objc public override init() {
         self.adapter = IOSAuthorizationAdapter(
@@ -523,15 +546,20 @@ final class PresentationProvider: NSObject,
         scopes: [String],
         completion: @escaping @Sendable (String?, Error?) -> Void
     ) {
-        Task { @MainActor in
+        let transport = URLSessionNativeHttpTransport()
+        let cancellation = FfiCancellationHandle()
+        let task = Task { @MainActor in
             do {
-                let transport = URLSessionNativeHttpTransport()
-                let cancellation = FfiCancellationHandle()
                 let configuration = try await FfiServiceConfiguration.discover(
                     issuer: issuer,
                     transport: transport,
                     cancellation: cancellation
                 )
+                // A cancel that lands between discovery and the adapter must
+                // not start the session either.
+                guard !cancellation.isCancelled() else {
+                    throw FfiError.Cancelled
+                }
                 let options = FfiAuthorizationOptions(
                     clientId: clientId,
                     redirectUri: redirectUri,
@@ -549,11 +577,18 @@ final class PresentationProvider: NSObject,
                 completion(nil, error)
             }
         }
+        activeCancellation = cancellation
+        activeTask = task
     }
 
-    /// Cancels the active browser session and any in-flight core request.
+    /// Cancels the active browser session, any in-flight core request, and a
+    /// suspended discovery request alike.
     @objc public func cancel() {
         adapter.cancel()
+        activeCancellation?.cancel()
+        activeTask?.cancel()
+        activeCancellation = nil
+        activeTask = nil
     }
 }
 ```
@@ -567,6 +602,8 @@ import NativeOIDC
 @MainActor
 @objc public final class NativeOIDCService: NSObject {
     private let adapter: MacOSAuthorizationAdapter
+    private var activeCancellation: FfiCancellationHandle?
+    private var activeTask: Task<Void, Never>?
 
     @objc public override init() {
         // The default closure opens the URL in the default browser.
@@ -584,15 +621,20 @@ import NativeOIDC
         scopes: [String],
         completion: @escaping @Sendable (String?, Error?) -> Void
     ) {
-        Task { @MainActor in
+        let transport = URLSessionNativeHttpTransport()
+        let cancellation = FfiCancellationHandle()
+        let task = Task { @MainActor in
             do {
-                let transport = URLSessionNativeHttpTransport()
-                let cancellation = FfiCancellationHandle()
                 let configuration = try await FfiServiceConfiguration.discover(
                     issuer: issuer,
                     transport: transport,
                     cancellation: cancellation
                 )
+                // A cancel that lands between discovery and the adapter must
+                // not start the listener either.
+                guard !cancellation.isCancelled() else {
+                    throw FfiError.Cancelled
+                }
                 let options = FfiAuthorizationOptions(
                     clientId: clientId,
                     redirectUri: redirectUri,
@@ -610,36 +652,58 @@ import NativeOIDC
                 completion(nil, error)
             }
         }
+        activeCancellation = cancellation
+        activeTask = task
     }
 
-    /// Stops the listener and any in-flight core request. It cannot dismiss
-    /// the external browser.
+    /// Cancels the active browser session, any in-flight core request, and a
+    /// suspended discovery request alike.
     @objc public func cancel() {
         adapter.cancel()
+        activeCancellation?.cancel()
+        activeTask?.cancel()
+        activeCancellation = nil
+        activeTask = nil
     }
 }
 ```
 
 ## Example verification
 
-The Swift examples in this guide were checked at the following scope:
+The Swift examples in this guide are exercised at the following scope:
 
-- **Build**: the example code compiles against the `v0.8.0` package — the
-  release archive binary plus the generated Swift sources shipped in the tag —
-  for macOS (release) and for the iOS simulator. The published `v0.8.0`
+- **Build**: the examples are mirrored in the Apple release consumer app
+  (`native/consumer-smoke/apple`, with the per-platform halves in
+  `GuideExamplesMacOS.swift` and `GuideExamplesIOS.swift`).
+  `scripts/check-apple-release-consumer.sh` compiles the mirror against the
+  release archive's generated bindings, adapters, and XCFramework — the
+  distributed artifacts, not the module sources — for a macOS host (which it
+  then runs) and for the iOS simulator (linked). The published `v0.8.0`
   simulator slice is arm64-only, so the iOS build excludes `x86_64`.
-- **Runtime**: the authorization, callback-exchange, and cancellation paths
-  are exercised by the repository's Swift test suite
+- **Runtime**: the macOS host runs the representative state-update,
+  cancellation, and error branches the examples rely on (#85): a scripted
+  refresh that updates the state in place and round-trips it through JSON, an
+  in-flight discovery ended by cancellation, a provider-rejected refresh,
+  malformed stored state, and the post-logout callback with a registered
+  redirect (a matching state validates, a mismatched one fails). The
+  authorization, callback-exchange, and cancellation paths are additionally
+  exercised by the repository's Swift test suite
   (`SwiftTests/NativeOIDCTests`, a macOS loopback flow against a local mock
   provider; `swift test` at `v0.8.0` ran 44 tests with 0
-  failures) and by the Apple consumer smoke app (see [Release consumer
+  failures) and by the consumer app (see [Release consumer
   validation](../README.md#release-consumer-validation)). The refresh,
-  end-session, revocation, and registration examples are build-verified but
-  not executed against a real IdP or on real devices, consistent with the
-  repository's [live IdP interoperability](live-idp-interoperability.md)
-  policy.
+  end-session, revocation, and registration examples are not executed against
+  a real IdP or on real devices, consistent with the repository's
+  [live IdP interoperability](live-idp-interoperability.md) policy.
 
 ### Example verification commands
+
+From a checkout that includes the consumer app, against a downloaded and
+checksum-verified release archive:
+
+```sh
+scripts/check-apple-release-consumer.sh dist/NativeOIDC-Apple-0.8.0.zip
+```
 
 From a checkout at tag `v0.8.0`:
 
