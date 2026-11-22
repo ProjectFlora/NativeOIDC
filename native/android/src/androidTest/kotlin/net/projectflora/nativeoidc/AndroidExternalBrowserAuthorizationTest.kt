@@ -150,8 +150,13 @@ class AndroidExternalBrowserAuthorizationTest {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             device.executeShellCommand("pm grant com.android.chrome android.permission.POST_NOTIFICATIONS")
         }
+        // Stop the Play Store from coming to the foreground and covering the Custom Tab.
+        // This is to prevent the first-boot "finish setup" flow on fresh AVD boots (#215).
+        device.executeShellCommand("am force-stop com.android.vending")
+        device.executeShellCommand("pm disable-user com.android.vending")
         device.executeShellCommand("am start -a android.intent.action.VIEW -d about:blank -p com.android.chrome")
         assertTrue(
+
             "Chrome did not open before the authorization flow",
             device.wait(Until.hasObject(By.pkg("com.android.chrome")), 20_000),
         )
