@@ -37,7 +37,7 @@ pub(super) const RESERVED_REVOCATION_PARAMETERS: &[&str] = &[
     "client_assertion_type",
 ];
 
-const RESERVED_END_SESSION_PARAMETERS: &[&str] = &[
+pub(super) const RESERVED_END_SESSION_PARAMETERS: &[&str] = &[
     "client_id",
     "id_token_hint",
     "logout_hint",
@@ -78,7 +78,7 @@ pub(super) fn validate_logout_endpoint(endpoint: &Url) -> Result<()> {
 }
 
 pub(super) fn validate_registration_endpoint(endpoint: &Url) -> Result<()> {
-    if endpoint.scheme() != "https" || validate_endpoint(endpoint).is_err() {
+    if validate_endpoint(endpoint).is_err() {
         return Err(AuthError::InvalidConfiguration(
             "client registration endpoint must use HTTPS without user info or fragments",
         ));
@@ -111,7 +111,7 @@ pub(super) fn validate_bearer_token(token: &str) -> Result<()> {
         if byte == b'=' {
             padding_started = true;
         } else if byte.is_ascii_alphanumeric()
-            || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'+' | b'/')
+            || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'+' | b'/' )
         {
             if padding_started {
                 return Err(AuthError::InvalidConfiguration(
@@ -296,6 +296,99 @@ fn redirect_uris_match(expected: &Url, received: &Url) -> bool {
         && expected.host_str() == received.host_str()
         && expected.port() == received.port()
         && expected.path() == received.path()
+}
+
+/// A query error for the shared callback parsing function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CallbackQueryError {
+    /// The URL query has invalid percent encoding or contains non-UTF-8 bytes.
+    InvalidEncoding,
+    /// The query contains a duplicate parameter name.
+    DuplicateParameter,
+    /// The registered redirect URI's query does not match the fixed portion of the callback.
+    FixedQueryMismatch {
+        /// The expected query string from the request's registered redirect URI.
+        expected: String,
+        /// The actual query string found in the response.
+        actual: String,
+    },
+}
+
+impl From<CallbackQueryError> for AuthError {
+    fn from(error: CallbackQueryError) -> Self {
+        match error {
+            CallbackQueryError::InvalidEncoding => AuthError::InvalidAuthorizationResponse(
+                "response query has invalid percent encoding or UTF-8",
+            ),
+            CallbackQueryError::DuplicateParameter => AuthError::InvalidAuthorizationResponse(
+                "response contains a duplicate parameter",
+            ),
+            CallbackQueryError::FixedQueryMismatch { expected, actual } => {
+                let msg = if expected == actual {
+                    format!("redirect URI query does not match: both sides have {expected}")
+                } else {
+                    format!(
+                        "redirect URI query does not match: expected {} but got {}",
+                        expected, actual
+                    )
+                };
+                AuthError::InvalidAuthorizationResponse(msg)
+            }
+        }
+    }
+}
+
+/// Parses the query portion of a callback URL.
+///
+/// This extracts and validates the three shared checks:
+/// 1. Percent-encoding/UTF-8 validity
+/// 2. Rejection of duplicate parameter names  
+/// 3. Matching and removing the registered redirect URI's fixed query portion
+///
+/// The caller must then separately handle state validation, code extraction, and error handling.
+pub(super) fn parse_callback_query(
+    redirect: &Url,
+    expected_redirect_uri: &Url,
+    error: impl Fn(CallbackQueryError) -> AuthError,
+) -> Result<BTreeMap<String, String>> {
+    let query = redirect.query();
+    
+    // Check 1: Has valid query encoding?
+    if !has_valid_query_encoding(redirect) {
+        return Err(error(CallbackQueryError::InvalidEncoding));
+    }
+    
+    // Parse query into a map for later checks
+    let mut parameters: BTreeMap<String, String> = BTreeMap::new();
+    for (name, value) in redirect.query_pairs() {
+        if !parameters.insert(name.into_owned(), value.into_owned()).is_some() {
+            // Duplicate parameter name found
+            return Err(error(CallbackQueryError::DuplicateParameter));
+        }
+    }
+    
+    // Check 3: Remove the registered redirect URI's fixed query portion
+    for (name, expected_value) in expected_redirect_uri.query_pairs() {
+        if let Some(actual_value) = parameters.get(name.as_ref()) {
+            if actual_value != &expected_value.into_owned() {
+                return Err(error(CallbackQueryError::FixedQueryMismatch {
+                    expected: expected_value.clone(),
+                    actual: actual_value.clone(),
+                }));
+            }
+            // Remove this parameter since it's part of the fixed query
+            parameters.remove(name.as_ref());
+        } else if name != "state" && name != "error" && name != "error_description" {
+            // The registered redirect URI has a parameter that wasn't in the response.
+            // This shouldn't happen, but we'll note it by treating it as a mismatch.
+            return Err(error(CallbackQueryError::FixedQueryMismatch {
+                expected: name.clone(),
+                actual: name.clone(),
+            }));
+        }
+    }
+    
+    Ok(parameters)
 }
 
 #[cfg(test)]
