@@ -3,6 +3,7 @@ package net.projectflora.nativeoidc.consumer
 import android.app.Activity
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -29,6 +30,7 @@ import uniffi.native_oidc.FfiAuthenticationState
 import uniffi.native_oidc.FfiAuthorizationOptions
 import uniffi.native_oidc.FfiCancellationHandle
 import uniffi.native_oidc.FfiEndSessionOptions
+import uniffi.native_oidc.FfiEndSessionSession
 import uniffi.native_oidc.FfiException
 import uniffi.native_oidc.FfiHttpRequest
 import uniffi.native_oidc.FfiHttpResponse
@@ -247,6 +249,33 @@ class GuideExamplesTest {
         } catch (error: FfiException.InvalidResponse) {
             // Expected.
         }
+    }
+
+    // Guide section 6: the host's pending-logout handling in the callback activity.
+    @Test
+    fun pendingLogoutAcceptsOnlyAValidCallbackForTheRetainedSession() {
+        val configuration = FfiServiceConfiguration(AUTHORIZE, TOKEN).withEndSessionEndpoint(LOGOUT)
+        fun begin(): String {
+            val session = beginEndSession(configuration, FfiEndSessionOptions(CLIENT_ID, null, LOGOUT_REDIRECT))
+            PendingLogout.begin(session)
+            return Uri.parse(session.endSessionUrl()).getQueryParameter("state")!!
+        }
+
+        // No session (for example after process recreation).
+        PendingLogout.abandon()
+        assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=x"))
+
+        // A launch without data keeps the pending session.
+        val state = begin()
+        assertFalse(PendingLogout.complete(null))
+        assertTrue(PendingLogout.complete("$LOGOUT_REDIRECT?state=$state"))
+        // The session is consumed.
+        assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=$state"))
+
+        // A mismatched state is rejected and consumes the session.
+        val other = begin()
+        assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=${other}x"))
+        assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=$other"))
     }
 
     // Guide section 6: revocation, then local deletion regardless of the result.
@@ -487,6 +516,67 @@ private fun guideDescribe(error: Throwable): String =
         is AndroidAuthorizationAdapterException.AuthorizationAlreadyRunning -> "already running"
         else -> "unexpected"
     }
+
+/** The guide's pending-logout holder used by the logout callback activity. */
+object PendingLogout {
+    private var session: FfiEndSessionSession? = null
+
+    @Synchronized
+    fun begin(session: FfiEndSessionSession) {
+        this.session?.close()
+        this.session = session
+    }
+
+    @Synchronized
+    fun abandon() {
+        session?.close()
+        session = null
+    }
+
+    fun complete(callbackUri: String?): Boolean {
+        if (callbackUri == null) return false
+        val pending = synchronized(this) { session.also { session = null } } ?: return false
+        return try {
+            pending.parseRedirect(callbackUri)
+            true
+        } catch (error: FfiException) {
+            false
+        } finally {
+            pending.close()
+        }
+    }
+}
+
+@Suppress("unused")
+private fun guideStartLogout(
+    activity: Activity,
+    configuration: FfiServiceConfiguration,
+    idToken: String?,
+) {
+    val endSession =
+        beginEndSession(
+            configuration,
+            FfiEndSessionOptions(
+                clientId = "client",
+                idTokenHint = idToken,
+                postLogoutRedirectUri = "com.example.app.logout:/callback",
+            ),
+        )
+    PendingLogout.begin(endSession)
+    // The guide opens endSessionUrl() with CustomTabsIntent. The Maven POM lists
+    // androidx.browser only at runtime scope, so this fixture does not compile that call.
+    Uri.parse(endSession.endSessionUrl())
+}
+
+/** Compile-only copy of the guide's logout callback activity (not in the manifest). */
+@Suppress("unused")
+class GuideLogoutCallbackActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        PendingLogout.complete(intent?.dataString)
+        finish()
+    }
+}
 
 @Suppress("unused")
 private class GuideJavaFacade(

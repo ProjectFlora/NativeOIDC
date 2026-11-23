@@ -75,7 +75,6 @@ The Android adapter lives in `net.projectflora.nativeoidc`; the generated
 UniFFI API lives in `uniffi.native_oidc`:
 
 ```kotlin
-import android.os.Build
 import net.projectflora.nativeoidc.AndroidAuthorizationAdapter
 import net.projectflora.nativeoidc.AndroidAuthorizationAdapterException
 import net.projectflora.nativeoidc.AndroidRedirectConfiguration
@@ -91,9 +90,33 @@ import uniffi.native_oidc.FfiServiceConfiguration
 import uniffi.native_oidc.beginEndSession
 import uniffi.native_oidc.registerPublicClient
 import uniffi.native_oidc.revoke
-// For the timeout example in section 8:
+```
+
+The examples below also use these Android, AndroidX, coroutine, and JDK
+imports:
+
+```kotlin
+import android.app.Activity
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import androidx.browser.customtabs.CustomTabsIntent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.future.future
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.security.KeyStore
+import java.util.concurrent.CompletableFuture
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import kotlin.time.Duration.Companion.minutes
+import uniffi.native_oidc.FfiEndSessionSession
 ```
 
 Generated objects such as `FfiServiceConfiguration` and
@@ -354,28 +377,80 @@ separate actions; see the [shared logout policy](user-guide.md#logout-revocation
 
 ### Provider end-session (RP-Initiated Logout)
 
-`beginEndSession` builds the logout URL. Open it in a browser you manage, and
-validate the post-logout callback with the same session:
+`beginEndSession` builds the logout URL. The host opens it in a browser and
+validates the post-logout callback with the same session. Keep the pending
+session in one place that the callback activity can reach:
 
 ```kotlin
-val endSession = beginEndSession(
-    configuration, // requires withEndSessionEndpoint or a discovered endpoint
-    FfiEndSessionOptions(
-        clientId = "client",
-        idTokenHint = state.tokenResponse().idToken,
-        postLogoutRedirectUri = "com.example.app.logout:/callback",
-    ),
-)
-CustomTabsIntent.Builder().build().launchUrl(activity, Uri.parse(endSession.endSessionUrl()))
+object PendingLogout {
+    private var session: FfiEndSessionSession? = null
 
-// Later, in the activity that receives com.example.app.logout:/callback:
-val response = endSession.parseRedirect(intent.dataString!!) // throws InvalidResponse on a state mismatch
+    @Synchronized
+    fun begin(session: FfiEndSessionSession) {
+        this.session?.close()
+        this.session = session
+    }
+
+    /** Call when the user abandons logout, for example on returning without a callback. */
+    @Synchronized
+    fun abandon() {
+        session?.close()
+        session = null
+    }
+
+    /** Returns true only when [callbackUri] is a valid callback for the pending logout. */
+    fun complete(callbackUri: String?): Boolean {
+        if (callbackUri == null) return false // launched without data: keep waiting
+        val pending = synchronized(this) { session.also { session = null } } ?: return false
+        return try {
+            pending.parseRedirect(callbackUri) // InvalidResponse on a state mismatch
+            true
+        } catch (error: FfiException) {
+            false
+        } finally {
+            pending.close()
+        }
+    }
+}
+
+fun startLogout(activity: Activity, configuration: FfiServiceConfiguration, idToken: String?) {
+    val endSession = beginEndSession(
+        configuration, // requires withEndSessionEndpoint or a discovered endpoint
+        FfiEndSessionOptions(
+            clientId = "client",
+            idTokenHint = idToken,
+            postLogoutRedirectUri = "com.example.app.logout:/callback",
+        ),
+    )
+    PendingLogout.begin(endSession)
+    CustomTabsIntent.Builder().build().launchUrl(activity, Uri.parse(endSession.endSessionUrl()))
+}
+
+class LogoutCallbackActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val confirmed = PendingLogout.complete(intent?.dataString)
+        // Report the result; local sign-out does not depend on it.
+        finish()
+    }
+}
 ```
 
-The library's callback activity serves authorization only. Register your own
-activity for the post-logout redirect, under a scheme that differs from the
-authorization callback's (see section 2), and register the same URI with the
-provider:
+`CustomTabsIntent` comes from AndroidX Browser. The Maven Central POM declares
+that library with runtime scope only, so add
+`implementation("androidx.browser:browser:1.8.0")` to your app when you call it
+directly. The GitHub Release AAR path already declares it.
+
+The pending session lives in memory. If Android recreates the process while
+the browser is open, the callback finds no session and `complete` returns
+`false`: the provider logout is unconfirmed, and local sign-out must already
+have happened independently. A launch without data, or a callback with a
+mismatched state, is never treated as confirmation.
+
+The library's callback activity serves authorization only. Register
+`LogoutCallbackActivity` for the post-logout redirect, under a scheme that
+differs from the authorization callback's (see section 2), and register the
+same URI with the provider:
 
 ```xml
 <activity
@@ -391,8 +466,6 @@ provider:
 </activity>
 ```
 
-Keep the `FfiEndSessionSession` until the callback arrives (or the user
-abandons it), and close it afterwards.
 Without a post-logout redirect, opening the URL does not confirm that the
 provider completed logout.
 
@@ -564,7 +637,8 @@ using a scripted in-process transport (no network):
 - Refresh failure (`AuthorizationServer`, `HttpStatus`, `TransportFailure`)
   and pre-cancelled refresh (`Cancelled`) leave the state unchanged.
 - End-session URL construction and callback validation, including a state
-  mismatch (`InvalidResponse`).
+  mismatch (`InvalidResponse`), and the `PendingLogout` handling of a missing
+  URI, a missing session, a mismatched state, and a valid callback.
 - Revocation followed by local deletion, also when revocation fails or the
   stored state cannot be decrypted.
 - Registration success and `ClientRegistrationServer`.
