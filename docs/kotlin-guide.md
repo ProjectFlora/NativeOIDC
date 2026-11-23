@@ -176,9 +176,19 @@ declaration, authorization fails with
   verified for the app and the URI resolves to the callback activity. The
   [HTTPS callback domain](https-callback-domain.md) procedure shows the file
   and how to check it.
+- **App Links need API 31 or later with v0.8.0.** The adapter checks
+  verification with `DomainVerificationManager`, which was added in API 31.
+  On API 28–30, a non-null `appLinkUri` makes `authorize` fail with
+  `NoClassDefFoundError` before it reaches the custom-scheme fallback. Pass
+  `appLinkUri = null` below API 31, as in the example in section 3.
 - **Custom scheme (fallback)**: a hierarchical, app-specific scheme such as
   `com.example.app:/oauth/callback`. `http`, `https`, and opaque URIs are
   rejected as `InvalidRedirectConfiguration`.
+- Android ignores `android:path` in a filter that has a scheme but no host,
+  so the custom-scheme filter above matches every `com.example.app:` URI.
+  Use this scheme only for the callback activity. Another activity with the
+  same scheme (for example a logout callback) makes the URI resolve to more
+  than one activity, and the adapter then rejects the redirect.
 
 The adapter ignores callbacks whose scheme, host, port, or path do not match
 the active redirect; the Rust core validates the complete callback and state.
@@ -205,7 +215,12 @@ suspend fun signIn(
             additionalTokenParameters = emptyList(),
         ),
         AndroidRedirectConfiguration(
-            appLinkUri = "https://login.example.com/oauth/callback",
+            // v0.8.0 checks App Link verification with an API 31 class.
+            appLinkUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                "https://login.example.com/oauth/callback"
+            } else {
+                null
+            },
             customSchemeUri = "com.example.app:/oauth/callback",
         ),
         UrlConnectionNativeHttpTransport(),
@@ -344,18 +359,36 @@ val endSession = beginEndSession(
     FfiEndSessionOptions(
         clientId = "client",
         idTokenHint = state.tokenResponse().idToken,
-        postLogoutRedirectUri = "com.example.app:/oauth/logout",
+        postLogoutRedirectUri = "com.example.app.logout:/callback",
     ),
 )
 CustomTabsIntent.Builder().build().launchUrl(activity, Uri.parse(endSession.endSessionUrl()))
 
-// Later, in the activity that receives com.example.app:/oauth/logout:
+// Later, in the activity that receives com.example.app.logout:/callback:
 val response = endSession.parseRedirect(intent.dataString!!) // throws InvalidResponse on a state mismatch
 ```
 
 The library's callback activity serves authorization only. Register your own
-activity for the post-logout redirect, keep the `FfiEndSessionSession` until
-the callback arrives (or the user abandons it), and close it afterwards.
+activity for the post-logout redirect, under a scheme that differs from the
+authorization callback's (see section 2), and register the same URI with the
+provider:
+
+```xml
+<activity
+    android:name=".LogoutCallbackActivity"
+    android:exported="true"
+    android:noHistory="true">
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="com.example.app.logout" />
+    </intent-filter>
+</activity>
+```
+
+Keep the `FfiEndSessionSession` until the callback arrives (or the user
+abandons it), and close it afterwards.
 Without a post-logout redirect, opening the URL does not confirm that the
 provider completed logout.
 
@@ -550,7 +583,7 @@ Evidence for this revision:
 | Operation group | Kotlin status |
 | --- | --- |
 | Discovery, explicit and optional endpoints | Available (`FfiServiceConfiguration`) |
-| Browser authorization and callback | Available (`AndroidAuthorizationAdapter`); manifest setup and `assetlinks.json` are host work |
+| Browser authorization and callback | Available (`AndroidAuthorizationAdapter`; App Links on API 31+); manifest setup and `assetlinks.json` are host work |
 | Callback validation and code exchange | Available (inside the adapter; also `beginAuthorization` for custom browsers) |
 | Tokens, expiry, serialize and restore | Available (`FfiAuthenticationState`) |
 | Secure persistence | Host (example above) |
@@ -566,6 +599,8 @@ Evidence for this revision:
 
 ### Known limits
 
+- With v0.8.0, App Links work only on API 31 and later; API 28–30 must use
+  the custom-scheme redirect alone (section 2).
 - Live identity-provider interoperability and physical-device execution are
   not verified; see [interoperability status](live-idp-interoperability.md)
   and the [support matrix](support-matrix.md). Execution on physical arm64

@@ -2,6 +2,7 @@ package net.projectflora.nativeoidc.consumer
 
 import android.app.Activity
 import android.net.Uri
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -339,7 +340,7 @@ class GuideExamplesTest {
         const val REGISTER = "https://idp.example/register"
         const val LOGOUT = "https://idp.example/logout"
         const val REDIRECT = "com.example.app:/oauth/callback"
-        const val LOGOUT_REDIRECT = "com.example.app:/oauth/logout"
+        const val LOGOUT_REDIRECT = "com.example.app.logout:/callback"
         const val STATE_JSON =
             """{"token_response":{"access_token":"access-0","token_type":"Bearer","refresh_token":"refresh-0"}}"""
         const val TOKEN_RESPONSE =
@@ -446,7 +447,13 @@ private suspend fun guideSignIn(
             additionalTokenParameters = emptyList(),
         ),
         AndroidRedirectConfiguration(
-            appLinkUri = "https://login.example.com/oauth/callback",
+            // v0.8.0 checks App Link verification with an API 31 class.
+            appLinkUri =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    "https://login.example.com/oauth/callback"
+                } else {
+                    null
+                },
             customSchemeUri = "com.example.app:/oauth/callback",
         ),
         UrlConnectionNativeHttpTransport(),
