@@ -677,12 +677,16 @@ using a scripted in-process transport (no network):
 - Revocation followed by local deletion, also when revocation fails or the
   stored state cannot be decrypted.
 - Registration success and `ClientRegistrationServer`.
-- The adapter call, the error-classification `when`, and the Java
+- The adapter's configuration errors raised before any browser opens:
+  `CallbackActivityNotRegistered` for an unregistered custom scheme, and
+  `InvalidRedirectConfiguration` for an `https` fallback (using a debug-only
+  host activity in the fixture app).
+- The successful adapter call, the error-classification `when`, and the Java
   `CompletableFuture` wrapper are compiled but not executed there: they need
-  a host activity, a registered callback activity, and a browser.
+  a registered callback activity, a browser, and a provider.
 
 The Custom Tab flow, callback activity, adapter cancellation, and the
-adapter's redirect-selection errors run in the library module's emulator
+remaining redirect-selection errors run in the library module's emulator
 tests against a local mock provider. Every UniFFI operation and error variant
 is covered by the [Kotlin UniFFI coverage tests](api-coverage.md#kotlin-uniffi-operation-and-error-coverage).
 

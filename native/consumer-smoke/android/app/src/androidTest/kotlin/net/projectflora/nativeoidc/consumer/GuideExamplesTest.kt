@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CompletableDeferred
@@ -250,6 +251,45 @@ class GuideExamplesTest {
             outcome.exceptionOrNull() is FfiException.Cancelled,
         )
         assertEquals(before, state.toJson())
+    }
+
+    // Guide sections 2 and 8: adapter configuration errors raised before any
+    // browser opens. This app does not register the callback activity.
+    @Test
+    fun adapterRejectsUnregisteredCallbackAndInvalidFallback() = runBlocking {
+        ActivityScenario.launch(GuideHostActivity::class.java).use { scenario ->
+            var host: Activity? = null
+            scenario.onActivity { host = it }
+            val adapter = AndroidAuthorizationAdapter(host!!)
+            val configuration = FfiServiceConfiguration(AUTHORIZE, TOKEN)
+            val transport = ScriptedTransport()
+
+            suspend fun failure(customSchemeUri: String): Throwable {
+                try {
+                    adapter.authorize(
+                        configuration,
+                        FfiAuthorizationOptions(CLIENT_ID, customSchemeUri, emptyList(), emptyList(), emptyList()),
+                        AndroidRedirectConfiguration(appLinkUri = null, customSchemeUri = customSchemeUri),
+                        transport,
+                    )
+                } catch (error: Throwable) {
+                    return error
+                }
+                throw AssertionError("Authorization unexpectedly succeeded for $customSchemeUri")
+            }
+
+            val unregistered = failure(REDIRECT)
+            assertTrue(
+                "Expected CallbackActivityNotRegistered, got $unregistered",
+                unregistered is AndroidAuthorizationAdapterException.CallbackActivityNotRegistered,
+            )
+            val invalid = failure("https://login.example.com/oauth/callback")
+            assertTrue(
+                "Expected InvalidRedirectConfiguration, got $invalid",
+                invalid is AndroidAuthorizationAdapterException.InvalidRedirectConfiguration,
+            )
+            assertTrue(transport.requests.isEmpty())
+        }
     }
 
     // Guide section 6: end-session URL and post-logout callback validation.
@@ -512,9 +552,9 @@ private class ScriptedTransport(
 
 /*
  * Compile-only checks for the guide's adapter and Java-wrapper examples.
- * They need a host activity, a registered callback activity and a browser,
- * so they are type-checked here and executed by the library module's
- * emulator tests instead.
+ * A successful authorization needs a registered callback activity, a
+ * browser and a provider, so these are type-checked here; the library
+ * module's emulator tests run the Custom Tab flow.
  */
 
 @Suppress("unused")

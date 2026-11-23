@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug-only host for GuideExamplesTest's adapter checks. The app
+             deliberately does not register AndroidAuthorizationCallbackActivity. -->
+        <activity
+            android:name="net.projectflora.nativeoidc.consumer.GuideHostActivity"
+            android:exported="false" />
+    </application>
+</manifest>
