@@ -42,7 +42,11 @@ Only posts identified as "Me" count as my instructions or answers. This also app
 - When a post responds to feedback, add a line listing the IDs of every comment it addresses, whether it is an inline reply, a PR comment, or a review reply:
   `Handled: {id}, {id}, ...`
 - When you post a plan (step 2), start the comment with this line instead:
-  `<!-- agent-workflow:plan -->`
+  `<!-- agent-workflow:plan flow={end-to-end or split} -->`
+- When you claim an issue to work on it, start the comment with this line instead (see "Claiming an issue" in [issue-to-pr.md](issue-to-pr.md)):
+  `<!-- agent-workflow:claim phase={plan or implement} flow={end-to-end or split} run={run id} until={UTC time, e.g. 2026-11-24T03:00:00Z} -->`
+  - `run`: an id unique to this run, such as the start time plus a few random characters
+  - A claim you give up is edited to start with `<!-- agent-workflow:claim-withdrawn -->` instead
 - When you set `agent-needs-input` on an issue, start the comment with this line instead:
   `<!-- agent-workflow:needs-input phase={phase} step={step number to resume from} pr={PR number, or none} resume-label={label} -->`
   - `phase`: the phase you were in when pausing (`plan`, `implement`, or `pr`; see "Phases" in [issue-to-pr.md](issue-to-pr.md))
@@ -110,7 +114,7 @@ Try another method if one fails, before concluding that a result is unavailable.
 - Changes beyond the scope of the issue
 - Reporting CI, reviews, or thread states as passed without retrieving them (see "Verification Rules" above)
 - Ending the implement phase without opening a PR or pausing (see "How the phase ends" in [phase-implement.md](phase-implement.md))
-- Ending any run with changes that are not committed and pushed
+- Ending any run with changes that are not committed and pushed, except a pause for a push that keeps failing (see "How the phase ends" in [phase-implement.md](phase-implement.md))
 
 ## When Handling Multiple Issues in Parallel
 - Do not touch any branch or PR other than the one for your assigned issue

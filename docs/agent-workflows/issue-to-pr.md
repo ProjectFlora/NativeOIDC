@@ -91,11 +91,12 @@ Check the following in order, skipping lines for phases this run does not handle
    - Has conflicts with the base branch
    - Meets the final-report criteria (step 7)
    → Follow [phase-pr.md](phase-pr.md) from step 6 (or go to step 7 if only the last condition applies)
-2. **Stalled work** (needs `plan` or `implement`, as below): the oldest open issue labeled `agent-in-progress` that has no open PR, and whose last activity is more than 2 hours old
-   - Last activity = the latest of: its last agent-marker comment, and the last commit on its issue branch `issue-{number}-*`
+2. **Stalled work** (needs `plan` or `implement`, as below): the oldest open issue labeled `agent-in-progress` that has no open PR, and whose claim has expired
+   - Expired: the latest claim comment that is not withdrawn has an `until` in the past, and no agent activity (agent-marker comment or commit on its issue branch `issue-{number}-*`) came after that time
+   - An issue with no claim comment (started before claims existed) is stalled when its last agent activity is more than 2 hours old
    - If it has a plan comment (needs `implement`): follow [phase-implement.md](phase-implement.md), continuing on the existing issue branch
    - If it has no plan comment (needs `plan`): follow [phase-plan.md](phase-plan.md). The flow is unknown here, so treat it as the split flow (`agent-plan-review` after the plan)
-   - First post an issue comment (with an agent marker) saying that the earlier run stalled and you are resuming it
+   - Claim it (see "Claiming an issue" below), and say in the claim comment that the earlier run stalled and you are resuming it. Keep the `flow` of the previous claim or plan comment
 3. **Implement phase** (needs `implement`): the oldest open issue labeled `agent-implement`
    → Follow [phase-implement.md](phase-implement.md)
 4. **End-to-end issue** (needs `plan` and `implement`): the oldest open issue labeled `agent-ready`
@@ -127,7 +128,16 @@ A final report can stop being true before I merge: a review arrives late, CI sta
 
 When resuming any issue, read the comments posted after your last agent-marker comment. Only comments identified as "Me" (see "Post Markers" in [common-rules.md](common-rules.md)) count as my answers or instructions. If there is none, treat the label change itself as "continue as is".
 
-Whenever you start working on a chosen issue, change its label to `agent-in-progress` first (to prevent duplicate work).
+Whenever you start working on a chosen issue, change its label to `agent-in-progress` first, then claim it.
+
+### Claiming an issue
+A claim keeps two runs from working on the same issue, and tells later runs whether the worker is still active. Plan and implement work in scheduled mode always runs under a claim.
+
+1. Post an issue comment starting with the claim marker (see "Post Markers" in [common-rules.md](common-rules.md)), with `until` set to 2 hours from now and the issue's `flow`
+2. Read the issue comments again. Among claim comments that are not withdrawn and were posted after the last expired claim, the one with the smallest comment ID wins
+3. If yours did not win, edit it to start with `<!-- agent-workflow:claim-withdrawn -->`, do no work on this issue, and continue with the next line of "Choosing a target"
+4. While you work, keep the claim alive: edit your claim comment to move `until` to 2 hours from now after each pushed plan step, and before any action you expect to take more than 30 minutes. If one action may take longer than 2 hours, set `until` far enough to cover it
+5. When the phase ends (PR opened, plan posted, or paused), the claim has done its job. Leave it as it is; the label now tells later runs what to do
 
 ### Pauses posted before the phase split
 Older `needs-input` markers have only `step` and `pr`, without `phase` or `resume-label`. Those issues were all in the end-to-end flow, and I resume them with `agent-ready`. When a target's last agent-marker comment is such a marker:
@@ -163,6 +173,7 @@ Use this both when you need a question or decision answered and when you stop ea
 | `pr` | `agent-in-progress` | `agent-in-progress` |
 
 - The flow is given by the label this run took the issue from: `agent-ready` is end-to-end; `agent-plan` and `agent-implement` are split
+  - A run that took the issue from `agent-in-progress` ("Stalled work") uses the `flow` of the latest claim or plan comment. If neither records a flow, use split, so that a plan approval is never skipped
 
 - Change the label from `agent-in-progress` to `agent-needs-input` and end the run
 
