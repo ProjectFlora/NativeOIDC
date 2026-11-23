@@ -881,10 +881,10 @@ The Swift examples in this guide are exercised at the following scope:
   prepared-session lifecycle entry points), the Keychain sketch (a second
   save under one account replaces the existing record, a failed deletion
   surfaces, and an absent record is reported as missing), the refresh/sign-out
-  guard (a refresh held before its persistence is released after sign-out and
-  its write is suppressed; a failing write injected through the guard's
-  `persistState` leaves a sign-out through its normal entry point free to
-  complete), and the authorization lifecycle (two overlapping authorizations:
+  guard (a refresh held on an active session is signed out once while
+  suspended, then released, and its write is suppressed; a failing write
+  injected through the guard's `persistState` leaves a sign-out through its
+  normal entry point free to complete), and the authorization lifecycle (two overlapping authorizations:
   the second is rejected; after a cancellation while the first discovery is in
   flight, an immediate retry is rejected while the slot stays claimed, a retry
   issued from the completion — inline on the main actor, not through a task

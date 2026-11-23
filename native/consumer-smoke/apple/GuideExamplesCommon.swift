@@ -394,6 +394,11 @@ private final class GuideScriptedTransport: NativeHttpTransport, @unchecked Send
     return _count
   }
 
+  /// The check installs an outcome here; `execute` records a success once a
+  /// held request is suspended and its continuation installed, so the check
+  /// can interpose work without racing the suspension.
+  var holdSignal: GuideOutcome?
+
   /// Suspends the next request it receives until `releaseHeldRequest()`
   /// runs, so the check can interleave other work with an in-flight request.
   func holdNextRequest() {
@@ -442,6 +447,7 @@ private final class GuideScriptedTransport: NativeHttpTransport, @unchecked Send
         lock.lock()
         _held = continuation
         lock.unlock()
+        holdSignal?.record(.success("held"))
       }
     }
 
@@ -771,9 +777,17 @@ private func checkRefreshSignOutInterleaving() async throws {
     }
   }
 
-  // A refresh that outlives sign-out must not write the deleted state back:
-  // hold a real refresh before its persistence, complete the sign-out, and
-  // only then release the refresh through the same persistState path.
+  // A refresh that outlives sign-out must not write the deleted state back.
+  // This runs on a fresh, active session: hold a real refresh before its
+  // persistence, sign the session out while the refresh is suspended, and
+  // only then release the refresh through the same persistState path — the
+  // suppressed write must come from this single sign-out. The check waits
+  // for the transport's held signal, which is published after the
+  // continuation is installed, so the release cannot be lost.
+  let heldSession = GuideSessionGuard()
+  try guideDeleteState(account: "native-oidc/state")
+  let heldSignal = GuideOutcome()
+  transport.holdSignal = heldSignal
   transport.holdNextRequest()
   let heldRefreshDone = GuideOutcome()
   let heldRefresh = Task {
@@ -781,16 +795,16 @@ private func checkRefreshSignOutInterleaving() async throws {
       state,
       configuration: configuration,
       transport: transport,
-      session: session
+      session: heldSession
     )
     heldRefreshDone.record(.success("released"))
   }
-  guard await guideWait(10, { transport.requestCount == 2 }) else {
+  guard await guideWait(10, { heldSignal.value != nil }) else {
     transport.releaseHeldRequest()
     heldRefresh.cancel()
-    fatalError("guide check: the held refresh never entered its token request")
+    fatalError("guide check: the held refresh never suspended before its persistence")
   }
-  try guideSignOut(session: session)
+  try guideSignOut(session: heldSession)
   transport.releaseHeldRequest()
   guard await guideWait(30, { heldRefreshDone.value != nil }) else {
     heldRefresh.cancel()
