@@ -91,6 +91,12 @@ struct AuthorizationInProgress: Error {}
     self.transport = transport
   }
 
+  // Internal seam: the guide's wrapper has no hook here; the lifecycle check
+  // installs one to observe the task entering the final serialization, so it
+  // can land a cancellation between the adapter success and the success
+  // report the way a host's `Task.cancel()` would.
+  var onStateSerialized: (@MainActor () -> Void)?
+
   /// Binds the loopback listener and opens the external browser. The
   /// completion handler reports the serialized state JSON (or `nil`) and
   /// any error. A call that arrives while an operation is in flight reports
@@ -142,6 +148,7 @@ struct AuthorizationInProgress: Error {}
           options: options,
           transport: transport
         )
+        onStateSerialized?()
         let stateJson = try await state.toJson()
         if inFlightGeneration == generation {
           activeTask = nil

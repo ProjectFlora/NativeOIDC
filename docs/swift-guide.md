@@ -129,11 +129,23 @@ let configuration = try configuration
 
 ### Authorization options
 
+The `redirectUri` must be the one for the platform the adapter runs on — the
+macOS adapter requires the loopback template and rejects anything else, while
+iOS/iPadOS uses the HTTPS associated domain. See
+[Platform callback setup](#platform-callback-setup):
+
 ```swift
+#if os(macOS)
+  // The macOS adapter binds an ephemeral port on this loopback template.
+  let redirectUri = "http://127.0.0.1/oauth/callback"
+#else
+  let redirectUri = "https://your-app.example/oidc/callback"
+#endif
+
 let options = FfiAuthorizationOptions(
     clientId: "native-public-client",
     // Must exactly match the redirect registered with the provider.
-    redirectUri: "https://your-app.example/oidc/callback",
+    redirectUri: redirectUri,
     scopes: ["openid", "profile"],
     // Optional pass-through for the authorization request and token exchange.
     additionalParameters: [FfiParameter(name: "prompt", value: "consent")],
@@ -303,6 +315,8 @@ import Security
 enum StateStorageError: Error {
     case update(OSStatus)
     case add(OSStatus)
+    case delete(OSStatus)
+    case read(OSStatus)
     case missing
 }
 
@@ -312,13 +326,14 @@ func saveState(_ json: String, account: String) throws {
         kSecAttrService: "com.example.app",
         kSecAttrAccount: account,
     ]
-    var attributes = query
-    attributes[kSecValueData] = Data(json.utf8)
 
     // Update the existing item in place, and only add when it does not
     // exist: deleting first would lose the previous session if the write
-    // fails partway through.
-    switch SecItemUpdate(query as CFDictionary, attributes as CFDictionary) {
+    // fails partway through. The update dictionary carries only the value
+    // being replaced — `SecItemUpdate` copies the attributes it is given, so
+    // the identifying attributes stay out of it.
+    let update: [CFString: Any] = [kSecValueData: Data(json.utf8)]
+    switch SecItemUpdate(query as CFDictionary, update as CFDictionary) {
     case errSecSuccess:
         return
     case errSecItemNotFound:
@@ -326,6 +341,8 @@ func saveState(_ json: String, account: String) throws {
     case let status:
         throw StateStorageError.update(status)
     }
+    var attributes = query
+    attributes[kSecValueData] = Data(json.utf8)
     let status = SecItemAdd(attributes as CFDictionary, nil)
     guard status == errSecSuccess else { throw StateStorageError.add(status) }
 }
@@ -341,7 +358,13 @@ func loadState(account: String) throws -> String {
     var item: CFTypeRef?
     let status = SecItemCopyMatching(query as CFDictionary, &item)
     guard status == errSecSuccess, let data = item as? Data else {
-        throw StateStorageError.missing
+        // Distinguish an absent record (first launch, or after sign-out)
+        // from a storage failure: only errSecItemNotFound means there is no
+        // state to restore.
+        if status == errSecItemNotFound {
+            throw StateStorageError.missing
+        }
+        throw StateStorageError.read(status)
     }
     return String(decoding: data, as: UTF8.self)
 }
@@ -482,12 +505,25 @@ try await revoke(
 ```
 
 Local sign-out is independent of both. Mark the session signed out in the
-guard shared with the refresh write, then clear the stored state (for example
-`SecItemDelete` for the item above) and drop in-memory references, and run it
-even if provider cleanup fails or is cancelled:
+guard shared with the refresh write, then clear the stored state and drop
+in-memory references, and run it even if provider cleanup fails or is
+cancelled. Check the deletion status and surface a failure: a deletion that
+is not verified as completed must not be reported as a completed sign-out.
 
 ```swift
 session.markSignedOut()
+
+let query: [CFString: Any] = [
+    kSecClass: kSecClassGenericPassword,
+    kSecAttrService: "com.example.app",
+    kSecAttrAccount: "native-oidc/state",
+]
+switch SecItemDelete(query as CFDictionary) {
+case errSecSuccess, errSecItemNotFound:
+    break
+case let status:
+    throw StateStorageError.delete(status)
+}
 ```
 
 See
@@ -499,7 +535,13 @@ See
 let registered = try await registerPublicClient(
     configuration: configuration, // requires a registration endpoint
     options: FfiRegistrationOptions(
-        redirectUris: ["https://your-app.example/oidc/callback"],
+        // The platform redirects from the options example above: the HTTPS
+        // associated domain for iOS/iPadOS and the loopback template for
+        // macOS. Register the ones the client supports.
+        redirectUris: [
+            "https://your-app.example/oidc/callback",
+            "http://127.0.0.1/oauth/callback",
+        ],
         clientName: "Example App",
         initialAccessToken: nil // only for a protected registration endpoint
     ),
@@ -574,6 +616,12 @@ lifecycle handling belong:
   is rejected rather than racing the still-busy adapter; the slot is
   released when the operation ends, before its completion handler runs, so a
   retry issued directly from the completion can claim it.
+- A cancellation that lands after the operation has already succeeded —
+  while the task is still serializing the state for the completion — cannot
+  be undone: the generated `toJson()` has no task-cancellation handler, so
+  the completion can still report the serialized state. A host that cancelled
+  in that window should treat the report as a completed sign-in it chose to
+  abandon.
 
 ### iOS/iPadOS wrapper
 
@@ -619,7 +667,11 @@ struct AuthorizationInProgress: Error {}
     /// handler reports the serialized state JSON (or `nil`) and any error.
     /// A call that arrives while an operation is in flight reports
     /// `AuthorizationInProgress` — including one that arrives right after a
-    /// `cancel()`, while the cancelled operation is still unwinding.
+    /// `cancel()`, while the cancelled operation is still unwinding. A
+    /// cancellation that lands while the task is serializing the
+    /// already-exchanged state is not undone — the generated `toJson()` has
+    /// no task-cancellation handler — so the completion can still report
+    /// the state.
     @objc public func authorize(
         issuer: String,
         clientId: String,
@@ -726,7 +778,11 @@ struct AuthorizationInProgress: Error {}
     /// completion handler reports the serialized state JSON (or `nil`) and
     /// any error. A call that arrives while an operation is in flight reports
     /// `AuthorizationInProgress` — including one that arrives right after a
-    /// `cancel()`, while the cancelled operation is still unwinding.
+    /// `cancel()`, while the cancelled operation is still unwinding. A
+    /// cancellation that lands while the task is serializing the
+    /// already-exchanged state is not undone — the generated `toJson()` has
+    /// no task-cancellation handler — so the completion can still report
+    /// the state.
     @objc public func authorize(
         issuer: String,
         clientId: String,
@@ -822,13 +878,20 @@ The Swift examples in this guide are exercised at the following scope:
   in-flight discovery ended by cancellation, a provider-rejected refresh,
   malformed stored state, the post-logout callback with a registered redirect
   (a matching state validates, a mismatched one fails; both through the
-  prepared-session lifecycle entry points), the refresh/sign-out guard
-  (a post-sign-out refresh write is suppressed, and a throwing critical
-  section releases the guard's lock), and the authorization lifecycle (two
-  overlapping authorizations: the second is rejected; after a cancellation
-  while the first discovery is in flight, an immediate retry is rejected
-  while the slot stays claimed, a retry from the completion is accepted, the
-  first ends cancelled, and the slot is released when the operation ends).
+  prepared-session lifecycle entry points), the Keychain sketch (a second
+  save under one account replaces the existing record, a failed deletion
+  surfaces, and an absent record is reported as missing), the refresh/sign-out
+  guard (a refresh held before its persistence is released after sign-out and
+  its write is suppressed; a failing write injected through the guard's
+  `persistState` leaves a sign-out through its normal entry point free to
+  complete), and the authorization lifecycle (two overlapping authorizations:
+  the second is rejected; after a cancellation while the first discovery is in
+  flight, an immediate retry is rejected while the slot stays claimed, a retry
+  issued from the completion — inline on the main actor, not through a task
+  hop — is accepted, the first ends cancelled, and the slot is released when
+  the operation ends; a scripted success flow in which a cancellation lands as
+  the task enters the final serialization still reports the serialized state,
+  because the generated `toJson()` has no task-cancellation handler).
   The
   authorization, callback-exchange, and cancellation paths are additionally
   exercised by the repository's Swift test suite

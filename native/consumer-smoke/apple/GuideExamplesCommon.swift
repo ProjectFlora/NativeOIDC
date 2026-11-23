@@ -65,10 +65,18 @@ func guideExplicitConfiguration() throws -> FfiServiceConfiguration {
 
 /// The guide's authorization-options example.
 func guideAuthorizationOptions() -> FfiAuthorizationOptions {
-  FfiAuthorizationOptions(
+  // The redirect must be the one for the platform the adapter runs on: the
+  // macOS adapter requires the loopback template and rejects anything else,
+  // while iOS/iPadOS uses the HTTPS associated domain.
+  #if os(macOS)
+    let redirectUri = "http://127.0.0.1/oauth/callback"
+  #else
+    let redirectUri = "https://your-app.example/oidc/callback"
+  #endif
+  return FfiAuthorizationOptions(
     clientId: "native-public-client",
     // Must exactly match the redirect registered with the provider.
-    redirectUri: "https://your-app.example/oidc/callback",
+    redirectUri: redirectUri,
     scopes: ["openid", "profile"],
     // Optional pass-through for the authorization request and token exchange.
     additionalParameters: [FfiParameter(name: "prompt", value: "consent")],
@@ -80,6 +88,8 @@ func guideAuthorizationOptions() -> FfiAuthorizationOptions {
 enum GuideStateStorageError: Error {
   case update(OSStatus)
   case add(OSStatus)
+  case delete(OSStatus)
+  case read(OSStatus)
   case missing
 }
 
@@ -89,13 +99,14 @@ func guideSaveState(_ json: String, account: String) throws {
     kSecAttrService: "com.example.app",
     kSecAttrAccount: account,
   ]
-  var attributes = query
-  attributes[kSecValueData] = Data(json.utf8)
 
   // Update the existing item in place, and only add when it does not exist:
   // deleting first would lose the previous session if the write fails
-  // partway through.
-  switch SecItemUpdate(query as CFDictionary, attributes as CFDictionary) {
+  // partway through. The update dictionary carries only the value being
+  // replaced — `SecItemUpdate` copies the attributes it is given, so the
+  // identifying attributes stay out of it.
+  let update: [CFString: Any] = [kSecValueData: Data(json.utf8)]
+  switch SecItemUpdate(query as CFDictionary, update as CFDictionary) {
   case errSecSuccess:
     return
   case errSecItemNotFound:
@@ -103,6 +114,8 @@ func guideSaveState(_ json: String, account: String) throws {
   case let status:
     throw GuideStateStorageError.update(status)
   }
+  var attributes = query
+  attributes[kSecValueData] = Data(json.utf8)
   let status = SecItemAdd(attributes as CFDictionary, nil)
   guard status == errSecSuccess else { throw GuideStateStorageError.add(status) }
 }
@@ -118,19 +131,33 @@ func guideLoadState(account: String) throws -> String {
   var item: CFTypeRef?
   let status = SecItemCopyMatching(query as CFDictionary, &item)
   guard status == errSecSuccess, let data = item as? Data else {
-    throw GuideStateStorageError.missing
+    // Distinguish an absent record (first launch, or after sign-out) from a
+    // storage failure: only errSecItemNotFound means there is no state to
+    // restore.
+    if status == errSecItemNotFound {
+      throw GuideStateStorageError.missing
+    }
+    throw GuideStateStorageError.read(status)
   }
   return String(decoding: data, as: UTF8.self)
 }
 
 /// The guide's local sign-out deletion of the stored state.
-func guideDeleteState(account: String) {
+func guideDeleteState(account: String) throws {
   let query: [CFString: Any] = [
     kSecClass: kSecClassGenericPassword,
     kSecAttrService: "com.example.app",
     kSecAttrAccount: account,
   ]
-  SecItemDelete(query as CFDictionary)
+  // Accept only the two expected outcomes — the record deleted, or already
+  // gone — and surface any other status: a failed deletion must not be
+  // reported as a completed sign-out.
+  switch SecItemDelete(query as CFDictionary) {
+  case errSecSuccess, errSecItemNotFound:
+    return
+  case let status:
+    throw GuideStateStorageError.delete(status)
+  }
 }
 
 /// The guide's "Secure state persistence" round trip.
@@ -163,12 +190,21 @@ final class GuideSessionGuard {
     withLock { signedOut }
   }
 
+  // Internal seam: the guide's guard writes through the Keychain sketch; the
+  // checks substitute a scripted write while keeping the same flag check and
+  // lock path.
+  var save: ((_ stateJson: String, _ account: String) throws -> Void)?
+
   /// Persists the state unless the session has been signed out: the flag
   /// check and the write run under one lock hold.
   func persistState(_ stateJson: String, account: String) throws {
     try withLock {
       guard !signedOut else { return }
-      try guideSaveState(stateJson, account: account)
+      if let save {
+        try save(stateJson, account)
+      } else {
+        try guideSaveState(stateJson, account: account)
+      }
     }
   }
 
@@ -180,10 +216,10 @@ final class GuideSessionGuard {
 }
 
 /// The guide's local sign-out: mark the session signed out in the shared
-/// guard, then clear the stored state.
+/// guard, then clear the stored state, checking the deletion status.
 func guideSignOut(session: GuideSessionGuard) throws {
   session.markSignedOut()
-  guideDeleteState(account: "native-oidc/state")
+  try guideDeleteState(account: "native-oidc/state")
 }
 
 /// The guide's refresh example, including re-persistence of the updated
@@ -286,7 +322,13 @@ func guideRegisterClient(
   try await registerPublicClient(
     configuration: configuration, // requires a registration endpoint
     options: FfiRegistrationOptions(
-      redirectUris: ["https://your-app.example/oidc/callback"],
+      // The platform redirects from the authorization-options example above:
+      // the HTTPS associated domain for iOS/iPadOS and the loopback template
+      // for macOS. Register the ones the client supports.
+      redirectUris: [
+        "https://your-app.example/oidc/callback",
+        "http://127.0.0.1/oauth/callback",
+      ],
       clientName: "Example App",
       initialAccessToken: nil // only for a protected registration endpoint
     ),
@@ -323,21 +365,25 @@ func guideCategorizeError(_ error: FfiError) -> String {
 private let guideStateJson =
   #"{"token_response":{"access_token":"old","token_type":"Bearer","refresh_token":"refresh"}}"#
 
-/// A transport that returns a fixed response or throws a fixed error.
+/// A transport that returns queued responses in request order or throws a
+/// queued error, and can suspend a request until the check releases it.
 private final class GuideScriptedTransport: NativeHttpTransport, @unchecked Sendable {
   private let lock = NSLock()
-  private var _result: Result<FfiHttpResponse, any Error>?
+  private var _responses: [Result<FfiHttpResponse, any Error>] = []
+  private var _holdNext = false
+  private var _held: CheckedContinuation<Void, Never>?
   private var _count = 0
 
-  var result: Result<FfiHttpResponse, any Error>? {
+  /// The responses `execute` returns, in request order.
+  var responses: [Result<FfiHttpResponse, any Error>] {
     get {
       lock.lock()
       defer { lock.unlock() }
-      return _result
+      return _responses
     }
     set {
       lock.lock()
-      _result = newValue
+      _responses = newValue
       lock.unlock()
     }
   }
@@ -348,10 +394,41 @@ private final class GuideScriptedTransport: NativeHttpTransport, @unchecked Send
     return _count
   }
 
+  /// Suspends the next request it receives until `releaseHeldRequest()`
+  /// runs, so the check can interleave other work with an in-flight request.
+  func holdNextRequest() {
+    lock.lock()
+    defer { lock.unlock() }
+    _holdNext = true
+  }
+
+  /// Releases a request suspended by `holdNextRequest()`.
+  func releaseHeldRequest() {
+    lock.lock()
+    let held = _held
+    _held = nil
+    lock.unlock()
+    held?.resume()
+  }
+
   private func countRequest() {
     lock.lock()
     _count += 1
     lock.unlock()
+  }
+
+  private func takeNextResponse() -> (hold: Bool, response: Result<FfiHttpResponse, any Error>?) {
+    lock.lock()
+    defer { lock.unlock() }
+    let hold = _holdNext
+    if hold {
+      _holdNext = false
+    }
+    let response = _responses.first
+    if !_responses.isEmpty {
+      _responses.removeFirst()
+    }
+    return (hold, response)
   }
 
   func execute(
@@ -359,7 +436,16 @@ private final class GuideScriptedTransport: NativeHttpTransport, @unchecked Send
     cancellation: FfiCancellationHandle
   ) async throws -> FfiHttpResponse {
     countRequest()
-    guard let result = self.result else {
+    let (hold, result) = takeNextResponse()
+    if hold {
+      await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        lock.lock()
+        _held = continuation
+        lock.unlock()
+      }
+    }
+
+    guard let result else {
       fatalError("guide check: no scripted response configured")
     }
     switch result {
@@ -390,14 +476,18 @@ private final class GuideBlockingTransport: NativeHttpTransport, @unchecked Send
     return _requestCount
   }
 
-  func execute(
-    request: FfiHttpRequest,
-    cancellation: FfiCancellationHandle
-  ) async throws -> FfiHttpResponse {
+  private func noteEntry() {
     lock.lock()
     _entered = true
     _requestCount += 1
     lock.unlock()
+  }
+
+  func execute(
+    request: FfiHttpRequest,
+    cancellation: FfiCancellationHandle
+  ) async throws -> FfiHttpResponse {
+    noteEntry()
     await cancellation.cancelled()
     throw FfiError.Cancelled
   }
@@ -465,12 +555,14 @@ private func checkStateUpdate() async throws {
     tokenEndpoint: "https://idp.example/token"
   )
   let transport = GuideScriptedTransport()
-  transport.result = .success(
-    guideJSONResponse(
-      200,
-      #"{"access_token":"new","token_type":"Bearer","expires_in":3600,"refresh_token":"rotated","scope":"profile"}"#
+  transport.responses = [
+    .success(
+      guideJSONResponse(
+        200,
+        #"{"access_token":"new","token_type":"Bearer","expires_in":3600,"refresh_token":"rotated","scope":"profile"}"#
+      )
     )
-  )
+  ]
 
   try await state.refresh(
     configuration: configuration,
@@ -549,9 +641,9 @@ private func checkErrorBranches() async throws {
 
   // Provider rejection surfaces as .AuthorizationServer with the OAuth code.
   let transport = GuideScriptedTransport()
-  transport.result = .success(
-    guideJSONResponse(400, #"{"error":"invalid_grant","error_description":"stale"}"#)
-  )
+  transport.responses = [
+    .success(guideJSONResponse(400, #"{"error":"invalid_grant","error_description":"stale"}"#))
+  ]
   do {
     try await state.refresh(
       configuration: configuration,
@@ -616,23 +708,41 @@ private func checkErrorBranches() async throws {
 }
 
 private func checkRefreshSignOutInterleaving() async throws {
-  // The guide's refresh write and local sign-out share one session guard:
-  // sign-out invalidates a pending refresh write, and a throwing critical
-  // section releases the guard's lock.
+  // The guide's Keychain sketch, refresh write, and local sign-out share one
+  // session guard: sign-out invalidates a pending refresh write, and a
+  // failing write releases the guard's lock.
   let state = try FfiAuthenticationState.fromJson(serialized: guideStateJson)
   let configuration = try FfiServiceConfiguration(
     authorizationEndpoint: "https://idp.example/authorize",
     tokenEndpoint: "https://idp.example/token"
   )
   let transport = GuideScriptedTransport()
-  transport.result = .success(
-    guideJSONResponse(
-      200,
-      #"{"access_token":"new","token_type":"Bearer","refresh_token":"rotated"}"#
-    )
-  )
+  transport.responses = [
+    .success(
+      guideJSONResponse(
+        200,
+        #"{"access_token":"new","token_type":"Bearer","refresh_token":"rotated"}"#
+      )
+    ),
+    .success(
+      guideJSONResponse(
+        200,
+        #"{"access_token":"new","token_type":"Bearer","refresh_token":"rotated"}"#
+      )
+    ),
+  ]
   let session = GuideSessionGuard()
-  guideDeleteState(account: "native-oidc/state")
+  try guideDeleteState(account: "native-oidc/state")
+
+  // Save twice under one account and confirm the second value is restored:
+  // the first save creates the record, the second must replace the existing
+  // record in place through `SecItemUpdate`.
+  try guideSaveState("first-save", account: "native-oidc/state")
+  try guideSaveState("second-save", account: "native-oidc/state")
+  guard (try? guideLoadState(account: "native-oidc/state")) == "second-save" else {
+    fatalError("guide check: a second save did not replace the existing Keychain record")
+  }
+  print("guide check ok: Keychain save (second save replaces the existing record)")
 
   // Refresh succeeds and persists the updated state through the guard.
   try await guideRefresh(
@@ -646,7 +756,8 @@ private func checkRefreshSignOutInterleaving() async throws {
     fatalError("guide check: the session was signed out before sign-out ran")
   }
 
-  // Sign-out: the flag and the deletion, through the same entry points.
+  // Sign-out: the flag and the checked deletion, through the same entry
+  // points.
   try guideSignOut(session: session)
   guard session.isSignedOut else {
     fatalError("guide check: sign-out did not set the flag")
@@ -660,13 +771,36 @@ private func checkRefreshSignOutInterleaving() async throws {
     }
   }
 
-  // A refresh that outlives sign-out must not write the deleted state back.
-  try await guideRefresh(
-    state,
-    configuration: configuration,
-    transport: transport,
-    session: session
-  )
+  // A refresh that outlives sign-out must not write the deleted state back:
+  // hold a real refresh before its persistence, complete the sign-out, and
+  // only then release the refresh through the same persistState path.
+  transport.holdNextRequest()
+  let heldRefreshDone = GuideOutcome()
+  let heldRefresh = Task {
+    try await guideRefresh(
+      state,
+      configuration: configuration,
+      transport: transport,
+      session: session
+    )
+    heldRefreshDone.record(.success("released"))
+  }
+  guard await guideWait(10, { transport.requestCount == 2 }) else {
+    transport.releaseHeldRequest()
+    heldRefresh.cancel()
+    fatalError("guide check: the held refresh never entered its token request")
+  }
+  try guideSignOut(session: session)
+  transport.releaseHeldRequest()
+  guard await guideWait(30, { heldRefreshDone.value != nil }) else {
+    heldRefresh.cancel()
+    fatalError("guide check: the released refresh did not finish after sign-out")
+  }
+  do {
+    try await heldRefresh.value
+  } catch {
+    fatalError("guide check: the released refresh threw: \(error)")
+  }
   do {
     _ = try guideLoadState(account: "native-oidc/state")
     fatalError("guide check: a post-sign-out refresh wrote the state back")
@@ -677,22 +811,26 @@ private func checkRefreshSignOutInterleaving() async throws {
   }
   print("guide check ok: refresh/sign-out interleaving (post-sign-out write suppressed)")
 
-  // A throwing critical section must release the lock (defer), so a
-  // sign-out immediately after must complete instead of blocking on it.
+  // A failing write through persistState must release the guard's lock, so a
+  // sign-out through its normal entry point completes instead of blocking on
+  // the failed write. This runs on a fresh session that has not signed out,
+  // so the write is attempted (and fails) before the sign-out.
+  let freshSession = GuideSessionGuard()
+  freshSession.save = { _, _ in throw GuideStateStorageError.add(errSecAuthFailed) }
   do {
-    _ = try session.withLock { throw GuideStateStorageError.missing }
-    fatalError("guide check: the scripted write unexpectedly succeeded")
+    try freshSession.persistState("failing-save", account: "native-oidc/state")
+    fatalError("guide check: the failing write unexpectedly succeeded")
   } catch {}
   let signOutDone = GuideOutcome()
   let signOutTask = Task {
-    session.markSignedOut()
+    try guideSignOut(session: freshSession)
     signOutDone.record(.success("signed out"))
   }
   guard await guideWait(10, { signOutDone.value != nil }) else {
     signOutTask.cancel()
-    fatalError("guide check: sign-out did not complete after a throwing write")
+    fatalError("guide check: sign-out did not complete after a failing write")
   }
-  print("guide check ok: throwing write released the session lock")
+  print("guide check ok: failing write through persistState left sign-out free to complete")
 }
 
 #if os(macOS)
@@ -733,9 +871,11 @@ private func checkAuthorizationLifecycle() async throws {
     }
     // A retry issued directly from the completion must be accepted: the
     // wrapper releases the slot before calling the completion handler. The
-    // completion is a `@Sendable` closure, so hop to the main actor for the
-    // retry — it runs while the slot is already free.
-    Task { @MainActor in
+    // completion is invoked on the main actor, so retry synchronously
+    // through `MainActor.assumeIsolated` — a `Task { @MainActor in }` hop
+    // would yield the main-actor job first, and the check would pass even if
+    // the slot were released only after the completion call.
+    MainActor.assumeIsolated {
       wrapper.authorize(
         issuer: "https://idp.example",
         clientId: "native-public-client",
@@ -867,6 +1007,88 @@ private func checkAuthorizationLifecycle() async throws {
   }
   print(
     "guide check ok: authorization lifecycle (overlap and post-cancel retries rejected, completion retry accepted, slot released when the operation ends)"
+  )
+
+  // A scripted success flow: discovery, the loopback callback, and the code
+  // exchange all complete, and the cancellation lands as the task enters the
+  // final serialization — after the adapter has returned, before the success
+  // report. The generated `toJson()` has no task-cancellation handler, so
+  // the operation still reports the serialized state.
+  let scriptedTransport = GuideScriptedTransport()
+  scriptedTransport.responses = [
+    .success(
+      guideJSONResponse(
+        200,
+        #"{"issuer":"https://idp.example/","authorization_endpoint":"https://idp.example/authorize","token_endpoint":"https://idp.example/token"}"#
+      )
+    ),
+    .success(
+      guideJSONResponse(
+        200,
+        #"{"access_token":"new","token_type":"Bearer","refresh_token":"rotated"}"#
+      )
+    ),
+  ]
+  let successWrapper = GuideMacOSObjCService(
+    adapter: MacOSAuthorizationAdapter { authorizationURL in
+      // Simulates the external browser: the authorization URL it would open
+      // names the loopback callback and the generated state; visit the
+      // callback with them, as the provider's redirect would.
+      let components = URLComponents(url: authorizationURL, resolvingAgainstBaseURL: false)
+      let queryItems = components?.queryItems ?? []
+      guard let redirect = queryItems.first(where: { $0.name == "redirect_uri" })?.value,
+        let stateParameter = queryItems.first(where: { $0.name == "state" })?.value,
+        var callback = URLComponents(string: redirect)
+      else {
+        throw URLError(.badURL)
+      }
+      callback.queryItems = [
+        URLQueryItem(name: "code", value: "scripted-authorization-code"),
+        URLQueryItem(name: "state", value: stateParameter),
+      ]
+      let (_, response) = try await URLSession.shared.data(from: callback.url!)
+      guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+        throw URLError(.badServerResponse)
+      }
+    },
+    transport: scriptedTransport
+  )
+  let successOutcome = GuideOutcome()
+  successWrapper.onStateSerialized = {
+    // The cancellation lands as the task enters the final serialization.
+    successWrapper.cancel()
+  }
+  successWrapper.authorize(
+    issuer: "https://idp.example/",
+    clientId: "native-public-client",
+    redirectUri: "http://127.0.0.1/oauth/callback",
+    scopes: ["profile"]
+  ) { stateJson, error in
+    if let stateJson {
+      successOutcome.record(.success(stateJson))
+    } else if let error, let ffiError = error as? FfiError {
+      successOutcome.record(.failure(ffiError))
+    } else if let error {
+      successOutcome.record(.failure(FfiError.Internal("unexpected error: \(error)")))
+    }
+  }
+  guard await guideWait(30, { successOutcome.value != nil }) else {
+    successWrapper.cancel()
+    fatalError("guide check: the scripted authorization flow did not complete")
+  }
+  guard case .success(let stateJson)? = successOutcome.value else {
+    fatalError(
+      "guide check: a cancellation during serialization should still deliver the state, got \(String(describing: successOutcome.value))"
+    )
+  }
+  // The delivered JSON is the exchanged state.
+  let delivered = try FfiAuthenticationState.fromJson(serialized: stateJson)
+  let deliveredTokens = await delivered.tokenResponse()
+  guard deliveredTokens.accessToken == "new" else {
+    fatalError("guide check: the delivered state was not the exchanged state")
+  }
+  print(
+    "guide check ok: cancellation during serialization still reports the state (toJson has no task-cancellation handler)"
   )
 }
 #endif
