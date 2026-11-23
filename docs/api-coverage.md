@@ -172,11 +172,11 @@ Run the affected commands and record the commit/run URL when updating a guide.
 
 | Operation group | Explanation / existing example | Verification source | Remaining documentation |
 | --- | --- | --- | --- |
-| Configuration, authorize, callback, exchange, nonce | [Shared guide](user-guide.md), [Rust example](../examples/manual_authorization.rs), [native notes](../README.md#native-bindings) | [Protocol integration](../tests/protocol_integration.rs), core/FFI unit tests, native flow scripts below | Complete Swift/Kotlin/C++/.NET examples: #85–#88 |
-| Tokens, expiry, save/restore, refresh | [State lifecycle](user-guide.md#save-restore-and-refresh), [Windows JSON example](../native/windows/README.md#token-refresh) | Core/FFI state and refresh unit tests; Windows consumer fixtures (C++ and .NET refresh success against a local mock provider) | Platform secure-storage and refresh examples: #85–#88 |
-| End-session, revoke, local deletion | [Logout policy](user-guide.md#logout-revocation-and-local-deletion), [Windows examples](../native/windows/README.md#end-session) | Core/FFI and Windows unit tests; Windows consumer fixtures (C++ and .NET revoke success against a local mock provider; end-session error paths only) | Swift/Kotlin browser/callback examples; complete language examples: #85–#88 |
-| Registration and additional parameters | [API reference entry points](README.md#api-reference), core/FFI source | Protocol integration and core/FFI unit tests | Swift/Kotlin examples: #85/#86; Windows limit: #87/#88 |
-| Cancellation, errors, transport | [Shared error guide](user-guide.md#cancellation-timeouts-and-errors), [Windows contract](windows-api.md) | Core/FFI unit tests, native lifecycle/transport tests | Direct-operation cancellation and language error examples: #85–#88 |
+| Configuration, authorize, callback, exchange, nonce | [Shared guide](user-guide.md), [Rust example](../examples/manual_authorization.rs), [native notes](../README.md#native-bindings) | [Protocol integration](../tests/protocol_integration.rs), core/FFI unit tests, native flow scripts below | Kotlin: [guide](kotlin-guide.md#3-authorization-tokens-and-expiry); complete Swift/C++/.NET examples: #85, #87, #88 |
+| Tokens, expiry, save/restore, refresh | [State lifecycle](user-guide.md#save-restore-and-refresh), [Windows JSON example](../native/windows/README.md#token-refresh) | Core/FFI state and refresh unit tests; Windows consumer fixtures (C++ and .NET refresh success against a local mock provider) | Kotlin: [guide](kotlin-guide.md#4-secure-persistence-and-restoration); platform secure-storage and refresh examples: #85, #87, #88 |
+| End-session, revoke, local deletion | [Logout policy](user-guide.md#logout-revocation-and-local-deletion), [Windows examples](../native/windows/README.md#end-session) | Core/FFI and Windows unit tests; Windows consumer fixtures (C++ and .NET revoke success against a local mock provider; end-session error paths only) | Kotlin: [guide](kotlin-guide.md#6-end-session-revocation-and-local-sign-out); Swift browser/callback examples; complete language examples: #85, #87, #88 |
+| Registration and additional parameters | [API reference entry points](README.md#api-reference), core/FFI source | Protocol integration and core/FFI unit tests | Kotlin: [guide](kotlin-guide.md#7-dynamic-registration-and-additional-parameters); Swift examples: #85; Windows limit: #87/#88 |
+| Cancellation, errors, transport | [Shared error guide](user-guide.md#cancellation-timeouts-and-errors), [Windows contract](windows-api.md) | Core/FFI unit tests, native lifecycle/transport tests | Kotlin: [guide](kotlin-guide.md#8-cancellation-errors-and-lifecycle); direct-operation cancellation and language error examples: #85, #87, #88 |
 | Installation and public binding calls | [Language entry points](README.md) | [Consumer fixtures](../native/consumer-smoke), release consumer scripts | Full guide and API coverage is broader than consumer smoke; packaging: #89 |
 
 Repository checks:
@@ -201,6 +201,9 @@ Platform checks require their host SDKs and tools:
   a fresh local mock provider (`native/consumer-smoke/windows/mock-provider`),
   which checks the requests it receives. Windows unit tests additionally
   exercise mock callback and protocol behavior.
+
+The Kotlin guide's examples run in the Android consumer fixture's
+`GuideExamplesTest`; see [its verification section](kotlin-guide.md#9-verification-coverage-and-known-limits).
 
 Consumer fixtures check only their implemented scenarios. They do not prove
 every operation in this table, mobile real-device execution, or live IdP
