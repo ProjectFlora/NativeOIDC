@@ -75,6 +75,7 @@ The Android adapter lives in `net.projectflora.nativeoidc`; the generated
 UniFFI API lives in `uniffi.native_oidc`:
 
 ```kotlin
+import android.os.Build
 import net.projectflora.nativeoidc.AndroidAuthorizationAdapter
 import net.projectflora.nativeoidc.AndroidAuthorizationAdapterException
 import net.projectflora.nativeoidc.AndroidRedirectConfiguration
@@ -90,6 +91,9 @@ import uniffi.native_oidc.FfiServiceConfiguration
 import uniffi.native_oidc.beginEndSession
 import uniffi.native_oidc.registerPublicClient
 import uniffi.native_oidc.revoke
+// For the timeout example in section 8:
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.time.Duration.Companion.minutes
 ```
 
 Generated objects such as `FfiServiceConfiguration` and
@@ -474,13 +478,14 @@ they surface differently:
   wait and core request, and `authorize` throws `FfiException.Cancelled`.
 
 Launch authorization in a scope tied to the UI (for example
-`lifecycleScope`). The library sets no timeout; apply your own:
+`lifecycleScope`). The library sets no timeout; apply your own.
+`withTimeoutOrNull` returns `null` when its own timeout expires and still
+propagates cancellation from the caller, including a caller's shorter
+timeout:
 
 ```kotlin
 val state: FfiAuthenticationState? = try {
-    withTimeout(5.minutes) { signIn(activity, configuration) }
-} catch (error: TimeoutCancellationException) {
-    null // the host's timeout policy expired
+    withTimeoutOrNull(5.minutes) { signIn(activity, configuration) } // null: this timeout expired
 } catch (error: FfiException.Cancelled) {
     null // adapter.cancel() was called
 }

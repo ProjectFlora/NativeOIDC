@@ -8,10 +8,9 @@ import android.security.keystore.KeyProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.future.future
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import net.projectflora.nativeoidc.AndroidAuthorizationAdapter
 import net.projectflora.nativeoidc.AndroidAuthorizationAdapterException
 import net.projectflora.nativeoidc.AndroidRedirectConfiguration
@@ -469,9 +468,7 @@ private suspend fun guideSignInWithTimeout(
     configuration: FfiServiceConfiguration,
 ): FfiAuthenticationState? =
     try {
-        withTimeout(5.minutes) { guideSignIn(activity, configuration) }
-    } catch (error: TimeoutCancellationException) {
-        null
+        withTimeoutOrNull(5.minutes) { guideSignIn(activity, configuration) }
     } catch (error: FfiException.Cancelled) {
         null
     }
