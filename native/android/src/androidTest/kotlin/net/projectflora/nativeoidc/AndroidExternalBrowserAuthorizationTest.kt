@@ -147,11 +147,18 @@ class AndroidExternalBrowserAuthorizationTest {
     private fun prepareChrome(device: UiDevice) {
         // Android 13+ asks for Chrome's notification permission in a system dialog
         // that covers the page. Grant it up front so the dialog never appears.
+        // Android 13+ asks for Chrome's notification permission in a system dialog
+        // that covers the page. Grant it up front so the dialog never appears.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             device.executeShellCommand("pm grant com.android.chrome android.permission.POST_NOTIFICATIONS")
         }
+        // Stop and disable the Play Store to prevent it from appearing on first boot and
+        // covering the Chrome Custom Tab during the authorization flow (#215).
+        device.executeShellCommand("am force-stop com.android.vending")
+        device.executeShellCommand("pm disable-user com.android.vending")
         device.executeShellCommand("am start -a android.intent.action.VIEW -d about:blank -p com.android.chrome")
         assertTrue(
+
             "Chrome did not open before the authorization flow",
             device.wait(Until.hasObject(By.pkg("com.android.chrome")), 20_000),
         )
