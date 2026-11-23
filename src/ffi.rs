@@ -5,10 +5,10 @@ use http::{header::HeaderName, HeaderMap, HeaderValue, StatusCode};
 use url::Url;
 
 use crate::{
-    parameters::are_parameter_names_unique, revoke_token, AuthError, AuthenticationState, AuthorizationRequest, AuthorizationResponse,
-    AuthorizationSession, CancellationHandle, ClientRegistrationRequest, EndSessionRequest,
-    HttpRequest, HttpResponse, HttpTransport, Result, RevocationTokenType, ServiceConfiguration,
-    TokenResponse,
+    parameters::are_parameter_names_unique, revoke_token, AuthError, AuthenticationState,
+    AuthorizationRequest, AuthorizationResponse, AuthorizationSession, CancellationHandle,
+    ClientRegistrationRequest, EndSessionRequest, HttpRequest, HttpResponse, HttpTransport, Result,
+    RevocationTokenType, ServiceConfiguration, TokenResponse,
 };
 
 /// Errors exposed to Swift and Kotlin callers.

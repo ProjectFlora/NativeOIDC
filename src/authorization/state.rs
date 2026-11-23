@@ -11,8 +11,7 @@ use super::{
     ServiceConfiguration,
 };
 use crate::{
-    id_token::validate_id_token_if_present,
-    AuthError, CancellationHandle, HttpTransport, Result,
+    id_token::validate_id_token_if_present, AuthError, CancellationHandle, HttpTransport, Result,
 };
 
 #[derive(Serialize, Deserialize)]
