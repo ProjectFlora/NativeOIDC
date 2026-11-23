@@ -1,14 +1,19 @@
 package net.projectflora.nativeoidc.consumer
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.future.future
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -226,6 +231,25 @@ class GuideExamplesTest {
         }
         assertTrue(untouched.requests.isEmpty())
         assertEquals(before, state.toJson())
+
+        // Cancel while the refresh request is in flight.
+        val inFlight = FfiCancellationHandle()
+        val blocking = BlockingTransport()
+        val pending =
+            async(Dispatchers.Default) {
+                runCatching { state.refresh(configuration, CLIENT_ID, emptyList(), blocking, inFlight) }
+            }
+        val entered = withTimeoutOrNull(10_000) { blocking.started.await() } != null
+        assertTrue("refresh did not reach the transport within 10 seconds", entered)
+        inFlight.cancel()
+        val outcome = withTimeoutOrNull(10_000) { pending.await() }
+        pending.cancel()
+        assertNotNull("refresh did not complete within 10 seconds after cancellation", outcome)
+        assertTrue(
+            "Expected FfiException.Cancelled, got ${outcome!!.exceptionOrNull()}",
+            outcome.exceptionOrNull() is FfiException.Cancelled,
+        )
+        assertEquals(before, state.toJson())
     }
 
     // Guide section 6: end-session URL and post-logout callback validation.
@@ -272,10 +296,27 @@ class GuideExamplesTest {
         // The session is consumed.
         assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=$state"))
 
-        // A mismatched state is rejected and consumes the session.
-        val other = begin()
-        assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=${other}x"))
-        assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=$other"))
+        // A stale callback from an earlier attempt neither completes nor
+        // cancels the current attempt.
+        val first = begin()
+        val second = begin()
+        assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=$first"))
+        assertTrue(PendingLogout.complete("$LOGOUT_REDIRECT?state=$second"))
+    }
+
+    // Guide section 6: a browser launch failure clears the pending attempt.
+    @Test
+    fun logoutLaunchFailureClearsThePendingSession() {
+        val configuration = FfiServiceConfiguration(AUTHORIZE, TOKEN).withEndSessionEndpoint(LOGOUT)
+        var launched: Uri? = null
+        val started =
+            startLogout(configuration, idToken = null) { url ->
+                launched = url
+                throw ActivityNotFoundException("no browser")
+            }
+        assertFalse(started)
+        val state = launched!!.getQueryParameter("state")!!
+        assertFalse(PendingLogout.complete("$LOGOUT_REDIRECT?state=$state"))
     }
 
     // Guide section 6: revocation, then local deletion regardless of the result.
@@ -435,6 +476,20 @@ class EncryptedStateStore(
     }
 }
 
+/** Signals when a request starts, then waits for cancellation, like the library coverage test. */
+private class BlockingTransport : NativeHttpTransport {
+    val started = CompletableDeferred<Unit>()
+
+    override suspend fun execute(
+        request: FfiHttpRequest,
+        cancellation: FfiCancellationHandle,
+    ): FfiHttpResponse {
+        started.complete(Unit)
+        cancellation.cancelled()
+        throw FfiException.Cancelled()
+    }
+}
+
 /** Records requests and returns one scripted response or failure. */
 private class ScriptedTransport(
     private val response: FfiHttpResponse? = null,
@@ -464,11 +519,10 @@ private class ScriptedTransport(
 
 @Suppress("unused")
 private suspend fun guideSignIn(
-    activity: Activity,
+    adapter: AndroidAuthorizationAdapter,
     configuration: FfiServiceConfiguration,
-): FfiAuthenticationState {
-    val adapter = AndroidAuthorizationAdapter(activity)
-    return adapter.authorize(
+): FfiAuthenticationState =
+    adapter.authorize(
         configuration,
         FfiAuthorizationOptions(
             clientId = "client",
@@ -489,15 +543,14 @@ private suspend fun guideSignIn(
         ),
         UrlConnectionNativeHttpTransport(),
     )
-}
 
 @Suppress("unused")
 private suspend fun guideSignInWithTimeout(
-    activity: Activity,
+    adapter: AndroidAuthorizationAdapter,
     configuration: FfiServiceConfiguration,
 ): FfiAuthenticationState? =
     try {
-        withTimeoutOrNull(5.minutes) { guideSignIn(activity, configuration) }
+        withTimeoutOrNull(5.minutes) { guideSignIn(adapter, configuration) }
     } catch (error: FfiException.Cancelled) {
         null
     }
@@ -533,26 +586,27 @@ object PendingLogout {
         session = null
     }
 
+    @Synchronized
     fun complete(callbackUri: String?): Boolean {
+        val pending = session ?: return false
         if (callbackUri == null) return false
-        val pending = synchronized(this) { session.also { session = null } } ?: return false
         return try {
             pending.parseRedirect(callbackUri)
+            session = null
+            pending.close()
             true
         } catch (error: FfiException) {
             false
-        } finally {
-            pending.close()
         }
     }
 }
 
-@Suppress("unused")
-private fun guideStartLogout(
-    activity: Activity,
+/** The guide's logout start; returns false when the browser could not be opened. */
+fun startLogout(
     configuration: FfiServiceConfiguration,
     idToken: String?,
-) {
+    launch: (Uri) -> Unit,
+): Boolean {
     val endSession =
         beginEndSession(
             configuration,
@@ -563,10 +617,24 @@ private fun guideStartLogout(
             ),
         )
     PendingLogout.begin(endSession)
-    // The guide opens endSessionUrl() with CustomTabsIntent. The Maven POM lists
-    // androidx.browser only at runtime scope, so this fixture does not compile that call.
-    Uri.parse(endSession.endSessionUrl())
+    return try {
+        launch(Uri.parse(endSession.endSessionUrl()))
+        true
+    } catch (error: ActivityNotFoundException) {
+        PendingLogout.abandon()
+        false
+    }
 }
+
+@Suppress("unused")
+private fun guideStartLogoutFromActivity(
+    activity: Activity,
+    configuration: FfiServiceConfiguration,
+    idToken: String?,
+): Boolean =
+    startLogout(configuration, idToken) { url ->
+        CustomTabsIntent.Builder().build().launchUrl(activity, url)
+    }
 
 /** Compile-only copy of the guide's logout callback activity (not in the manifest). */
 @Suppress("unused")
@@ -581,10 +649,14 @@ class GuideLogoutCallbackActivity : Activity() {
 @Suppress("unused")
 private class GuideJavaFacade(
     private val scope: CoroutineScope,
-    private val activity: Activity,
+    activity: Activity,
 ) {
+    private val adapter = AndroidAuthorizationAdapter(activity)
+
     fun signIn(configuration: FfiServiceConfiguration): CompletableFuture<FfiAuthenticationState> =
-        scope.future { guideSignIn(activity, configuration) }
+        scope.future { guideSignIn(adapter, configuration) }
+
+    fun cancel() = adapter.cancel()
 }
 
 @Suppress("unused")

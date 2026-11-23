@@ -97,6 +97,7 @@ imports:
 
 ```kotlin
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -224,15 +225,16 @@ the active redirect; the Rust core validates the complete callback and state.
 
 `AndroidAuthorizationAdapter.authorize` selects the redirect, opens a Custom
 Tab, waits for the callback, validates it, and exchanges the code. It is a
-`suspend` function and returns `FfiAuthenticationState`:
+`suspend` function and returns `FfiAuthenticationState`. Create the adapter
+in the activity that starts sign-in and keep that instance, so the same
+activity can cancel it (section 8):
 
 ```kotlin
 suspend fun signIn(
-    activity: Activity,
+    adapter: AndroidAuthorizationAdapter,
     configuration: FfiServiceConfiguration,
-): FfiAuthenticationState {
-    val adapter = AndroidAuthorizationAdapter(activity)
-    return adapter.authorize(
+): FfiAuthenticationState =
+    adapter.authorize(
         configuration,
         FfiAuthorizationOptions(
             clientId = "client",
@@ -252,9 +254,10 @@ suspend fun signIn(
         ),
         UrlConnectionNativeHttpTransport(),
     )
-}
 
-val state: FfiAuthenticationState = signIn(activity, configuration)
+// In the activity:
+val adapter = AndroidAuthorizationAdapter(this)
+val state: FfiAuthenticationState = signIn(adapter, configuration)
 ```
 
 The adapter overwrites `options.redirectUri` with the URI it selects from
@@ -398,22 +401,32 @@ object PendingLogout {
         session = null
     }
 
-    /** Returns true only when [callbackUri] is a valid callback for the pending logout. */
+    /**
+     * Returns true only when [callbackUri] is a valid callback for the pending
+     * logout. Only a valid callback consumes the session: a launch without
+     * data, or a stale or forged callback, leaves the current attempt waiting.
+     */
+    @Synchronized
     fun complete(callbackUri: String?): Boolean {
-        if (callbackUri == null) return false // launched without data: keep waiting
-        val pending = synchronized(this) { session.also { session = null } } ?: return false
+        val pending = session ?: return false
+        if (callbackUri == null) return false
         return try {
             pending.parseRedirect(callbackUri) // InvalidResponse on a state mismatch
+            session = null
+            pending.close()
             true
         } catch (error: FfiException) {
             false
-        } finally {
-            pending.close()
         }
     }
 }
 
-fun startLogout(activity: Activity, configuration: FfiServiceConfiguration, idToken: String?) {
+/** Returns false when the browser could not be opened; logout then did not start. */
+fun startLogout(
+    configuration: FfiServiceConfiguration,
+    idToken: String?,
+    launch: (Uri) -> Unit,
+): Boolean {
     val endSession = beginEndSession(
         configuration, // requires withEndSessionEndpoint or a discovered endpoint
         FfiEndSessionOptions(
@@ -423,7 +436,18 @@ fun startLogout(activity: Activity, configuration: FfiServiceConfiguration, idTo
         ),
     )
     PendingLogout.begin(endSession)
-    CustomTabsIntent.Builder().build().launchUrl(activity, Uri.parse(endSession.endSessionUrl()))
+    return try {
+        launch(Uri.parse(endSession.endSessionUrl()))
+        true
+    } catch (error: ActivityNotFoundException) {
+        PendingLogout.abandon() // no callback will arrive for this attempt
+        false
+    }
+}
+
+// In an activity:
+val started = startLogout(configuration, idToken) { url ->
+    CustomTabsIntent.Builder().build().launchUrl(this, url)
 }
 
 class LogoutCallbackActivity : Activity() {
@@ -445,7 +469,9 @@ The pending session lives in memory. If Android recreates the process while
 the browser is open, the callback finds no session and `complete` returns
 `false`: the provider logout is unconfirmed, and local sign-out must already
 have happened independently. A launch without data, or a callback with a
-mismatched state, is never treated as confirmation.
+mismatched state, is never treated as confirmation and does not cancel the
+current attempt. Starting a new logout replaces (and closes) the previous
+attempt, so a late callback from an older browser tab cannot complete it.
 
 The library's callback activity serves authorization only. Register
 `LogoutCallbackActivity` for the post-logout redirect, under a scheme that
@@ -558,10 +584,13 @@ timeout:
 
 ```kotlin
 val state: FfiAuthenticationState? = try {
-    withTimeoutOrNull(5.minutes) { signIn(activity, configuration) } // null: this timeout expired
+    withTimeoutOrNull(5.minutes) { signIn(adapter, configuration) } // null: this timeout expired
 } catch (error: FfiException.Cancelled) {
     null // adapter.cancel() was called
 }
+
+// A cancel button in the same activity uses the same adapter instance:
+fun onCancelSignIn() = adapter.cancel()
 ```
 
 Other cancellation rules:
@@ -609,9 +638,13 @@ Expose the `suspend` call from a Kotlin wrapper, for example as a
 `CompletableFuture` (`kotlinx-coroutines-core` provides `future`):
 
 ```kotlin
-class AuthFacade(private val scope: CoroutineScope, private val activity: Activity) {
+class AuthFacade(private val scope: CoroutineScope, activity: Activity) {
+    private val adapter = AndroidAuthorizationAdapter(activity)
+
     fun signIn(configuration: FfiServiceConfiguration): CompletableFuture<FfiAuthenticationState> =
-        scope.future { signIn(activity, configuration) } // the section 3 helper
+        scope.future { signIn(adapter, configuration) } // the section 3 helper
+
+    fun cancel() = adapter.cancel()
 }
 ```
 
@@ -634,11 +667,13 @@ using a scripted in-process transport (no network):
 - The `EncryptedStateStore` Keystore round trip and local deletion.
 - Refresh with rotation and re-save; a response without a refresh token keeps
   the old one.
-- Refresh failure (`AuthorizationServer`, `HttpStatus`, `TransportFailure`)
-  and pre-cancelled refresh (`Cancelled`) leave the state unchanged.
+- Refresh failure (`AuthorizationServer`, `HttpStatus`, `TransportFailure`),
+  pre-cancelled refresh, and refresh cancelled while its request is in flight
+  (`Cancelled`) leave the state unchanged.
 - End-session URL construction and callback validation, including a state
   mismatch (`InvalidResponse`), and the `PendingLogout` handling of a missing
-  URI, a missing session, a mismatched state, and a valid callback.
+  URI, a missing session, a stale callback from an earlier attempt, a valid
+  callback, and a browser launch failure.
 - Revocation followed by local deletion, also when revocation fails or the
   stored state cannot be decrypted.
 - Registration success and `ClientRegistrationServer`.
@@ -665,18 +700,21 @@ scripts/check-android-release-consumer.sh native-oidc-android-0.8.0.aar
 ./native/android/gradlew -p native/android connectedDebugAndroidTest
 ```
 
-Evidence for this revision:
+Recorded results, by tested revision:
 
-- Repository-built AAR: pull request CI (`Android adapters validation`)
-  passed `GuideExamplesTest` and `ReleaseConsumerTest` (9 tests) on x86_64
-  `google_apis_playstore` emulators at API 28 and API 35, for commit
-  `aae0cc4` ([run 45136595660](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45136595660/job/137564286601)).
-- Published GitHub Release AAR: `GuideExamplesTest` and `ReleaseConsumerTest` (9 tests) passed locally
-  against the published `native-oidc-android-0.8.0.aar` GitHub Release asset,
-  checksum verified, on an arm64-v8a API 28 emulator (2026-11-23, local
-  run; the APKs were run with `adb shell am instrument`).
-- Maven Central artifact (`-PnativeOidcVersion=0.8.0`): not yet run for this
-  revision.
+- `aae0cc4`, repository-built AAR: pull request CI
+  (`Android adapters validation`) passed `GuideExamplesTest` and
+  `ReleaseConsumerTest` (9 tests) on x86_64 `google_apis_playstore`
+  emulators at API 28 and API 35
+  ([run 45136595660](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45136595660/job/137564286601)).
+- `aae0cc4`, published GitHub Release AAR: the same 9 tests passed locally
+  against `native-oidc-android-0.8.0.aar` (checksum verified) on an
+  arm64-v8a API 28 emulator, run with `adb shell am instrument`.
+- Later revisions add tests: the pending-logout, launch-failure, and in-flight
+  refresh cancellation cases. Their results are the pull request checks for
+  each head commit and the local runs listed in
+  [PR #220](https://github.com/ProjectFlora/NativeOIDC/pull/220).
+- Maven Central artifact (`-PnativeOidcVersion=0.8.0`): not run.
 
 ### Coverage by operation
 

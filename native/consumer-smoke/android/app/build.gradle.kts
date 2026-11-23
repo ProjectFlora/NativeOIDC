@@ -36,6 +36,9 @@ dependencies {
         implementation("androidx.browser:browser:1.8.0")
     }
 
+    // The guide's examples call CustomTabsIntent directly. The Maven POM lists
+    // androidx.browser only at runtime scope, so declare it for compilation.
+    androidTestImplementation("androidx.browser:browser:1.8.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
 }
