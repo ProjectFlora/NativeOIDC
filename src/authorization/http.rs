@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
+
 use http::{header, HeaderMap, HeaderValue, Method, StatusCode};
-use url::Url;
+use url::{form_urlencoded, Url};
 
 use super::{
     json::UniqueJsonObject,
@@ -8,6 +10,22 @@ use super::{
     TokenResponse,
 };
 use crate::{AuthError, CancellationHandle, HttpRequest, HttpTransport, Result};
+
+/// Serializes a token-endpoint form body: the fixed parameters in the given
+/// order, then the additional parameters in name order.
+pub(super) fn serialize_token_form(
+    fixed_parameters: &[(&str, &str)],
+    additional_parameters: &BTreeMap<String, String>,
+) -> Vec<u8> {
+    let mut form = form_urlencoded::Serializer::new(String::new());
+    for (name, value) in fixed_parameters {
+        form.append_pair(name, value);
+    }
+    for (name, value) in additional_parameters {
+        form.append_pair(name, value);
+    }
+    form.finish().into_bytes()
+}
 
 pub(super) async fn send_token_request(
     token_endpoint: &Url,

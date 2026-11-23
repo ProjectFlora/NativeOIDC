@@ -122,6 +122,46 @@ pub(crate) async fn validate_id_token(
     .await
 }
 
+/// Validates `id_token` when the token response contains one.
+///
+/// A present ID Token requires both the OIDC issuer and the JWKS endpoint.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn validate_id_token_if_present(
+    id_token: Option<&str>,
+    issuer: Option<&Url>,
+    jwks_uri: Option<&Url>,
+    client_id: &str,
+    expected_nonce: Option<&str>,
+    require_nonce: bool,
+    jwks_cache: &JwksCache,
+    transport: &dyn HttpTransport,
+    cancellation: CancellationHandle,
+) -> Result<()> {
+    let Some(id_token) = id_token else {
+        return Ok(());
+    };
+    let issuer = issuer.ok_or(AuthError::InvalidConfiguration(
+        "OIDC issuer is required to validate ID Tokens",
+    ))?;
+    let jwks_uri = jwks_uri.ok_or(AuthError::InvalidConfiguration(
+        "JWKS endpoint is required to validate ID Tokens",
+    ))?;
+    validate_id_token(
+        IdTokenValidation {
+            token: id_token,
+            issuer,
+            jwks_uri,
+            client_id,
+            expected_nonce,
+            require_nonce,
+        },
+        jwks_cache,
+        transport,
+        cancellation,
+    )
+    .await
+}
+
 // Read the clock after signature verification and any JWKS fetch. Keeping the
 // clock injectable lets tests exercise the complete validation path without sleep.
 async fn validate_id_token_with_clock(

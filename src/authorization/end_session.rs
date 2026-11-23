@@ -4,8 +4,8 @@ use url::Url;
 
 use super::{
     validation::{
-        has_valid_query_encoding, reject_reserved_end_session_parameters,
-        validate_end_session_redirect_uri_match, validate_redirect_uri, parse_callback_query,
+        parse_callback_query, reject_reserved_end_session_parameters,
+        validate_end_session_redirect_uri_match, validate_redirect_uri, CallbackQueryError,
     },
     ServiceConfiguration,
 };
@@ -117,13 +117,18 @@ impl EndSessionSession {
                     "no post-logout redirect URI was requested",
                 ))?;
         validate_end_session_redirect_uri_match(expected_redirect_uri, redirect)?;
-        if !has_valid_query_encoding(redirect) {
-            return Err(AuthError::InvalidEndSessionResponse(
-                "response query has invalid percent encoding or UTF-8",
-            ));
-        }
-
-        let (parameters, _) = parse_callback_query(expected_redirect_uri, redirect)?;
+        let mut parameters =
+            parse_callback_query(redirect, expected_redirect_uri, |error| match error {
+                CallbackQueryError::InvalidEncoding => AuthError::InvalidEndSessionResponse(
+                    "response query has invalid percent encoding or UTF-8",
+                ),
+                CallbackQueryError::DuplicateParameter => {
+                    AuthError::InvalidEndSessionResponse("response contains a duplicate parameter")
+                }
+                CallbackQueryError::FixedQueryMismatch => AuthError::InvalidEndSessionResponse(
+                    "post-logout redirect URI query does not match",
+                ),
+            })?;
 
         let returned_state =
             parameters
@@ -241,7 +246,7 @@ mod tests {
         assert!(matches!(
             session.parse_redirect(&duplicate_state),
             Err(AuthError::InvalidEndSessionResponse(
-                "response query has invalid percent encoding or UTF-8"
+                "response contains a duplicate parameter"
             ))
         ));
     }
