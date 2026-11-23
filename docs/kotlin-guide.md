@@ -462,11 +462,32 @@ Parameters that the library sets itself (for example `state`, `nonce`,
 
 ### Cancellation and timeouts
 
-- `AndroidAuthorizationAdapter.authorize` follows coroutine cancellation.
-  Launch it in a scope tied to the UI (for example `lifecycleScope`) and use
-  `withTimeout` for a timeout policy; the library sets none. `adapter.cancel()`
-  stops the active callback wait and core request from outside the coroutine.
-  An adapter-level cancellation surfaces as `FfiException.Cancelled`.
+`AndroidAuthorizationAdapter.authorize` can be cancelled in two ways, and
+they surface differently:
+
+- **Coroutine cancellation** (the calling scope is cancelled, or `withTimeout`
+  expires): the adapter cleans up and rethrows the coroutine's
+  `CancellationException`, for example `TimeoutCancellationException`. It is
+  not converted to `FfiException.Cancelled`. Let it propagate, or catch only
+  the timeout you started.
+- **`adapter.cancel()`** from outside the coroutine: stops the active callback
+  wait and core request, and `authorize` throws `FfiException.Cancelled`.
+
+Launch authorization in a scope tied to the UI (for example
+`lifecycleScope`). The library sets no timeout; apply your own:
+
+```kotlin
+val state: FfiAuthenticationState? = try {
+    withTimeout(5.minutes) { signIn(activity, configuration) }
+} catch (error: TimeoutCancellationException) {
+    null // the host's timeout policy expired
+} catch (error: FfiException.Cancelled) {
+    null // adapter.cancel() was called
+}
+```
+
+Other cancellation rules:
+
 - Direct UniFFI calls (`discover`, `refresh`, `revoke`, `registerPublicClient`)
   take an explicit `FfiCancellationHandle`. Call `cancel()` on it to stop the
   operation; the result is `FfiException.Cancelled`. A cancelled handle stays
@@ -484,7 +505,7 @@ Parameters that the library sets itself (for example `state`, `nonce`,
 | `FfiException.ClientRegistrationServer` | Registration error from the provider |
 | `FfiException.HttpStatus` | Unexpected HTTP status (`status`) |
 | `FfiException.TransportFailure` / `Transport` | Network or transport failure |
-| `FfiException.Cancelled` | Cancelled by the handle, the adapter, or the coroutine |
+| `FfiException.Cancelled` | Cancelled by an `FfiCancellationHandle` or `adapter.cancel()`; coroutine cancellation stays a `CancellationException` |
 | `FfiException.Clock`, `Randomness`, `Internal` | Platform or internal failure |
 | `AndroidAuthorizationAdapterException.CallbackActivityNotRegistered` | The selected URI does not resolve to the callback activity |
 | `AndroidAuthorizationAdapterException.InvalidRedirectConfiguration` | Invalid redirect URIs, or an unverified App Link without a usable fallback |

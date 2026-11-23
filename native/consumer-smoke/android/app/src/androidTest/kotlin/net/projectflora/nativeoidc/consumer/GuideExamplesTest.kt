@@ -8,8 +8,10 @@ import android.security.keystore.KeyProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.future.future
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import net.projectflora.nativeoidc.AndroidAuthorizationAdapter
 import net.projectflora.nativeoidc.AndroidAuthorizationAdapterException
 import net.projectflora.nativeoidc.AndroidRedirectConfiguration
@@ -49,6 +51,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Executes the examples in `docs/kotlin-guide.md` against the AAR this
@@ -459,6 +462,19 @@ private suspend fun guideSignIn(
         UrlConnectionNativeHttpTransport(),
     )
 }
+
+@Suppress("unused")
+private suspend fun guideSignInWithTimeout(
+    activity: Activity,
+    configuration: FfiServiceConfiguration,
+): FfiAuthenticationState? =
+    try {
+        withTimeout(5.minutes) { guideSignIn(activity, configuration) }
+    } catch (error: TimeoutCancellationException) {
+        null
+    } catch (error: FfiException.Cancelled) {
+        null
+    }
 
 @Suppress("unused")
 private fun guideDescribe(error: Throwable): String =
