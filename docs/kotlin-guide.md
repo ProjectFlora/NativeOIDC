@@ -510,13 +510,16 @@ scripts/check-android-release-consumer.sh native-oidc-android-0.8.0.aar
 
 Evidence for this revision:
 
-- Pull request CI (`Android adapters validation`) builds the repository AAR
-  and runs the consumer fixture, including `GuideExamplesTest`, on x86_64
-  API 28 and API 35 emulators. See the checks of
-  [PR #220](https://github.com/ProjectFlora/NativeOIDC/pull/220).
-- `GuideExamplesTest` and `ReleaseConsumerTest` (9 tests) passed locally
+- Repository-built AAR: pull request CI (`Android adapters validation`)
+  passed `GuideExamplesTest` and `ReleaseConsumerTest` (9 tests) on x86_64
+  `google_apis_playstore` emulators at API 28 and API 35, for commit
+  `aae0cc4` ([run 45136595660](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45136595660/job/137564286601)).
+- Published GitHub Release AAR: `GuideExamplesTest` and `ReleaseConsumerTest` (9 tests) passed locally
   against the published `native-oidc-android-0.8.0.aar` GitHub Release asset,
-  checksum verified, on an arm64-v8a API 28 emulator (2026-11-23).
+  checksum verified, on an arm64-v8a API 28 emulator (2026-11-23, local
+  run; the APKs were run with `adb shell am instrument`).
+- Maven Central artifact (`-PnativeOidcVersion=0.8.0`): not yet run for this
+  revision.
 
 ### Coverage by operation
 
