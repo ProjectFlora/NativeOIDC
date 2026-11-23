@@ -109,6 +109,8 @@ Try another method if one fails, before concluding that a result is unavailable.
 - Force pushing, or pushing directly to the base branch
 - Changes beyond the scope of the issue
 - Reporting CI, reviews, or thread states as passed without retrieving them (see "Verification Rules" above)
+- Ending the implement phase without opening a PR or pausing (see "How the phase ends" in [phase-implement.md](phase-implement.md))
+- Ending any run with changes that are not committed and pushed
 
 ## When Handling Multiple Issues in Parallel
 - Do not touch any branch or PR other than the one for your assigned issue
