@@ -3,7 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use url::form_urlencoded;
 
 use super::{
     http::send_token_request,
@@ -12,7 +11,7 @@ use super::{
     ServiceConfiguration,
 };
 use crate::{
-    id_token::{validate_id_token, IdTokenValidation},
+    id_token::{validate_id_token, IdTokenValidation, JwksCache},
     AuthError, CancellationHandle, HttpTransport, Result,
 };
 
@@ -185,35 +184,25 @@ impl AuthenticationState {
             cancellation.clone(),
         )
         .await?;
-        if let Some(id_token) = &refreshed.id_token {
-            let issuer = configuration
+
+        // Validate ID token if present
+        validate_id_token_if_present(
+            refreshed.id_token.as_ref(),
+            configuration
                 .issuer
                 .as_ref()
-                .ok_or(AuthError::InvalidConfiguration(
-                    "OIDC issuer is required to validate ID Tokens",
-                ))?;
-            let jwks_uri =
-                configuration
-                    .jwks_uri
-                    .as_ref()
-                    .ok_or(AuthError::InvalidConfiguration(
-                        "JWKS endpoint is required to validate ID Tokens",
-                    ))?;
-            validate_id_token(
-                IdTokenValidation {
-                    token: id_token,
-                    issuer,
-                    jwks_uri,
-                    client_id,
-                    expected_nonce: self.oidc_nonce.as_deref(),
-                    require_nonce: false,
-                },
-                &configuration.jwks_cache,
-                transport,
-                cancellation,
-            )
-            .await?;
-        }
+                .ok_or(AuthError::InvalidConfiguration("OIDC issuer is required to validate ID Tokens"))?,
+            configuration
+                .jwks_uri
+                .as_ref()
+                .ok_or(AuthError::InvalidConfiguration("JWKS endpoint is required to validate ID Tokens"))?,
+            client_id,
+            self.oidc_nonce.as_deref(),
+            false, // require_nonce: false for refresh
+            &configuration.jwks_cache,
+            transport,
+            cancellation,
+        ).await?;
 
         if refreshed.refresh_token.is_none() {
             refreshed.refresh_token = Some(refresh_token.to_owned());

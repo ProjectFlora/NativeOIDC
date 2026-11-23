@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use http::{header::HeaderName, HeaderMap, HeaderValue, StatusCode};
@@ -455,14 +455,8 @@ fn apply_parameters(
 }
 
 fn ensure_unique_parameter_names(parameters: &[FfiParameter]) -> std::result::Result<(), FfiError> {
-    let mut names = BTreeSet::new();
-    if parameters
-        .iter()
-        .any(|parameter| !names.insert(parameter.name.as_str()))
-    {
-        return Err(FfiError::InvalidRequest(
-            "parameter names must be unique".to_owned(),
-        ));
+    if !are_parameter_names_unique(parameters.iter().map(|p| p.name.as_str())) {
+        return Err(FfiError::InvalidRequest("parameter names must be unique".to_owned()));
     }
     Ok(())
 }

@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use url::Url;
 
 use super::{
     validation::{
         has_valid_query_encoding, reject_reserved_end_session_parameters,
-        validate_end_session_redirect_uri_match, validate_redirect_uri,
+        validate_end_session_redirect_uri_match, validate_redirect_uri, parse_callback_query,
     },
     ServiceConfiguration,
 };
@@ -123,25 +123,7 @@ impl EndSessionSession {
             ));
         }
 
-        let mut parameters = BTreeMap::new();
-        let mut names = HashSet::new();
-        for (name, value) in redirect.query_pairs() {
-            if !names.insert(name.to_string()) {
-                return Err(AuthError::InvalidEndSessionResponse(
-                    "response contains a duplicate parameter",
-                ));
-            }
-            parameters.insert(name.into_owned(), value.into_owned());
-        }
-
-        for (name, expected_value) in expected_redirect_uri.query_pairs() {
-            if parameters.get(name.as_ref()) != Some(&expected_value.into_owned()) {
-                return Err(AuthError::InvalidEndSessionResponse(
-                    "post-logout redirect URI query does not match",
-                ));
-            }
-            parameters.remove(name.as_ref());
-        }
+        let (parameters, _) = parse_callback_query(expected_redirect_uri, redirect)?;
 
         let returned_state =
             parameters
@@ -259,7 +241,7 @@ mod tests {
         assert!(matches!(
             session.parse_redirect(&duplicate_state),
             Err(AuthError::InvalidEndSessionResponse(
-                "response contains a duplicate parameter"
+                "response query has invalid percent encoding or UTF-8"
             ))
         ));
     }

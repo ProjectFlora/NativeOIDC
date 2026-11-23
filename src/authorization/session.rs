@@ -1,13 +1,13 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap};
 
-use url::{form_urlencoded, Url};
+use url::Url;
 
 use super::{
     http::send_token_request,
     validation::{
-        has_valid_query_encoding, reject_reserved_endpoint_parameters,
+        has_valid_query_encoding, parse_callback_query, reject_reserved_endpoint_parameters,
         validate_additional_token_parameter, validate_redirect_uri, validate_redirect_uri_match,
-        validate_scope, RESERVED_AUTHORIZATION_PARAMETERS,
+        validate_scope, RESERVED_AUTHORIZATION_PARAMETERS, serialize_token_form,
     },
     AuthenticationState, ServiceConfiguration, TokenResponse,
 };
@@ -209,39 +209,16 @@ impl AuthorizationSession {
     /// responses are returned as [`AuthError::AuthorizationServer`].
     pub fn parse_redirect(&self, redirect: &Url) -> Result<AuthorizationResponse> {
         validate_redirect_uri_match(&self.redirect_uri, redirect)?;
-        if !has_valid_query_encoding(redirect) {
-            return Err(AuthError::InvalidAuthorizationResponse(
-                "response query has invalid percent encoding or UTF-8",
-            ));
-        }
 
-        let mut parameters = BTreeMap::new();
-        let mut names = HashSet::new();
-        for (name, value) in redirect.query_pairs() {
-            if !names.insert(name.to_string()) {
-                return Err(AuthError::InvalidAuthorizationResponse(
-                    "response contains a duplicate parameter",
-                ));
-            }
-            parameters.insert(name.into_owned(), value.into_owned());
-        }
+        let (query_parameters, _) = parse_callback_query(redirect, &self.redirect_uri)?;
 
-        for (name, expected_value) in self.redirect_uri.query_pairs() {
-            if parameters.get(name.as_ref()) != Some(&expected_value.into_owned()) {
-                return Err(AuthError::InvalidAuthorizationResponse(
-                    "redirect URI query does not match",
-                ));
-            }
-            parameters.remove(name.as_ref());
-        }
-
-        if parameters.get("state").map(String::as_str) != Some(self.state.as_str()) {
+        if query_parameters.get("state").map(String::as_str) != Some(self.state.as_str()) {
             return Err(AuthError::InvalidAuthorizationResponse("state mismatch"));
         }
-        parameters.remove("state");
+        query_parameters.remove("state");
 
-        let code = parameters.remove("code");
-        let error = parameters.remove("error");
+        let code = query_parameters.remove("code");
+        let error = query_parameters.remove("error");
         if code.is_some() && error.is_some() {
             return Err(AuthError::InvalidAuthorizationResponse(
                 "response contains both code and error",
@@ -256,7 +233,7 @@ impl AuthorizationSession {
             return Ok(AuthorizationResponse {
                 code,
                 state: self.state.clone(),
-                additional_parameters: parameters,
+                additional_parameters: query_parameters,
             });
         }
         if let Some(code) = error {
@@ -267,7 +244,7 @@ impl AuthorizationSession {
             }
             return Err(AuthError::AuthorizationServer {
                 code,
-                description: parameters.remove("error_description"),
+                description: query_parameters.remove("error_description"),
             });
         }
 
@@ -294,53 +271,33 @@ impl AuthorizationSession {
             ));
         }
 
-        let body = {
-            let mut form = form_urlencoded::Serializer::new(String::new());
-            form.append_pair("grant_type", "authorization_code")
-                .append_pair("code", &response.code)
-                .append_pair("redirect_uri", self.redirect_uri.as_str())
-                .append_pair("client_id", &self.client_id)
-                .append_pair("code_verifier", self.pkce.verifier());
-            for (name, value) in &self.additional_token_parameters {
-                form.append_pair(name, value);
-            }
-            form.finish().into_bytes()
-        };
-        let token_response =
-            send_token_request(&self.token_endpoint, body, transport, cancellation.clone()).await?;
+        let fixed_parameters = &[
+            ("grant_type", "authorization_code"),
+            ("code", &response.code),
+            ("redirect_uri", self.redirect_uri.as_str()),
+            ("client_id", &self.client_id),
+            ("code_verifier", self.pkce.verifier()),
+        ];
+        let body_bytes = serialize_token_form(fixed_parameters, &self.additional_token_parameters);
+
+        let token_response = send_token_request(&self.token_endpoint, body_bytes, transport, cancellation.clone()).await?;
         if self.nonce.is_some() && token_response.id_token.is_none() {
             return Err(AuthError::InvalidIdToken(
                 "openid token response is missing an ID Token",
             ));
         }
-        if let Some(id_token) = &token_response.id_token {
-            let issuer = self
-                .oidc_issuer
-                .as_ref()
-                .ok_or(AuthError::InvalidConfiguration(
-                    "OIDC issuer is required to validate ID Tokens",
-                ))?;
-            let jwks_uri = self
-                .jwks_uri
-                .as_ref()
-                .ok_or(AuthError::InvalidConfiguration(
-                    "JWKS endpoint is required to validate ID Tokens",
-                ))?;
-            validate_id_token(
-                IdTokenValidation {
-                    token: id_token,
-                    issuer,
-                    jwks_uri,
-                    client_id: &self.client_id,
-                    expected_nonce: self.nonce.as_deref(),
-                    require_nonce: self.nonce.is_some(),
-                },
-                &self.jwks_cache,
-                transport,
-                cancellation,
-            )
-            .await?;
-        }
+
+        validate_id_token_if_present(
+            token_response.id_token.as_deref(),
+            self.oidc_issuer.as_deref(),
+            self.jwks_uri.as_deref(),
+            &self.client_id,
+            self.nonce.as_deref(),
+            self.nonce.is_some(),
+            &self.jwks_cache,
+            transport,
+            cancellation,
+        ).await?;
         Ok(token_response)
     }
 }
