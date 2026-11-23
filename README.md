@@ -481,6 +481,11 @@ that may not match the newer Swift sources.
 
 ## Android adapter
 
+The [Kotlin/Android user guide](docs/kotlin-guide.md) walks through
+installation, callback setup, authorization, secure state storage, refresh,
+logout, and error handling with verified examples. This section summarizes
+the adapter.
+
 - The adapter is a Kotlin API. Java applications should wrap it with a small
   Kotlin class or function in the app; see the
   [shared user guide](docs/user-guide.md#supported-application-languages).
