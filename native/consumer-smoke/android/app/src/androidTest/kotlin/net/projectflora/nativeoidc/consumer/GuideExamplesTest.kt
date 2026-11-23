@@ -39,6 +39,7 @@ import uniffi.native_oidc.beginEndSession
 import uniffi.native_oidc.registerPublicClient
 import uniffi.native_oidc.revoke
 import java.io.File
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
@@ -261,6 +262,13 @@ class GuideExamplesTest {
         storage.save(FfiAuthenticationState.fromJson(STATE_JSON))
         signOut(configuration, ScriptedTransport(json(503, "")))
         assertNull(storage.load())
+
+        // Corrupt ciphertext cannot be restored, but sign-out still deletes it.
+        storage.file.writeBytes(byteArrayOf(12, 1, 2, 3))
+        val unused = ScriptedTransport(json(200, ""))
+        signOut(configuration, unused)
+        assertFalse(storage.file.exists())
+        assertTrue(unused.requests.isEmpty())
     }
 
     // Guide section 7: dynamic public-client registration.
@@ -307,17 +315,18 @@ class GuideExamplesTest {
         configuration: FfiServiceConfiguration,
         transport: NativeHttpTransport,
     ) {
-        val state = storage.load()
         try {
-            val refreshToken = state?.tokenResponse()?.refreshToken
-            if (refreshToken != null) {
-                revoke(configuration, CLIENT_ID, refreshToken, "refresh_token", transport, FfiCancellationHandle())
+            // Unreadable state (invalidated key, corrupt file) has nothing to revoke.
+            val state = runCatching { storage.load() }.getOrNull()
+            state?.use {
+                it.tokenResponse().refreshToken?.let { token ->
+                    revoke(configuration, CLIENT_ID, token, "refresh_token", transport, FfiCancellationHandle())
+                }
             }
         } catch (error: FfiException) {
             // Revocation failure does not block local sign-out.
         } finally {
             storage.delete()
-            state?.close()
         }
     }
 
@@ -376,7 +385,7 @@ class EncryptedStateStore(
     }
 
     fun delete() {
-        file.delete()
+        if (file.exists() && !file.delete()) throw IOException("Could not delete stored state")
     }
 
     private fun key(): SecretKey {

@@ -22,10 +22,23 @@ wrapper in the app (see [Java hosts](#java-hosts)).
 | ABIs | `arm64-v8a`, `x86_64` |
 | Runtime dependencies | `net.java.dev.jna:jna:5.12.0@aar`, `org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2`, `androidx.browser:browser:1.8.0` |
 
+Both installation paths resolve the runtime dependencies from Google's Maven
+repository (AndroidX Browser) and Maven Central, so declare both, for example
+in `settings.gradle.kts`:
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+```
+
 ### Maven Central (v0.7.0 and later)
 
-With `mavenCentral()` in the repositories, one dependency brings in the AAR
-and its runtime dependencies:
+With those repositories, one dependency brings in the AAR and its runtime
+dependencies:
 
 ```kotlin
 dependencies {
@@ -177,22 +190,29 @@ Tab, waits for the callback, validates it, and exchanges the code. It is a
 `suspend` function and returns `FfiAuthenticationState`:
 
 ```kotlin
-val adapter = AndroidAuthorizationAdapter(activity)
-val state: FfiAuthenticationState = adapter.authorize(
-    configuration,
-    FfiAuthorizationOptions(
-        clientId = "client",
-        redirectUri = "com.example.app:/oauth/callback", // replaced by the selected redirect
-        scopes = listOf("openid", "profile"),
-        additionalParameters = emptyList(),
-        additionalTokenParameters = emptyList(),
-    ),
-    AndroidRedirectConfiguration(
-        appLinkUri = "https://login.example.com/oauth/callback",
-        customSchemeUri = "com.example.app:/oauth/callback",
-    ),
-    UrlConnectionNativeHttpTransport(),
-)
+suspend fun signIn(
+    activity: Activity,
+    configuration: FfiServiceConfiguration,
+): FfiAuthenticationState {
+    val adapter = AndroidAuthorizationAdapter(activity)
+    return adapter.authorize(
+        configuration,
+        FfiAuthorizationOptions(
+            clientId = "client",
+            redirectUri = "com.example.app:/oauth/callback", // replaced by the selected redirect
+            scopes = listOf("openid", "profile"),
+            additionalParameters = emptyList(),
+            additionalTokenParameters = emptyList(),
+        ),
+        AndroidRedirectConfiguration(
+            appLinkUri = "https://login.example.com/oauth/callback",
+            customSchemeUri = "com.example.app:/oauth/callback",
+        ),
+        UrlConnectionNativeHttpTransport(),
+    )
+}
+
+val state: FfiAuthenticationState = signIn(activity, configuration)
 ```
 
 The adapter overwrites `options.redirectUri` with the URI it selects from
@@ -246,7 +266,7 @@ class EncryptedStateStore(private val file: File, private val keyAlias: String) 
     }
 
     fun delete() {
-        file.delete()
+        if (file.exists() && !file.delete()) throw IOException("Could not delete stored state")
     }
 
     private fun key(): SecretKey {
@@ -342,20 +362,23 @@ provider completed logout.
 ### Token revocation and local deletion
 
 `revoke` asks the provider to invalidate one token. It is a separate network
-call, not a browser action. Delete local state whether or not it succeeds:
+call, not a browser action. Delete local state whether or not it succeeds,
+and also when the stored state can no longer be decrypted or parsed:
 
 ```kotlin
 suspend fun signOut() {
-    val state = store.load()
     try {
-        state?.tokenResponse()?.refreshToken?.let { token ->
-            revoke(configuration, "client", token, "refresh_token", UrlConnectionNativeHttpTransport(), FfiCancellationHandle())
+        // Unreadable state (invalidated key, corrupt file) has nothing to revoke.
+        val state = runCatching { store.load() }.getOrNull()
+        state?.use {
+            it.tokenResponse().refreshToken?.let { token ->
+                revoke(configuration, "client", token, "refresh_token", UrlConnectionNativeHttpTransport(), FfiCancellationHandle())
+            }
         }
     } catch (error: FfiException) {
         // Revocation failure does not block local sign-out.
     } finally {
-        store.delete()
-        state?.close()
+        store.delete() // throws if the file remains, so sign-out is not reported as complete
     }
 }
 ```
@@ -456,7 +479,7 @@ Expose the `suspend` call from a Kotlin wrapper, for example as a
 ```kotlin
 class AuthFacade(private val scope: CoroutineScope, private val activity: Activity) {
     fun signIn(configuration: FfiServiceConfiguration): CompletableFuture<FfiAuthenticationState> =
-        scope.future { AndroidAuthorizationAdapter(activity).authorize(/* … */) }
+        scope.future { signIn(activity, configuration) } // the section 3 helper
 }
 ```
 
@@ -483,7 +506,8 @@ using a scripted in-process transport (no network):
   and pre-cancelled refresh (`Cancelled`) leave the state unchanged.
 - End-session URL construction and callback validation, including a state
   mismatch (`InvalidResponse`).
-- Revocation followed by local deletion, also when revocation fails.
+- Revocation followed by local deletion, also when revocation fails or the
+  stored state cannot be decrypted.
 - Registration success and `ClientRegistrationServer`.
 - The adapter call, the error-classification `when`, and the Java
   `CompletableFuture` wrapper are compiled but not executed there: they need
@@ -544,7 +568,8 @@ Evidence for this revision:
 
 - Live identity-provider interoperability and physical-device execution are
   not verified; see [interoperability status](live-idp-interoperability.md)
-  and the [support matrix](support-matrix.md). arm64 execution is unverified.
+  and the [support matrix](support-matrix.md). Execution on physical arm64
+  devices is unverified; arm64 coverage is limited to the emulator run above.
 - The fixture's scripted transport checks the library's behavior, not a
   provider's.
 - The storage example is a starting point, not a complete storage layer; the
