@@ -255,14 +255,18 @@ func performSignIn(
     configuration: FfiServiceConfiguration,
     options: FfiAuthorizationOptions,
     transport: URLSessionNativeHttpTransport
-) async throws {
+) async throws -> FfiAuthenticationState {
     let authService = AuthService() // the platform adapter of choice
     let state = try await authService.signIn(
         configuration: configuration,
         options: options,
         transport: transport
     )
-    // `state` is ready for the operations below.
+    // Return the state to the host: it holds the tokens, the OIDC nonce, and
+    // the expiry that the persistence, refresh, and end-session operations
+    // below require, and dropping it would leave the host with nothing to
+    // act on.
+    return state
 }
 ```
 
@@ -354,9 +358,15 @@ atomic. Retain the original absolute expiry instead of recalculating it from
 ## Refresh
 
 Refresh requires a non-empty refresh token and updates `state` in place only
-after a successful response:
+after a successful response. Local sign-out sets the `signedOut` flag under
+the same lock, so a refresh that outlives sign-out cannot write the deleted
+state back:
 
 ```swift
+// Shared with the local sign-out in "End-session and revocation".
+let sessionLock = NSLock()
+var signedOut = false
+
 try await state.refresh(
     configuration: configuration,
     clientId: "native-public-client",
@@ -365,8 +375,15 @@ try await state.refresh(
     cancellation: FfiCancellationHandle()
 )
 
-// Refresh tokens may rotate; persist the updated complete state.
-try saveState(try await state.toJson(), account: "native-oidc/state")
+// Refresh tokens may rotate; persist the updated complete state. Serialize
+// the state outside the lock — `toJson` is a core request, and the lock
+// must not be held across it — then check the flag under the lock.
+let stateJson = try await state.toJson()
+sessionLock.lock()
+if !signedOut {
+    try saveState(stateJson, account: "native-oidc/state")
+}
+sessionLock.unlock()
 ```
 
 On failure or cancellation the local previous state is unchanged, which does
@@ -399,7 +416,7 @@ let logoutURL = URL(string: endSession.endSessionUrl())!
 // When the provider returns the app to the registered redirect, validate the
 // callback it carried:
 do {
-    let response = endSession.parseRedirect(redirectUri: callbackURL.absoluteString)
+    let response = try endSession.parseRedirect(redirectUri: callbackURL.absoluteString)
     // `response.state` matched the generated state; the provider completed
     // the logout.
 } catch {
@@ -426,9 +443,18 @@ try await revoke(
 )
 ```
 
-Local sign-out is independent of both: clear the stored state (for example
+Local sign-out is independent of both. Set the sign-out flag under the same
+lock the refresh write takes, then clear the stored state (for example
 `SecItemDelete` for the item above) and drop in-memory references, and run it
-even if provider cleanup fails or is cancelled. See
+even if provider cleanup fails or is cancelled:
+
+```swift
+sessionLock.lock()
+signedOut = true
+sessionLock.unlock()
+```
+
+See
 [Logout, revocation, and local deletion](user-guide.md#logout-revocation-and-local-deletion).
 
 ## Dynamic registration
@@ -503,6 +529,11 @@ lifecycle handling belong:
   still open the browser when it resumes. The wrapper therefore retains the
   discovery cancellation handle and the task, signals both from `cancel()`,
   and checks for cancellation before starting the adapter.
+- The wrapper claims a single in-flight slot before discovery starts. A
+  second `authorize` call while an operation is in flight fails with
+  `AuthorizationInProgress` instead of replacing the first operation's task
+  and handle, which would leave its discovery un-cancellable and let it open
+  the browser when it resumes. The slot is released when the operation ends.
 
 ### iOS/iPadOS wrapper
 
@@ -523,11 +554,18 @@ final class PresentationProvider: NSObject,
     }
 }
 
+/// An `authorize` call was rejected because an operation is already in
+/// flight.
+struct AuthorizationInProgress: Error {}
+
 @MainActor
 @objc public final class NativeOIDCService: NSObject {
     private let adapter: IOSAuthorizationAdapter
     private var activeCancellation: FfiCancellationHandle?
     private var activeTask: Task<Void, Never>?
+    // Bumped for every claimed operation, so a superseded task cannot
+    // release a slot that a newer operation owns.
+    private var inFlightGeneration = 0
 
     @objc public override init() {
         self.adapter = IOSAuthorizationAdapter(
@@ -539,6 +577,8 @@ final class PresentationProvider: NSObject,
 
     /// Runs authorization in the system browser session. The completion
     /// handler reports the serialized state JSON (or `nil`) and any error.
+    /// A call that arrives while an operation is in flight reports
+    /// `AuthorizationInProgress`.
     @objc public func authorize(
         issuer: String,
         clientId: String,
@@ -546,6 +586,15 @@ final class PresentationProvider: NSObject,
         scopes: [String],
         completion: @escaping @Sendable (String?, Error?) -> Void
     ) {
+        // Claim the single in-flight slot before discovery starts: a second
+        // call must be rejected here, not replace the first operation's task
+        // and handle, which would leave its discovery un-cancellable.
+        guard activeTask == nil else {
+            completion(nil, AuthorizationInProgress())
+            return
+        }
+        inFlightGeneration += 1
+        let generation = inFlightGeneration
         let transport = URLSessionNativeHttpTransport()
         let cancellation = FfiCancellationHandle()
         let task = Task { @MainActor in
@@ -576,6 +625,13 @@ final class PresentationProvider: NSObject,
             } catch {
                 completion(nil, error)
             }
+            // Release the slot once this operation has fully ended —
+            // success, failure, or cancellation — only if it is still the
+            // claimed one.
+            if inFlightGeneration == generation {
+                activeTask = nil
+                activeCancellation = nil
+            }
         }
         activeCancellation = cancellation
         activeTask = task
@@ -599,11 +655,18 @@ final class PresentationProvider: NSObject,
 import AppKit
 import NativeOIDC
 
+/// An `authorize` call was rejected because an operation is already in
+/// flight.
+struct AuthorizationInProgress: Error {}
+
 @MainActor
 @objc public final class NativeOIDCService: NSObject {
     private let adapter: MacOSAuthorizationAdapter
     private var activeCancellation: FfiCancellationHandle?
     private var activeTask: Task<Void, Never>?
+    // Bumped for every claimed operation, so a superseded task cannot
+    // release a slot that a newer operation owns.
+    private var inFlightGeneration = 0
 
     @objc public override init() {
         // The default closure opens the URL in the default browser.
@@ -613,7 +676,8 @@ import NativeOIDC
 
     /// Binds the loopback listener and opens the external browser. The
     /// completion handler reports the serialized state JSON (or `nil`) and
-    /// any error.
+    /// any error. A call that arrives while an operation is in flight
+    /// reports `AuthorizationInProgress`.
     @objc public func authorize(
         issuer: String,
         clientId: String,
@@ -621,6 +685,15 @@ import NativeOIDC
         scopes: [String],
         completion: @escaping @Sendable (String?, Error?) -> Void
     ) {
+        // Claim the single in-flight slot before discovery starts: a second
+        // call must be rejected here, not replace the first operation's task
+        // and handle, which would leave its discovery un-cancellable.
+        guard activeTask == nil else {
+            completion(nil, AuthorizationInProgress())
+            return
+        }
+        inFlightGeneration += 1
+        let generation = inFlightGeneration
         let transport = URLSessionNativeHttpTransport()
         let cancellation = FfiCancellationHandle()
         let task = Task { @MainActor in
@@ -650,6 +723,13 @@ import NativeOIDC
                 completion(try await state.toJson(), nil)
             } catch {
                 completion(nil, error)
+            }
+            // Release the slot once this operation has fully ended —
+            // success, failure, or cancellation — only if it is still the
+            // claimed one.
+            if inFlightGeneration == generation {
+                activeTask = nil
+                activeCancellation = nil
             }
         }
         activeCancellation = cancellation
@@ -684,8 +764,11 @@ The Swift examples in this guide are exercised at the following scope:
   cancellation, and error branches the examples rely on (#85): a scripted
   refresh that updates the state in place and round-trips it through JSON, an
   in-flight discovery ended by cancellation, a provider-rejected refresh,
-  malformed stored state, and the post-logout callback with a registered
-  redirect (a matching state validates, a mismatched one fails). The
+  malformed stored state, the post-logout callback with a registered redirect
+  (a matching state validates, a mismatched one fails; both through the
+  prepared-session lifecycle entry points), and two overlapping
+  authorizations (the second is rejected, the first ends cancelled while its
+  discovery is in flight, and the single-flight slot is released after). The
   authorization, callback-exchange, and cancellation paths are additionally
   exercised by the repository's Swift test suite
   (`SwiftTests/NativeOIDCTests`, a macOS loopback flow against a local mock

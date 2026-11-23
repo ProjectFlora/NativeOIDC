@@ -155,11 +155,13 @@ class GuideSession(
     private var signedOut = false
 
     // On the next launch: restore the state before any operation that needs
-    // it.
-    fun restoreState(): FfiAuthenticationState =
-        FfiAuthenticationState.fromJson(
-            serialized = store.getString("native-oidc/state")!!,
-        )
+    // it. The first launch, and the launch after sign-out, have nothing
+    // stored, so restore only when a value exists — the absence of state
+    // means signed-out, not an error.
+    fun restoreState(): FfiAuthenticationState? =
+        store.getString("native-oidc/state")?.let {
+            FfiAuthenticationState.fromJson(serialized = it)
+        }
 
     fun refresh(state: FfiAuthenticationState) {
         scope.launch {
@@ -203,10 +205,22 @@ class GuideSession(
         }
     }
 
+    /** The prepared end-session session together with its URL. The session
+     *  must be retained until the post-logout callback returns: validating
+     *  the callback requires the original session whose random state was
+     *  embedded in the URL, and recreating it would generate a different
+     *  state that never matches. */
+    data class PreparedEndSession(
+        val url: Uri,
+        val session: FfiEndSessionSession,
+    )
+
     // Provider logout: the authorization adapter has no logout method.
     // Prepare the end-session URL with the UniFFI API; the host manages the
-    // browser and any post-logout callback.
-    fun endSessionUrl(): Uri {
+    // browser and any post-logout callback. Returns the prepared session
+    // together with the URL so the callback can be validated against the same
+    // session that generated the URL's state.
+    fun prepareEndSession(): PreparedEndSession {
         val endSession = beginEndSession(
             configuration = configuration, // requires an end-session endpoint
             options = FfiEndSessionOptions(
@@ -217,17 +231,27 @@ class GuideSession(
                 postLogoutRedirectUri = "https://your-app.example/oidc/post-logout",
             ),
         )
-        return Uri.parse(endSession.endSessionUrl())
+        return PreparedEndSession(
+            url = Uri.parse(endSession.endSessionUrl()),
+            session = endSession,
+        )
     }
 
     // With a post-logout redirect configured, validate the callback when it
-    // returns.
-    fun validateEndSessionRedirect(session: FfiEndSessionSession, callbackUri: Uri) {
-        try {
+    // returns, using the same session that prepared the URL. Returns whether
+    // the callback's state matched (i.e., whether the provider logout is
+    // verified).
+    fun validateEndSessionRedirect(
+        session: FfiEndSessionSession,
+        callbackUri: Uri,
+    ): Boolean {
+        return try {
             session.parseRedirect(callbackUri.toString())
+            true
         } catch (error: FfiException) {
             // Callback or state mismatch: report the provider logout as
             // unverified.
+            false
         }
     }
 }

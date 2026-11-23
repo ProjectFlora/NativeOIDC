@@ -9,7 +9,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -249,5 +251,89 @@ class ReleaseConsumerTest {
                 )
             }
         }
+    }
+
+    // An in-memory secure store for the post-authorization lifecycle checks.
+    private class InMemoryGuideStore : GuideSecureStore {
+        private val values = mutableMapOf<String, String>()
+
+        override fun getString(key: String): String? = values[key]
+        override fun putString(key: String, value: String) {
+            values[key] = value
+        }
+        override fun remove(key: String) {
+            values.remove(key)
+        }
+    }
+
+    private fun guideConfiguration(): FfiServiceConfiguration =
+        FfiServiceConfiguration(
+            authorizationEndpoint = "https://idp.example/authorize",
+            tokenEndpoint = "https://idp.example/token",
+        ).withEndSessionEndpoint(endpoint = "https://idp.example/logout")
+
+    // A missing stored state must restore to null, not crash: the first
+    // launch, and the launch after sign-out, have nothing stored.
+    @Test
+    fun restoreStateHandlesMissingState() {
+        val store = InMemoryGuideStore()
+        val session = GuideSession(
+            store = store,
+            configuration = guideConfiguration(),
+            scope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
+        )
+
+        // First launch: nothing is stored yet.
+        assertNull(
+            "first launch has no stored state and must not crash",
+            session.restoreState(),
+        )
+
+        // After storing state and signing out, storage is empty again.
+        store.putString("native-oidc/state", STATE_JSON)
+        assertNotNull(
+            "a stored state must restore",
+            session.restoreState(),
+        )
+        session.signOut()
+        assertNull(
+            "after sign-out the stored state is gone and must not crash",
+            session.restoreState(),
+        )
+    }
+
+    // The end-session helper must retain the prepared session with its URL:
+    // validation needs the session whose random state is embedded in the URL,
+    // and a scripted callback derived from that URL validates against it.
+    @Test
+    fun endSessionLifecycleRetainsPreparedSession() {
+        val session = GuideSession(
+            store = InMemoryGuideStore(),
+            configuration = guideConfiguration(),
+            scope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
+        )
+
+        val prepared = session.prepareEndSession()
+        val stateParameter = prepared.url.getQueryParameter("state")
+        assertNotNull("the end-session URL must carry a state parameter", stateParameter)
+
+        // A scripted callback derived from the generated URL validates against
+        // the retained session.
+        assertTrue(
+            "a callback derived from the generated URL must validate",
+            session.validateEndSessionRedirect(
+                prepared.session,
+                Uri.parse("https://your-app.example/oidc/post-logout?state=$stateParameter"),
+            ),
+        )
+
+        // A mismatched state must not validate.
+        assertFalse(
+            "a mismatched state must not validate",
+            session.validateEndSessionRedirect(
+                prepared.session,
+                Uri.parse("https://your-app.example/oidc/post-logout?state=wrong_state"),
+            ),
+        )
     }
 }

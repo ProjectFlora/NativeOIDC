@@ -169,9 +169,12 @@ import uniffi.native_oidc.FfiException
 import uniffi.native_oidc.beginEndSession
 
 // On the next launch: restore the state before any operation that needs it.
-val state = FfiAuthenticationState.fromJson(
-    serialized = secureStore.getString("native-oidc/state")!!
-)
+// The first launch, and the launch after sign-out, have nothing stored, so
+// restore only when a value exists — the absence of state means signed-out,
+// not an error.
+val state = secureStore.getString("native-oidc/state")?.let {
+    FfiAuthenticationState.fromJson(serialized = it)
+}
 
 // Serialize the refresh write against local sign-out so a late refresh
 // cannot restore state after deletion.
@@ -179,6 +182,9 @@ val sessionLock = Any()
 var signedOut = false
 
 scope.launch {
+    // Nothing to refresh when there is no restored state (first launch or
+    // signed out).
+    val state = state ?: return@launch
     // Refresh requires a non-empty refresh token and updates `state` in place
     // after a successful response.
     state.refresh(
@@ -249,7 +255,10 @@ The Kotlin examples above are mirrored in the release consumer app
 "Kotlin usage" flow, and the post-authorization operations, and the
 instrumented tests run the representative state-update, cancellation, and
 error branches (#85) with scripted transports, without a network
-connection. `scripts/check-android-release-consumer.sh` builds the consumer
+connection, plus the state-restoration branches (a missing stored state
+restores to `null` rather than crashing) and the end-session lifecycle entry
+points (the prepared session retained with its URL, and a scripted callback
+derived from the generated URL, matching and mismatched). `scripts/check-android-release-consumer.sh` builds the consumer
 app against the release AAR and runs the instrumented tests on an emulator,
 so the examples are verified against the distributed artifact — against the
 AAR built from the branch in pull request CI, and against the published
