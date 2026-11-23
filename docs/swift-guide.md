@@ -301,20 +301,32 @@ import Foundation
 import Security
 
 enum StateStorageError: Error {
+    case update(OSStatus)
     case add(OSStatus)
     case missing
 }
 
 func saveState(_ json: String, account: String) throws {
-    let delete: [CFString: Any] = [
+    let query: [CFString: Any] = [
         kSecClass: kSecClassGenericPassword,
         kSecAttrService: "com.example.app",
         kSecAttrAccount: account,
     ]
-    SecItemDelete(delete as CFDictionary)
-    var add = delete
-    add[kSecValueData] = Data(json.utf8)
-    let status = SecItemAdd(add as CFDictionary, nil)
+    var attributes = query
+    attributes[kSecValueData] = Data(json.utf8)
+
+    // Update the existing item in place, and only add when it does not
+    // exist: deleting first would lose the previous session if the write
+    // fails partway through.
+    switch SecItemUpdate(query as CFDictionary, attributes as CFDictionary) {
+    case errSecSuccess:
+        return
+    case errSecItemNotFound:
+        break // No item yet: fall through to add.
+    case let status:
+        throw StateStorageError.update(status)
+    }
+    let status = SecItemAdd(attributes as CFDictionary, nil)
     guard status == errSecSuccess else { throw StateStorageError.add(status) }
 }
 
@@ -350,22 +362,52 @@ let state = try FfiAuthenticationState.fromJson(
 ```
 
 The Keychain item above is a sketch: the application still chooses the
-accessibility class, scopes the item per user and issuer, and makes the write
-atomic. Retain the original absolute expiry instead of recalculating it from
+accessibility class and scopes the item per user and issuer. The update-first
+write keeps the previous session intact when a write fails partway through.
+Retain the original absolute expiry instead of recalculating it from
 `expires_in` on each launch. See
 [Save, restore, and refresh](user-guide.md#save-restore-and-refresh).
 
 ## Refresh
 
 Refresh requires a non-empty refresh token and updates `state` in place only
-after a successful response. Local sign-out sets the `signedOut` flag under
-the same lock, so a refresh that outlives sign-out cannot write the deleted
-state back:
+after a successful response. A session-owned guard shared with the local
+sign-out serializes the persistence write: a refresh that outlives sign-out
+cannot write the deleted state back, and a failed write releases the guard's
+lock instead of deadlocking a later sign-out:
 
 ```swift
-// Shared with the local sign-out in "End-session and revocation".
-let sessionLock = NSLock()
-var signedOut = false
+// Shared with the local sign-out in "End-session and revocation": one lock
+// and one flag, so the refresh write and sign-out cannot drift apart.
+final class SessionGuard {
+    private let lock = NSLock()
+    private var signedOut = false
+
+    /// A synchronous critical section that releases the lock even when
+    /// `body` throws, so a failed Keychain write cannot deadlock sign-out.
+    func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+
+    /// Persists the state unless the session has been signed out: the flag
+    /// check and the write run under one lock hold.
+    func persistState(_ stateJson: String, account: String) throws {
+        try withLock {
+            guard !signedOut else { return }
+            try saveState(stateJson, account: account)
+        }
+    }
+
+    /// Local sign-out sets the flag under the same lock, so a suspended
+    /// refresh write cannot write the deleted state back.
+    func markSignedOut() {
+        withLock { signedOut = true }
+    }
+}
+
+let session = SessionGuard()
 
 try await state.refresh(
     configuration: configuration,
@@ -377,13 +419,9 @@ try await state.refresh(
 
 // Refresh tokens may rotate; persist the updated complete state. Serialize
 // the state outside the lock — `toJson` is a core request, and the lock
-// must not be held across it — then check the flag under the lock.
+// must not be held across it.
 let stateJson = try await state.toJson()
-sessionLock.lock()
-if !signedOut {
-    try saveState(stateJson, account: "native-oidc/state")
-}
-sessionLock.unlock()
+try session.persistState(stateJson, account: "native-oidc/state")
 ```
 
 On failure or cancellation the local previous state is unchanged, which does
@@ -443,15 +481,13 @@ try await revoke(
 )
 ```
 
-Local sign-out is independent of both. Set the sign-out flag under the same
-lock the refresh write takes, then clear the stored state (for example
+Local sign-out is independent of both. Mark the session signed out in the
+guard shared with the refresh write, then clear the stored state (for example
 `SecItemDelete` for the item above) and drop in-memory references, and run it
 even if provider cleanup fails or is cancelled:
 
 ```swift
-sessionLock.lock()
-signedOut = true
-sessionLock.unlock()
+session.markSignedOut()
 ```
 
 See
@@ -533,7 +569,11 @@ lifecycle handling belong:
   second `authorize` call while an operation is in flight fails with
   `AuthorizationInProgress` instead of replacing the first operation's task
   and handle, which would leave its discovery un-cancellable and let it open
-  the browser when it resumes. The slot is released when the operation ends.
+  the browser when it resumes. `cancel()` keeps the slot claimed until the
+  cancelled operation finishes unwinding, so a retry right after a `cancel()`
+  is rejected rather than racing the still-busy adapter; the slot is
+  released when the operation ends, before its completion handler runs, so a
+  retry issued directly from the completion can claim it.
 
 ### iOS/iPadOS wrapper
 
@@ -578,7 +618,8 @@ struct AuthorizationInProgress: Error {}
     /// Runs authorization in the system browser session. The completion
     /// handler reports the serialized state JSON (or `nil`) and any error.
     /// A call that arrives while an operation is in flight reports
-    /// `AuthorizationInProgress`.
+    /// `AuthorizationInProgress` — including one that arrives right after a
+    /// `cancel()`, while the cancelled operation is still unwinding.
     @objc public func authorize(
         issuer: String,
         clientId: String,
@@ -598,6 +639,10 @@ struct AuthorizationInProgress: Error {}
         let transport = URLSessionNativeHttpTransport()
         let cancellation = FfiCancellationHandle()
         let task = Task { @MainActor in
+            // Release the slot before calling the completion handler, so a
+            // host that retries directly from the completion can claim it.
+            // The generation gate keeps a superseded task from releasing a
+            // slot a newer operation owns.
             do {
                 let configuration = try await FfiServiceConfiguration.discover(
                     issuer: issuer,
@@ -621,16 +666,18 @@ struct AuthorizationInProgress: Error {}
                     options: options,
                     transport: transport
                 )
-                completion(try await state.toJson(), nil)
+                let stateJson = try await state.toJson()
+                if inFlightGeneration == generation {
+                    activeTask = nil
+                    activeCancellation = nil
+                }
+                completion(stateJson, nil)
             } catch {
+                if inFlightGeneration == generation {
+                    activeTask = nil
+                    activeCancellation = nil
+                }
                 completion(nil, error)
-            }
-            // Release the slot once this operation has fully ended —
-            // success, failure, or cancellation — only if it is still the
-            // claimed one.
-            if inFlightGeneration == generation {
-                activeTask = nil
-                activeCancellation = nil
             }
         }
         activeCancellation = cancellation
@@ -638,13 +685,14 @@ struct AuthorizationInProgress: Error {}
     }
 
     /// Cancels the active browser session, any in-flight core request, and a
-    /// suspended discovery request alike.
+    /// suspended discovery request alike. The in-flight slot stays claimed
+    /// until the cancelled operation finishes unwinding — the adapter may
+    /// still be busy — so a retry right after a `cancel()` is rejected rather
+    /// than racing it; the slot is released when the operation ends.
     @objc public func cancel() {
         adapter.cancel()
         activeCancellation?.cancel()
         activeTask?.cancel()
-        activeCancellation = nil
-        activeTask = nil
     }
 }
 ```
@@ -676,8 +724,9 @@ struct AuthorizationInProgress: Error {}
 
     /// Binds the loopback listener and opens the external browser. The
     /// completion handler reports the serialized state JSON (or `nil`) and
-    /// any error. A call that arrives while an operation is in flight
-    /// reports `AuthorizationInProgress`.
+    /// any error. A call that arrives while an operation is in flight reports
+    /// `AuthorizationInProgress` — including one that arrives right after a
+    /// `cancel()`, while the cancelled operation is still unwinding.
     @objc public func authorize(
         issuer: String,
         clientId: String,
@@ -697,6 +746,10 @@ struct AuthorizationInProgress: Error {}
         let transport = URLSessionNativeHttpTransport()
         let cancellation = FfiCancellationHandle()
         let task = Task { @MainActor in
+            // Release the slot before calling the completion handler, so a
+            // host that retries directly from the completion can claim it.
+            // The generation gate keeps a superseded task from releasing a
+            // slot a newer operation owns.
             do {
                 let configuration = try await FfiServiceConfiguration.discover(
                     issuer: issuer,
@@ -720,16 +773,18 @@ struct AuthorizationInProgress: Error {}
                     options: options,
                     transport: transport
                 )
-                completion(try await state.toJson(), nil)
+                let stateJson = try await state.toJson()
+                if inFlightGeneration == generation {
+                    activeTask = nil
+                    activeCancellation = nil
+                }
+                completion(stateJson, nil)
             } catch {
+                if inFlightGeneration == generation {
+                    activeTask = nil
+                    activeCancellation = nil
+                }
                 completion(nil, error)
-            }
-            // Release the slot once this operation has fully ended —
-            // success, failure, or cancellation — only if it is still the
-            // claimed one.
-            if inFlightGeneration == generation {
-                activeTask = nil
-                activeCancellation = nil
             }
         }
         activeCancellation = cancellation
@@ -737,13 +792,14 @@ struct AuthorizationInProgress: Error {}
     }
 
     /// Cancels the active browser session, any in-flight core request, and a
-    /// suspended discovery request alike.
+    /// suspended discovery request alike. The in-flight slot stays claimed
+    /// until the cancelled operation finishes unwinding — the adapter may
+    /// still be busy — so a retry right after a `cancel()` is rejected rather
+    /// than racing it; the slot is released when the operation ends.
     @objc public func cancel() {
         adapter.cancel()
         activeCancellation?.cancel()
         activeTask?.cancel()
-        activeCancellation = nil
-        activeTask = nil
     }
 }
 ```
@@ -766,9 +822,14 @@ The Swift examples in this guide are exercised at the following scope:
   in-flight discovery ended by cancellation, a provider-rejected refresh,
   malformed stored state, the post-logout callback with a registered redirect
   (a matching state validates, a mismatched one fails; both through the
-  prepared-session lifecycle entry points), and two overlapping
-  authorizations (the second is rejected, the first ends cancelled while its
-  discovery is in flight, and the single-flight slot is released after). The
+  prepared-session lifecycle entry points), the refresh/sign-out guard
+  (a post-sign-out refresh write is suppressed, and a throwing critical
+  section releases the guard's lock), and the authorization lifecycle (two
+  overlapping authorizations: the second is rejected; after a cancellation
+  while the first discovery is in flight, an immediate retry is rejected
+  while the slot stays claimed, a retry from the completion is accepted, the
+  first ends cancelled, and the slot is released when the operation ends).
+  The
   authorization, callback-exchange, and cancellation paths are additionally
   exercised by the repository's Swift test suite
   (`SwiftTests/NativeOIDCTests`, a macOS loopback flow against a local mock

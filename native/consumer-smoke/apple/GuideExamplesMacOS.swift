@@ -94,7 +94,8 @@ struct AuthorizationInProgress: Error {}
   /// Binds the loopback listener and opens the external browser. The
   /// completion handler reports the serialized state JSON (or `nil`) and
   /// any error. A call that arrives while an operation is in flight reports
-  /// `AuthorizationInProgress`.
+  /// `AuthorizationInProgress` — including one that arrives right after a
+  /// `cancel()`, while the cancelled operation is still unwinding.
   @objc public func authorize(
     issuer: String,
     clientId: String,
@@ -113,6 +114,10 @@ struct AuthorizationInProgress: Error {}
     let generation = inFlightGeneration
     let cancellation = FfiCancellationHandle()
     let task = Task { @MainActor in
+      // Release the slot before calling the completion handler, so a host
+      // that retries directly from the completion can claim it. The
+      // generation gate keeps a superseded task from releasing a slot a
+      // newer operation owns.
       do {
         // Discovery is a core request, not an adapter operation: signal the
         // shared handle so a cancel while it is in flight ends it instead of
@@ -137,15 +142,18 @@ struct AuthorizationInProgress: Error {}
           options: options,
           transport: transport
         )
-        completion(try await state.toJson(), nil)
+        let stateJson = try await state.toJson()
+        if inFlightGeneration == generation {
+          activeTask = nil
+          activeCancellation = nil
+        }
+        completion(stateJson, nil)
       } catch {
+        if inFlightGeneration == generation {
+          activeTask = nil
+          activeCancellation = nil
+        }
         completion(nil, error)
-      }
-      // Release the slot once this operation has fully ended — success,
-      // failure, or cancellation — only if it is still the claimed one.
-      if inFlightGeneration == generation {
-        activeTask = nil
-        activeCancellation = nil
       }
     }
     activeCancellation = cancellation
@@ -153,12 +161,13 @@ struct AuthorizationInProgress: Error {}
   }
 
   /// Cancels the active browser session, any in-flight core request, and a
-  /// suspended discovery request alike.
+  /// suspended discovery request alike. The in-flight slot stays claimed
+  /// until the cancelled operation finishes unwinding — the adapter may
+  /// still be busy — so a retry right after a `cancel()` is rejected rather
+  /// than racing it; the slot is released when the operation ends.
   @objc public func cancel() {
     adapter.cancel()
     activeCancellation?.cancel()
     activeTask?.cancel()
-    activeCancellation = nil
-    activeTask = nil
   }
 }
