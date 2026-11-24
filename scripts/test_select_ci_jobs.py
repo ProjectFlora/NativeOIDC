@@ -75,6 +75,9 @@ class SharedInputTests(unittest.TestCase):
         self.assertEqual(selected("scripts/check-macos-real-browser.sh"), {"test"})
         self.assertEqual(selected("native/apple/MacOSRealBrowserCheck.swift"), {"apple"})
         self.assertEqual(selected("scripts/generate-bindings.sh"), {"test", "apple", "android", "spm_bindings"})
+        self.assertEqual(selected("scripts/apple-phase-timing.sh"), {"test", "apple"})
+        self.assertEqual(selected("scripts/check-apple-static-link-smoke.sh"), {"test", "apple"})
+        self.assertEqual(selected("scripts/test_apple_phase_timing.py"), {"test"})
 
     def test_unknown_paths_run_everything(self):
         self.assertEqual(selected("rust-toolchain.toml"), ALL)

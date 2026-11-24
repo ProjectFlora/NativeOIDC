@@ -1,8 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Build, verify and archive the Apple release package. CI, the release
+# workflow and local runs all use this one entry point; it runs the phases in
+# order and records how long each took (scripts/apple-phase-timing.sh) in the
+# step summary, including a failed run's last phase:
+#
+# 1. Build: UniFFI bindings and the four Rust release slices.
+# 2. Stage: Swift sources, notices, README, headers and the universal macOS
+#    library in target/apple/release-package.
+# 3. XCFramework: create it, and check that its canonical Info.plist is the
+#    same across two create-xcframework runs.
+# 4. Verify: the macOS static-link smoke test
+#    (scripts/check-apple-static-link-smoke.sh) and the iOS simulator
+#    authorization flow (scripts/check-ios-authorization-flow.sh), which
+#    records its simulator phases separately.
+# 5. Archive: the release zip and its determinism self-test.
+#
+# Each verification script also runs on its own against an existing staging.
+
 repo_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
+# shellcheck source=scripts/apple-phase-timing.sh
+source "$repo_root/scripts/apple-phase-timing.sh"
 
 if [[ "$(uname -s)" != Darwin ]]; then
     echo "Apple XCFramework packaging requires macOS and Xcode" >&2
@@ -14,15 +34,6 @@ if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
     echo "Usage: $0 [version]" >&2
     exit 2
 fi
-
-case "$(uname -m)" in
-    arm64) host_macos_target=arm64-apple-macosx15.0 ;;
-    x86_64) host_macos_target=x86_64-apple-macosx15.0 ;;
-    *)
-        echo "unsupported macOS architecture for package smoke test" >&2
-        exit 1
-        ;;
-esac
 
 output_root="$repo_root/target/apple/release-package"
 package_root="$output_root/NativeOIDC-Apple"
@@ -42,20 +53,69 @@ if [[ -e "$output_root" ]]; then
     exit 1
 fi
 
+# The self-test outputs below. The guard above requires $output_root to be
+# absent, so none exists from an earlier run; cleanup removes them on every
+# exit path, so a run never leaves them behind. Both stay in $output_root,
+# outside the staged $package_root, so a crashed run can never leave them in
+# the release tree that the archive embeds.
+scratch_xcframework="$output_root/NativeOIDC-Apple-scratch.xcframework"
+recheck="$output_root/NativeOIDC-Apple-$version-determinism.zip"
+
+# A fresh timing file for this run, shared with the scripts it calls. Timing
+# is diagnostic only: if the file cannot be created, the phases are still
+# logged as [timing] lines and packaging continues.
+if APPLE_PHASE_TIMING_FILE=$(mktemp "${TMPDIR:-/tmp}/package-phase-timings.XXXXXX" 2>/dev/null); then
+    export APPLE_PHASE_TIMING_FILE
+else
+    echo "warning: could not create a phase timing file; the phase table is not written" >&2
+    unset APPLE_PHASE_TIMING_FILE
+fi
+package_started=$SECONDS
+
+# A failure to remove the self-test outputs must not skip the phase table or
+# replace the packaging error, so it is held until the table is written. It
+# fails a run that otherwise succeeded.
+cleanup() {
+    local status=$? cleanup_status=0
+    rm -rf "$scratch_xcframework" "$recheck" || cleanup_status=$?
+    phase_fail_open
+    if ((status == 0 && cleanup_status == 0)); then
+        phase_record "Total" ok $((SECONDS - package_started))
+    else
+        phase_record "Total" failed $((SECONDS - package_started))
+    fi
+    phase_write_summary "Apple packaging phases"
+    if [[ -n "${APPLE_PHASE_TIMING_FILE:-}" ]]; then
+        rm -f "$APPLE_PHASE_TIMING_FILE" 2>/dev/null || true
+    fi
+    if ((cleanup_status != 0)); then
+        echo "Could not remove the packaging self-test outputs: $scratch_xcframework $recheck" >&2
+        if ((status == 0)); then
+            exit "$cleanup_status"
+        fi
+    fi
+}
+trap cleanup EXIT
+
 export IPHONEOS_DEPLOYMENT_TARGET=18.0
 export MACOSX_DEPLOYMENT_TARGET=15.0
 
+phase_begin "Build: UniFFI bindings"
 scripts/generate-bindings.sh "$generated"
+phase_end
 
 for target in \
     aarch64-apple-ios \
     aarch64-apple-ios-sim \
     aarch64-apple-darwin \
     x86_64-apple-darwin; do
+    phase_begin "Build: Rust $target"
     rustup target add "$target"
     cargo build --locked --release --lib --target "$target"
+    phase_end
 done
 
+phase_begin "Stage: sources, notices, headers, macOS library"
 mkdir -p "$repo_root/target/apple" "$package_root/Swift" "$headers"
 # The Swift package sources (the UniFFI-generated API plus the platform
 # adapters) ship in the archive so manual Xcode users get the same content as
@@ -77,7 +137,9 @@ xcrun lipo -create \
     target/aarch64-apple-darwin/release/libnative_oidc.a \
     target/x86_64-apple-darwin/release/libnative_oidc.a \
     -output "$macos_library"
+phase_end
 
+phase_begin "XCFramework: create and check Info.plist stability"
 # The slice inputs are shared by both create-xcframework calls below; the
 # xcframework names derive from the libraries, so only -output differs.
 xcframework_args=(
@@ -100,15 +162,9 @@ xcodebuild -create-xcframework \
 # framework a second time, canonicalizes both plists
 # (scripts/normalize_xcframework_plist.py: validate the slice set, sort the
 # array and each architecture list, rewrite in a fixed format), and requires
-# identical bytes before the archive embeds the framework.
-scratch_xcframework="$output_root/NativeOIDC-Apple-scratch.xcframework"
-# The guard above requires $output_root to be absent before the run, so no
-# scratch from an earlier run exists here; the EXIT trap removes it on
-# every exit path instead, so the run never leaves its self-test outputs
-# behind. The scratch stays in $output_root, outside the staged
-# $package_root, so a crashed run can never leave it in the release tree
-# that the archive embeds.
-trap 'rm -rf "$scratch_xcframework"' EXIT
+# identical bytes before the archive embeds the framework. The scratch copy
+# ($scratch_xcframework, defined with the guard) is removed by cleanup on
+# every exit path.
 xcodebuild -create-xcframework \
     "${xcframework_args[@]}" \
     -output "$scratch_xcframework"
@@ -122,22 +178,17 @@ if ! cmp -s "$xcframework/Info.plist" "$scratch_xcframework/Info.plist"; then
     exit 1
 fi
 rm -rf "$scratch_xcframework"
+phase_end
 
-xcrun swiftc \
-    -parse-as-library \
-    -target "$host_macos_target" \
-    -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
-    -Xcc "-fmodule-map-file=$headers/module.modulemap" \
-    -L "$repo_root/target/apple" \
-    -lnative_oidc_macos \
-    -o "$repo_root/target/apple/mac-authorization-flow-smoke-static" \
-    "$generated/swift/native_oidc.swift" \
-    "$repo_root/SwiftTests/NativeOIDCTests/MacOSMockOAuthProvider.swift" \
-    "$repo_root/Sources/NativeOIDC/MacOSAuthorizationAdapter.swift" \
-    "$repo_root/Sources/NativeOIDC/URLSessionNativeHttpTransport.swift" \
-    "$repo_root/native/apple/MacOSAuthorizationFlowSmoke.swift"
-"$repo_root/target/apple/mac-authorization-flow-smoke-static"
+phase_begin "Verify: macOS static-link smoke"
+scripts/check-apple-static-link-smoke.sh
+phase_end
+
+# The iOS flow records its own phases (app build, simulator selection, boot,
+# install, launch, result) in the same table.
 scripts/check-ios-authorization-flow.sh
+
+phase_begin "Archive: zip and determinism self-test"
 
 # Keep the archive bytes free of build-time and file-state inputs that
 # `ditto` would otherwise record. The in-run self-test below zips the same
@@ -184,14 +235,9 @@ python3 "$repo_root/scripts/normalize_zip.py" "$archive"
 # normalize both, and demand identical hashes. Staging is not repeated.
 # (The raw double-ditto hashes would differ: the first zip's read of the
 # tree advances file atimes, which the second zip records in the UX extra
-# field; the normalizer is what makes the comparison meaningful.)
-recheck="$output_root/NativeOIDC-Apple-$version-determinism.zip"
-# Extend the EXIT trap to the recheck zip as well (replacing the
-# scratch-only trap set with the scratch). With the guard requiring
-# $output_root to be absent, no recheck zip from an earlier run exists
-# here either; the trap is what removes both self-test outputs on every
-# exit path.
-trap 'rm -rf "$scratch_xcframework" "$recheck"' EXIT
+# field; the normalizer is what makes the comparison meaningful.) The recheck
+# zip ($recheck, defined with the guard) is removed by cleanup on every exit
+# path.
 ditto -c -k --keepParent "$package_root" "$recheck"
 python3 "$repo_root/scripts/normalize_zip.py" "$recheck"
 first_hash=$(shasum -a 256 "$archive" | awk '{print $1}')
@@ -201,4 +247,5 @@ if [[ "$first_hash" != "$second_hash" ]]; then
     echo "Apple release archive packaging is not deterministic: $first_hash != $second_hash" >&2
     exit 1
 fi
+phase_end
 echo "Apple release archive packaging is deterministic ($first_hash)"
