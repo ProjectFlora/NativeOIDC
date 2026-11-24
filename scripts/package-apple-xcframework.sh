@@ -72,11 +72,14 @@ else
 fi
 package_started=$SECONDS
 
+# A failure to remove the self-test outputs must not skip the phase table or
+# replace the packaging error, so it is held until the table is written. It
+# fails a run that otherwise succeeded.
 cleanup() {
-    local status=$?
-    rm -rf "$scratch_xcframework" "$recheck"
+    local status=$? cleanup_status=0
+    rm -rf "$scratch_xcframework" "$recheck" || cleanup_status=$?
     phase_fail_open
-    if ((status == 0)); then
+    if ((status == 0 && cleanup_status == 0)); then
         phase_record "Total" ok $((SECONDS - package_started))
     else
         phase_record "Total" failed $((SECONDS - package_started))
@@ -84,6 +87,12 @@ cleanup() {
     phase_write_summary "Apple packaging phases"
     if [[ -n "${APPLE_PHASE_TIMING_FILE:-}" ]]; then
         rm -f "$APPLE_PHASE_TIMING_FILE" 2>/dev/null || true
+    fi
+    if ((cleanup_status != 0)); then
+        echo "Could not remove the packaging self-test outputs: $scratch_xcframework $recheck" >&2
+        if ((status == 0)); then
+            exit "$cleanup_status"
+        fi
     fi
 }
 trap cleanup EXIT

@@ -146,6 +146,40 @@ def first_line(lines, text, start=0):
     return next(index for index in range(start, len(lines)) if text in lines[index])
 
 
+@unittest.skipUnless(BASH, "bash is not installed")
+class PackageCleanupTestCase(BashHelperMixin, unittest.TestCase):
+    """The package script's own cleanup function, with self-test removal failing."""
+
+    def run_cleanup(self, ending):
+        lines = script_lines("package-apple-xcframework.sh")
+        start = first_line(lines, "cleanup() {")
+        end = lines.index("}", start)
+        cleanup = "\n".join(lines[start:end + 1])
+        body = (cleanup + "\n"
+                # Only the self-test removal (`rm -rf`) fails; other rm calls run.
+                'rm() { if [[ "$1" == -rf ]]; then return 1; fi; command rm "$@"; }\n'
+                "scratch_xcframework=scratch.xcframework\nrecheck=recheck.zip\n"
+                "package_started=$SECONDS\ntrap cleanup EXIT\n"
+                "phase_begin 'Archive: zip and determinism self-test'\n" + ending)
+        return self.run_bash(body)
+
+    def test_packaging_error_is_kept_and_the_table_is_written(self):
+        result = self.run_cleanup("exit 17\n")
+        self.assertEqual(result.returncode, 17, result.stderr)
+        self.assertIn("| Archive: zip and determinism self-test | failed |", result.stdout)
+        self.assertIn("| Total | failed |", result.stdout)
+        self.assertIn("Could not remove the packaging self-test outputs", result.stderr)
+        self.assertFalse(os.path.exists(self.timing_file))
+
+    def test_cleanup_failure_fails_an_otherwise_successful_run(self):
+        result = self.run_cleanup("phase_end\n")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("| Archive: zip and determinism self-test | ok |", result.stdout)
+        self.assertIn("| Total | failed |", result.stdout)
+        self.assertIn("Could not remove the packaging self-test outputs", result.stderr)
+        self.assertFalse(os.path.exists(self.timing_file))
+
+
 class ScriptOrderTestCase(unittest.TestCase):
     """Failure paths that the bash tests above cannot reach without Xcode."""
 
