@@ -85,20 +85,21 @@ void check_refresh(AuthClient& client) {
     check(timed_out.status == OperationStatus::Cancelled, "the host timeout cancels a refresh");
     check(client.stored_state() == refreshed, "a timed-out refresh keeps the stored state");
 
-    // Step 4: the provider never answers; another thread cancels.
+    // Step 4: the provider never answers; another thread requests a stop.
+    std::stop_source stop;
     OperationResult cancelled;
-    std::thread worker([&client, &cancelled] {
+    std::thread worker([&client, &cancelled, token = stop.get_token()] {
         try {
-            cancelled = client.refresh(std::chrono::seconds(60));
+            cancelled = client.refresh(std::chrono::seconds(60), token);
         } catch (const std::exception& error) {
             cancelled = {OperationStatus::Error, error.what()};
         }
     });
     std::this_thread::sleep_for(std::chrono::seconds(3));
-    client.cancel();
+    stop.request_stop();
     worker.join();
     check(cancelled.status == OperationStatus::Cancelled,
-          "AuthClient::cancel cancels a refresh from another thread");
+          "a stop from another thread cancels a running refresh");
     check(client.stored_state() == refreshed, "a cancelled refresh keeps the stored state");
 }
 
@@ -145,13 +146,22 @@ void check_local_errors(const std::string& base_url, const std::filesystem::path
               OperationStatus::Error,
           "end-session with explicit endpoints requires end_session_endpoint");
 
+    // A valid configuration: only the stop prevents the browser launch.
+    AuthClient valid(mock_config(base_url), file);
+    std::stop_source stopped;
+    stopped.request_stop();
+    check(valid.sign_in(std::chrono::seconds(10), stopped.get_token()).status ==
+              OperationStatus::Cancelled,
+          "a stop requested before sign_in starts cancels it");
+
     std::promise<OperationResult> background;
-    {
-        const std::jthread thread = start_sign_in(
-            single, [&background](const OperationResult& result) { background.set_value(result); });
-    }
-    check(background.get_future().get().status == OperationStatus::Error,
+    std::jthread thread = start_sign_in(
+        single, [&background](const OperationResult& result) { background.set_value(result); });
+    std::future<OperationResult> finished = background.get_future();
+    check(finished.wait_for(std::chrono::seconds(10)) == std::future_status::ready &&
+              finished.get().status == OperationStatus::Error,
           "start_sign_in reports the result from its thread");
+    thread = {};
 
     check(!signed_out.stored_state().has_value(), "failed operations store no state");
 }

@@ -423,19 +423,32 @@ OperationResult take_result(NativeOidcWindowsAuthorizationResult* raw) {
 Never call an operation on a UI thread: authorization waits for the user in
 the browser, and the others wait on the network. `OperationRun` starts one
 operation on its own thread with a fresh handle, can cancel it, and waits for
-it to return before it frees the handle:
+it to return before it frees the handle. It also connects an optional
+`std::stop_token` to the handle **before** the call starts, so a stop
+requested at any time, even before the operation began, cancels it:
 
 ```cpp
 using NativeOperation = NativeOidcWindowsAuthorizationResult* (*)(
     const char* request_json_utf8, const NativeOidcWindowsCancellationHandle* cancellation);
 
+struct CancelOnStop {
+    const NativeOidcWindowsCancellationHandle* handle;
+    void operator()() const noexcept {
+        native_oidc_windows_cancellation_cancel(handle);
+    }
+};
+
 class OperationRun {
 public:
-    OperationRun(NativeOperation operation, std::string request_json_utf8)
+    OperationRun(NativeOperation operation, std::string request_json_utf8,
+                 std::stop_token stop = {})
         : cancellation_(native_oidc_windows_cancellation_new()) {
         if (!cancellation_) {
             throw std::runtime_error("could not create a cancellation handle");
         }
+        // Runs CancelOnStop right away if a stop was already requested, so
+        // the call then returns the cancelled status before doing any work.
+        stop_callback_.emplace(std::move(stop), CancelOnStop{cancellation_.get()});
         result_ = promise_.get_future();
         worker_ = std::thread([this, operation, request = std::move(request_json_utf8)] {
             try {
@@ -479,6 +492,7 @@ public:
 
 private:
     CancellationPtr cancellation_;  // destroyed last, after the worker joined
+    std::optional<std::stop_callback<CancelOnStop>> stop_callback_;
     std::promise<OperationResult> promise_;
     std::future<OperationResult> result_;
     std::thread worker_;
@@ -487,7 +501,8 @@ private:
 
 A GUI can hold an `OperationRun`, poll `wait_for` with a zero timeout from a
 timer, and call `cancel` from a Cancel button. The examples below use it
-through the `AuthClient` class, which blocks its caller.
+through the `AuthClient` class, which blocks its caller and takes a
+`std::stop_token` instead.
 
 ### The client: state, operations, and serialization
 
@@ -496,25 +511,26 @@ through the `AuthClient` class, which blocks its caller.
 operation that reads or writes the state, as the
 [shared guide](user-guide.md#save-restore-and-refresh) requires, so a late
 refresh cannot write tokens back after sign-out. Its methods block, so call
-them from a background thread; `cancel` may be called from any thread:
+them from a background thread. To cancel one from another thread, pass a
+`std::stop_token` and request a stop on its source:
 
 ```cpp
 class AuthClient {
 public:
     AuthClient(ProviderConfig config, std::filesystem::path state_file);
 
+    // A stop requested on `stop` cancels the operation, whether it is
+    // already running or still waiting for another operation to finish.
     std::optional<std::string> stored_state();
-    OperationResult sign_in(std::chrono::milliseconds timeout);
-    OperationResult refresh(std::chrono::milliseconds timeout);
-    OperationResult end_provider_session(std::chrono::milliseconds timeout);
-    OperationResult sign_out(std::chrono::milliseconds timeout);
-
-    // Cancels the operation that is running now, if any.
-    void cancel();
+    OperationResult sign_in(std::chrono::milliseconds timeout, std::stop_token stop = {});
+    OperationResult refresh(std::chrono::milliseconds timeout, std::stop_token stop = {});
+    OperationResult end_provider_session(std::chrono::milliseconds timeout,
+                                         std::stop_token stop = {});
+    OperationResult sign_out(std::chrono::milliseconds timeout, std::stop_token stop = {});
 
 private:
     OperationResult run(NativeOperation operation, std::string request,
-                        std::chrono::milliseconds timeout);
+                        std::chrono::milliseconds timeout, std::stop_token stop);
     // Protected storage, section 4. Called with state_mutex_ held.
     std::optional<std::string> load_state() const;
     void save_state(std::string_view state_json) const;
@@ -522,9 +538,7 @@ private:
 
     ProviderConfig config_;
     std::filesystem::path state_file_;
-    std::mutex state_mutex_;    // held for each whole operation
-    std::mutex running_mutex_;  // guards running_
-    OperationRun* running_ = nullptr;
+    std::mutex state_mutex_;  // held for each whole operation
 };
 ```
 
@@ -535,29 +549,13 @@ way, for example by saving a successful state:
 
 ```cpp
 OperationResult AuthClient::run(NativeOperation operation, std::string request,
-                                std::chrono::milliseconds timeout) {
-    OperationRun run(operation, std::move(request));
-    {
-        const std::lock_guard lock(running_mutex_);
-        running_ = &run;
-    }
-    // Unregister before `run` is destroyed, even if waiting throws.
-    const std::unique_ptr<AuthClient, void (*)(AuthClient*)> unregister(this, [](AuthClient* client) {
-        const std::lock_guard lock(client->running_mutex_);
-        client->running_ = nullptr;
-    });
+                                std::chrono::milliseconds timeout, std::stop_token stop) {
+    OperationRun run(operation, std::move(request), std::move(stop));
     if (std::optional<OperationResult> result = run.wait_for(timeout)) {
         return std::move(*result);
     }
     run.cancel();
     return run.wait();
-}
-
-void AuthClient::cancel() {
-    const std::lock_guard lock(running_mutex_);
-    if (running_ != nullptr) {
-        running_->cancel();
-    }
 }
 ```
 
@@ -571,13 +569,14 @@ authentication-state JSON. The authorization URL and nonce are not exposed.
 
 The call waits for the browser callback **without a timeout of its own**: if
 the user closes the browser, it waits until it is cancelled. Always pass a
-host timeout (or a Cancel button). Cancellation stops the wait but cannot
-close the browser window.
+host timeout (or a stop from a Cancel button). Cancellation stops the wait
+but cannot close the browser window.
 
 ```cpp
-OperationResult AuthClient::sign_in(std::chrono::milliseconds timeout) {
+OperationResult AuthClient::sign_in(std::chrono::milliseconds timeout, std::stop_token stop) {
     const std::lock_guard lock(state_mutex_);
-    OperationResult result = run(native_oidc_windows_authorize, authorization_request(config_), timeout);
+    OperationResult result =
+        run(native_oidc_windows_authorize, authorization_request(config_), timeout, std::move(stop));
     if (result.status == OperationStatus::Success) {
         save_state(result.value);
     }
@@ -586,17 +585,19 @@ OperationResult AuthClient::sign_in(std::chrono::milliseconds timeout) {
 ```
 
 From a UI, start sign-in on a background thread and marshal the result back
-to the UI thread (for example with `PostMessage`). On shutdown, call
-`cancel` and let the thread join before the client is destroyed:
+to the UI thread (for example with `PostMessage`). `std::jthread` passes its
+own stop token. Destroying the returned thread (or calling `request_stop`)
+cancels the sign-in, even one that has not started its native call yet, and
+the destructor then waits for it. Destroy it before the client:
 
 ```cpp
 // Runs sign-in on a background thread; on_done runs on that thread.
 std::jthread start_sign_in(AuthClient& client,
                            std::function<void(const OperationResult&)> on_done) {
-    return std::jthread([&client, on_done = std::move(on_done)] {
+    return std::jthread([&client, on_done = std::move(on_done)](std::stop_token stop) {
         OperationResult result;
         try {
-            result = client.sign_in(std::chrono::minutes(5));
+            result = client.sign_in(std::chrono::minutes(5), std::move(stop));
         } catch (const std::exception& error) {
             result = {OperationStatus::Error, error.what()};  // for example, storage failed
         }
@@ -811,13 +812,14 @@ latest one the host has. See the
 does not guarantee.
 
 ```cpp
-OperationResult AuthClient::refresh(std::chrono::milliseconds timeout) {
+OperationResult AuthClient::refresh(std::chrono::milliseconds timeout, std::stop_token stop) {
     const std::lock_guard lock(state_mutex_);
     const std::optional<std::string> state = load_state();
     if (!state) {
         return {OperationStatus::Error, "not signed in"};
     }
-    OperationResult result = run(native_oidc_windows_refresh, refresh_request(config_, *state), timeout);
+    OperationResult result =
+        run(native_oidc_windows_refresh, refresh_request(config_, *state), timeout, std::move(stop));
     if (result.status == OperationStatus::Success) {
         save_state(result.value);
     }
@@ -878,14 +880,15 @@ system browser. Read the ID Token for `id_token_hint` before deleting the
 state:
 
 ```cpp
-OperationResult AuthClient::end_provider_session(std::chrono::milliseconds timeout) {
+OperationResult AuthClient::end_provider_session(std::chrono::milliseconds timeout,
+                                                 std::stop_token stop) {
     const std::lock_guard lock(state_mutex_);
     std::optional<std::string> id_token_hint;
     if (const std::optional<std::string> state = load_state()) {
         id_token_hint = read_tokens(*state).id_token;
     }
     return run(native_oidc_windows_end_session, end_session_request(config_, id_token_hint),
-               timeout);
+               timeout, std::move(stop));
 }
 ```
 
@@ -905,17 +908,19 @@ then deletes the stored state **whatever the revocation result**: local
 sign-out must not depend on the provider:
 
 ```cpp
-OperationResult AuthClient::sign_out(std::chrono::milliseconds timeout) {
+OperationResult AuthClient::sign_out(std::chrono::milliseconds timeout, std::stop_token stop) {
     const std::lock_guard lock(state_mutex_);
     OperationResult revocation{OperationStatus::Success, ""};
     try {
         if (const std::optional<std::string> state = load_state()) {
             const Tokens tokens = read_tokens(*state);
-            revocation = tokens.refresh_token
-                ? run(native_oidc_windows_revoke,
-                      revocation_request(config_, *tokens.refresh_token, "refresh_token"), timeout)
-                : run(native_oidc_windows_revoke,
-                      revocation_request(config_, tokens.access_token, "access_token"), timeout);
+            const bool has_refresh_token = tokens.refresh_token.has_value();
+            revocation = run(native_oidc_windows_revoke,
+                             revocation_request(config_,
+                                                has_refresh_token ? *tokens.refresh_token
+                                                                  : tokens.access_token,
+                                                has_refresh_token ? "refresh_token" : "access_token"),
+                             timeout, std::move(stop));
         }
     } catch (const std::exception& error) {
         revocation = {OperationStatus::Error, error.what()};
@@ -965,8 +970,9 @@ result before the browser opens.
 ### Cancellation and timeouts
 
 - Every operation takes a cancellation handle; `OperationRun` gives each one
-  its own. `native_oidc_windows_cancellation_cancel` is thread-safe and
-  idempotent.
+  its own and connects it to a `std::stop_token` before the call starts, so
+  a stop is never lost to a race with the operation's start.
+  `native_oidc_windows_cancellation_cancel` is thread-safe and idempotent.
 - Cancellation makes the blocking call return with the cancelled status as
   soon as the current step notices it. It cannot undo a request the
   provider already processed, and it cannot close the browser.
@@ -1028,8 +1034,10 @@ which checks every request it receives:
 - `usable_access_token` refreshes an expired state, the provider rotates the
   refresh token, and the replacement state is saved.
 - A refresh rejected with `invalid_grant`, a refresh cancelled by the host
-  timeout, and a refresh cancelled through `AuthClient::cancel` from
+  timeout, and a refresh cancelled through a `std::stop_token` from
   another thread each leave the stored state unchanged.
+- A sign-in whose stop was requested before it started returns the
+  cancelled status without opening the browser.
 - `sign_out` revokes the refresh token and deletes the state, and still
   deletes it when revocation fails with HTTP 503.
 - Errors that need no browser: a single explicit endpoint, a non-loopback
