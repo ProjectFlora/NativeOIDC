@@ -76,6 +76,10 @@ To cancel while the call is running, invoke
 `native_oidc_windows_cancellation_cancel(cancellation)` from another thread. After
 joining, inspect `resultStatus` and `resultValue` on the caller thread.
 
+The [Windows C++ user guide](https://github.com/ProjectFlora/NativeOIDC/blob/main/docs/windows-cpp-guide.md)
+builds on this with CMake setup, JSON request construction, DPAPI-protected state storage,
+refresh, logout, timeouts, and error handling.
+
 ## .NET interop
 
 The same C ABI can be called from C# or VB.NET using P/Invoke. Declare UTF-8

@@ -9,15 +9,18 @@ $ErrorActionPreference = "Stop"
 # its port on the first standard output line, and the consumer receives the
 # provider base URL as its only argument. Both must exit with 0: the consumer
 # checks the results it received, and the provider checks the requests it
-# served.
+# served. ProviderArguments selects the provider's mode (`guide` for the C++
+# guide examples).
 function Invoke-ConsumerWithMockProvider {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$MockProvider,
-        [Parameter(Mandatory = $true)][string]$Consumer
+        [Parameter(Mandatory = $true)][string]$Consumer,
+        [string[]]$ProviderArguments = @()
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new($MockProvider)
+    foreach ($argument in $ProviderArguments) { $startInfo.ArgumentList.Add($argument) }
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardOutput = $true
     $provider = [System.Diagnostics.Process]::Start($startInfo)
@@ -81,6 +84,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "C++ consumer build failed: $LASTEXITCODE" }
     Invoke-ConsumerWithMockProvider -Name "C++" -MockProvider $mockProvider `
         -Consumer (Join-Path $cppBuild "Release/native_oidc_release_consumer.exe")
+    # The C++ guide's examples (docs/windows-cpp-guide.md), built by the same
+    # CMake project from the guide's cpp blocks.
+    Invoke-ConsumerWithMockProvider -Name "C++ guide examples" -MockProvider $mockProvider `
+        -Consumer (Join-Path $cppBuild "Release/native_oidc_guide_examples.exe") `
+        -ProviderArguments @("guide")
 
     $dotnetBuild = Join-Path $workDir "dotnet-build"
     dotnet build (Join-Path $fixture "dotnet/NativeOidcReleaseConsumer.csproj") `

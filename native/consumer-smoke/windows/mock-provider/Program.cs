@@ -14,6 +14,73 @@ using System.Threading.Tasks;
 // form fields. It exits with 0 only when both expected requests arrived;
 // any unexpected request, form mismatch or the overall timeout exits with 1.
 // Diagnostics go to standard error.
+//
+// With the single argument `guide`, it instead serves the fixed sequence of
+// GuideSteps below, in order, for the C++ guide examples
+// (native/consumer-smoke/windows/cpp/guide_examples.cpp). The default mode,
+// used by the C++ and .NET release consumers, is unchanged.
+
+var guideMode = args.Length == 1 && args[0] == "guide";
+if (args.Length != 0 && !guideMode)
+{
+    Console.Error.WriteLine("usage: NativeOidcMockProvider [guide]");
+    return 2;
+}
+
+// The C++ guide examples' requests, in the order guide_examples.cpp sends
+// them. A stalled step reads the request, sends no response, and waits for
+// the client to close the connection (the guide cancels the refresh).
+var guideSteps = new[]
+{
+    // Refresh with rotation.
+    new GuideStep("/token", new Expectation(
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = "guide-refresh-1",
+            ["client_id"] = "guide-client",
+        },
+        "application/json",
+        """{"access_token":"guide-access-2","token_type":"Bearer","expires_in":3600,"refresh_token":"guide-refresh-2"}"""),
+        200, Stall: false),
+    // Refresh rejected by the provider.
+    new GuideStep("/token", new Expectation(
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = "guide-refresh-2",
+            ["client_id"] = "guide-client",
+        },
+        "application/json",
+        """{"error":"invalid_grant","error_description":"refresh token expired"}"""),
+        400, Stall: false),
+    // Two refreshes that never answer: the client's timeout cancels the
+    // first, and another client thread cancels the second.
+    StalledRefresh("guide-refresh-2"),
+    StalledRefresh("guide-refresh-2"),
+    // Sign-out with successful revocation.
+    new GuideStep("/revoke", new Expectation(
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["token"] = "guide-refresh-2",
+            ["token_type_hint"] = "refresh_token",
+            ["client_id"] = "guide-client",
+        },
+        "text/plain",
+        ""),
+        200, Stall: false),
+    // Sign-out with failed revocation.
+    new GuideStep("/revoke", new Expectation(
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["token"] = "guide-refresh-3",
+            ["token_type_hint"] = "refresh_token",
+            ["client_id"] = "guide-client",
+        },
+        "text/plain",
+        ""),
+        503, Stall: false),
+};
 
 var expectations = new Dictionary<string, Expectation>(StringComparer.Ordinal)
 {
@@ -44,6 +111,11 @@ try
 {
     Console.Out.WriteLine(((IPEndPoint)listener.LocalEndpoint).Port);
     Console.Out.Flush();
+
+    if (guideMode)
+    {
+        return await ServeGuideStepsAsync(listener, guideSteps, timeout.Token);
+    }
 
     while (expectations.Count > 0)
     {
@@ -81,8 +153,8 @@ try
 }
 catch (OperationCanceledException) when (timeout.IsCancellationRequested)
 {
-    Console.Error.WriteLine(
-        $"Mock provider: timed out waiting for {string.Join(", ", expectations.Keys)}.");
+    var pending = guideMode ? "the guide sequence" : string.Join(", ", expectations.Keys);
+    Console.Error.WriteLine($"Mock provider: timed out waiting for {pending}.");
     return 1;
 }
 catch (Exception error)
@@ -94,6 +166,72 @@ finally
 {
     listener.Stop();
 }
+
+// Serves the steps in order, one connection each. Returns 0 when every step
+// was served as expected, and 1 on the first unexpected request.
+static async Task<int> ServeGuideStepsAsync(
+    TcpListener listener,
+    IReadOnlyList<GuideStep> steps,
+    CancellationToken cancellation)
+{
+    for (var index = 0; index < steps.Count; index++)
+    {
+        var step = steps[index];
+        using var client = await listener.AcceptTcpClientAsync(cancellation);
+        using var stream = client.GetStream();
+        var request = await HttpRequest.ReadAsync(stream, cancellation);
+        if (request is null)
+        {
+            Console.Error.WriteLine($"Mock provider: step {index + 1}: connection closed before a complete request.");
+            return 1;
+        }
+        if (request.Method != "POST" || request.Target != step.Target)
+        {
+            Console.Error.WriteLine(
+                $"Mock provider: step {index + 1}: unexpected request {request.Method} {request.Target}, expected POST {step.Target}.");
+            await HttpRequest.WriteResponseAsync(stream, 404, "text/plain", "", cancellation);
+            return 1;
+        }
+        var mismatch = step.Expectation.FindMismatch(HttpRequest.ParseForm(request.Body));
+        if (mismatch is not null)
+        {
+            Console.Error.WriteLine($"Mock provider: step {index + 1}: {request.Target} {mismatch}.");
+            await HttpRequest.WriteResponseAsync(stream, 400, "text/plain", "", cancellation);
+            return 1;
+        }
+
+        if (step.Stall)
+        {
+            // Wait until the client gives up on the request and closes the
+            // connection.
+            var buffer = new byte[256];
+            while (await stream.ReadAsync(buffer.AsMemory(), cancellation) > 0)
+            {
+            }
+            Console.Error.WriteLine($"Mock provider: step {index + 1}: client closed the stalled {step.Target}.");
+            continue;
+        }
+
+        await HttpRequest.WriteResponseAsync(
+            stream, step.Status, step.Expectation.ContentType, step.Expectation.ResponseBody, cancellation);
+        Console.Error.WriteLine($"Mock provider: step {index + 1}: served {step.Target} with {step.Status}.");
+    }
+    return 0;
+}
+
+static GuideStep StalledRefresh(string refreshToken) =>
+    new("/token", new Expectation(
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = refreshToken,
+            ["client_id"] = "guide-client",
+        },
+        "application/json",
+        ""),
+        0, Stall: true);
+
+sealed record GuideStep(string Target, Expectation Expectation, int Status, bool Stall);
 
 sealed record Expectation(
     IReadOnlyDictionary<string, string> Form,
@@ -212,6 +350,7 @@ sealed record HttpRequest(string Method, string Target, byte[] Body)
         {
             200 => "OK",
             400 => "Bad Request",
+            503 => "Service Unavailable",
             _ => "Not Found",
         };
         var bodyBytes = Encoding.UTF8.GetBytes(body);
