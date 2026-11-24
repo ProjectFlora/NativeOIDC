@@ -1150,18 +1150,20 @@ from the branch. The `Published release consumer validation` workflow
 checks out the release tag's own scripts, so for v0.8.0 it runs only the
 consumers that existed at that tag, not these guide examples.
 
-Evidence for this guide (commit `f65587e`):
+Evidence for this guide (commit `eec199e`):
 
 - Executed: CI built a package from the branch, then compiled all 19 `cpp`
-  blocks and passed all 26 checks against it, both on Windows Server
-  ([`windows_core`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45299430987/job/138128023271))
+  blocks, ran the 32 checks against it with all of them passing, and built and
+  linked the minimal application. This held both on Windows Server
+  ([`windows_core`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45323822859/job/138208510828))
   and on a Windows 11 client with x64 emulation
-  ([`windows_client`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45299430987/job/138129767357)).
+  ([`windows_client`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45323822859/job/138209779421)).
   The Windows module, header, and ABI are unchanged between v0.8.0 and that
   commit.
 - Compiled and linked only: MSVC 19.52 (`/std:c++20 /W4 /utf-8`, no
   warnings) against the published v0.8.0 header and `native_oidc.dll.lib`
-  (ZIP SHA-256 verified against `SHA256SUMS`).
+  (ZIP SHA-256 verified against `SHA256SUMS`), for both the fixture and the
+  minimal application.
 - **Not run:** the examples against the published v0.8.0 `native_oidc.dll`.
   The local machine's Smart App Control blocks unsigned executables, and the
   release workflow does not run branch scripts (see above).
