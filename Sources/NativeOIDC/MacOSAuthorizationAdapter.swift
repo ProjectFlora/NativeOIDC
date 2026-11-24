@@ -28,18 +28,20 @@
     private var activeListener: LoopbackHTTPListener?
     private var isRunning = false
 
+    /// The default browser-opening closure that uses `NSWorkspace`.
+    private static func defaultOpenAuthorizationURL(opener: @escaping @MainActor @Sendable (URL) async throws -> Void) {
+      opener
+    }
+
     /// Creates an adapter with a browser-opening closure.
     ///
-    /// The default opens the URL using `NSWorkspace`; a custom closure can be
-    /// supplied by hosts that manage browser presentation themselves.
+    /// Pass `nil` to use the default implementation that opens URLs with
+    /// `NSWorkspace.shared.open`. A custom closure can be supplied by hosts
+    /// that manage browser presentation themselves.
     public init(
-      openAuthorizationURL: @escaping @MainActor @Sendable (URL) async throws -> Void = { url in
-        guard NSWorkspace.shared.open(url) else {
-          throw MacOSAuthorizationAdapterError.browserCouldNotBeOpened
-        }
-      }
+      openAuthorizationURL: (@escaping @MainActor @Sendable (URL) async throws -> Void)? = nil
     ) {
-      self.openAuthorizationURL = openAuthorizationURL
+      self.openAuthorizationURL = Self.defaultOpenAuthorizationURL(opener: openAuthorizationURL ?? NSWorkspace.shared.open)
     }
 
     /// Starts the loopback listener, opens the external browser, and exchanges the callback code.

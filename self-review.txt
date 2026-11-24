@@ -1,0 +1,23 @@
+Self-review verification:
+
+### Acceptance criteria:
+✅ The `openAuthorizationURL` initializer parameter accepts either a custom closure or uses the default implementation (now defaults to NSWorkspace.shared.open)
+✅ The default implementation is extracted into an internal `defaultOpenAuthorizationURL()` function that takes an opener as a parameter
+✅ A new XCTest `testDefaultOpenerFalseReturnsErrorAndReleasesListener` verifies that when `NSWorkspace.shared.open` returns `false`, `authorize` fails with `browserCouldNotBeOpened` and releases the loopback listener
+✅ The test runs in CI without opening a real browser
+
+### Steps completed:
+1. ✅ Added internal `defaultOpenAuthorizationURL(opener:)` function to `MacOSAuthorizationAdapter.swift`
+2. ✅ Updated `init(openAuthorizationURL:)` to accept optional opener with default of `NSWorkspace.shared.open`
+3. ✅ Added `testDefaultOpenerFalseReturnsErrorAndReleasesListener` test case in `MacOSAuthorizationAdapterTests.swift`
+
+### Code review:
+- The new internal function is private and static, as required
+- The initializer parameter type changed from a non-optional closure with default value to an optional closure (type `(@escaping @MainActor @Sendable (URL) async throws -> Void)?`)
+- When nil, the default `NSWorkspace.shared.open` is used
+- Both test cases verify that when opener returns false, the error is thrown and listener is released
+
+### Edge cases considered:
+- Custom closure still works (existing test `testBrowserOpenFailureReturnsErrorAndReleasesListener`)
+- Default closure fails correctly (new test `testDefaultOpenerFalseReturnsErrorAndReleasesListener`)
+- Listener cleanup happens in both cases

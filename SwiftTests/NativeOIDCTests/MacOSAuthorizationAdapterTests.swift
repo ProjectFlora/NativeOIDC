@@ -234,6 +234,33 @@
       }
     }
 
+    @MainActor
+    func testDefaultOpenerFalseReturnsErrorAndReleasesListener() async throws {
+      let opened = OpenedRedirects()
+      let adapter = MacOSAuthorizationAdapter()
+      let configuration = try FfiServiceConfiguration(
+        authorizationEndpoint: "https://idp.example/authorize",
+        tokenEndpoint: "https://idp.example/token"
+      )
+
+      // The default opener fails with NSWorkspace.shared.open returning false.
+      for attempt in 1...2 {
+        do {
+          _ = try await adapter.authorize(
+            configuration: configuration, options: Self.options,
+            transport: URLSessionNativeHttpTransport())
+          XCTFail("attempt \(attempt): authorization succeeded without a browser")
+        } catch MacOSAuthorizationAdapterError.browserCouldNotBeOpened {
+        }
+      }
+
+      XCTAssertEqual(opened.uris.count, 2)
+      for redirectURI in opened.uris {
+        let port = try XCTUnwrap(URLComponents(string: redirectURI)?.port)
+        try await Self.assertPortReleased(UInt16(port))
+      }
+    }
+
     // MARK: - Helpers
 
     @MainActor
