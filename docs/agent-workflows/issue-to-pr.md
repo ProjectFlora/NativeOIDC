@@ -95,8 +95,8 @@ Check the following in order, skipping lines for phases this run does not handle
    - Expired: the latest active claim (not withdrawn or released) has an `until` in the past, and the latest agent activity (agent-marker comment or commit on its issue branch `issue-{number}-*`) is either before that `until` or more than 2 hours old. Activity just after the deadline only delays recovery by up to 2 hours; it never blocks it
    - An issue with no claim comment (started before claims existed), or whose claims are all withdrawn, is stalled when its last agent activity is more than 2 hours old
    - **Unfinished handoff**: the run stopped after posting its handoff but before changing the label. Check these first, before any phase recovery below, and if one applies, finish the handoff and end without resuming any phase:
-     - A `needs-input` pause comment from an agent was posted after the latest claim (whether or not that claim was released): release the claim if it is not released yet (`next-label=agent-needs-input`), then change the label to `agent-needs-input`
-     - The latest claim is released with a `next-label` other than `agent-in-progress`: change the label to that `next-label`
+     - A `needs-input` pause comment from an agent was posted after the latest claim (see "Claiming an issue" for which claim is the latest; whether or not it was released): release the claim if it is not released yet (`next-label=agent-needs-input`), then change the label to `agent-needs-input`
+     - The latest claim is released with a `next-label` other than `agent-in-progress` (a withdrawn claim posted later does not hide it): change the label to that `next-label`
    - Decide what to resume from the expired claim's `phase` and `flow` (see "Reading plan comments" in [common-rules.md](common-rules.md) for which plan counts):
      | Expired claim | Plan posted after that claim? | Resume |
      |---|---|---|
@@ -142,6 +142,8 @@ Whenever you start working on a chosen issue, claim it first (see "Claiming an i
 
 ### Claiming an issue
 A claim keeps two runs from working on the same issue, and tells later runs whether the worker is still active. Plan and implement work in scheduled mode always runs under a claim.
+
+**The latest claim** is the claim comment with the newest creation time among those that are not withdrawn. Withdrawn claims are ignored by every rule that looks at the latest claim (stalled work, unfinished handoffs, and the flow to keep), because a withdrawn claim never did any work.
 
 1. Post an issue comment starting with the claim marker (see "Post Markers" in [common-rules.md](common-rules.md)), with `until` set to 2 hours from now and the issue's `flow`
 2. Read the issue comments again. Among the **active** claims (not withdrawn, not released, and `until` not yet past), the one with the smallest comment ID wins
@@ -189,7 +191,7 @@ Use this both when you need a question or decision answered and when you stop ea
 | `pr` | `agent-in-progress` | `agent-in-progress` |
 
 - The flow is given by the label this run took the issue from: `agent-ready` is end-to-end; `agent-plan` and `agent-implement` are split
-  - A run that took the issue from `agent-in-progress` ("Stalled work") uses the `flow` of the latest claim or plan comment. If neither records a flow, use split, so that a plan approval is never skipped
+  - A run that took the issue from `agent-in-progress` ("Stalled work") uses the `flow` of the latest claim (see "Claiming an issue") or the latest plan comment. If neither records a flow, use split, so that a plan approval is never skipped
 
 - Change the label from `agent-in-progress` to `agent-needs-input` and end the run
 
