@@ -57,39 +57,13 @@ xcrun --sdk iphonesimulator swiftc \
 codesign --force --sign - --timestamp=none "$app_bundle"
 phase_end
 
-# IOS_SIMULATOR_UDID names a simulator that the caller selected and booted
-# (scripts/boot-ios-simulator.sh); the caller also shuts it down. Without it,
-# this script selects and boots one itself, and shuts down one it booted.
-if [[ -n "${IOS_SIMULATOR_UDID:-}" ]]; then
-    phase_begin "iOS flow: check preselected simulator"
-    simulator_selection=$(
-        xcrun simctl list devices available -j |
-            python3 -c '
-import json, sys
-target = sys.argv[1]
-for runtime, devices in json.load(sys.stdin).get("devices", {}).items():
-    for device in devices:
-        if device.get("udid") == target:
-            print("\t".join((target, str(device.get("state")), runtime)))
-            sys.exit(0)
-sys.exit("preselected iOS simulator is not available: " + target)
-' "$IOS_SIMULATOR_UDID"
-    )
-    IFS=$'\t' read -r simulator_id simulator_state simulator_runtime <<< "$simulator_selection"
-    if [[ "$simulator_state" != Booted ]]; then
-        echo "preselected iOS simulator is not booted: $simulator_id ($simulator_state)" >&2
-        exit 1
-    fi
-    phase_end
-else
-    phase_begin "iOS flow: select simulator"
-    simulator_selection=$(
-        xcrun simctl list devices available -j |
-            python3 scripts/select_ios_simulator.py "${IOS_SIMULATOR_MAJOR_VERSION:-}"
-    )
-    IFS=$'\t' read -r simulator_id simulator_state simulator_runtime <<< "$simulator_selection"
-    phase_end
-fi
+phase_begin "iOS flow: select simulator"
+simulator_selection=$(
+    xcrun simctl list devices available -j |
+        python3 scripts/select_ios_simulator.py "${IOS_SIMULATOR_MAJOR_VERSION:-}"
+)
+IFS=$'\t' read -r simulator_id simulator_state simulator_runtime <<< "$simulator_selection"
+phase_end
 echo "iOS flow simulator: $simulator_id ($simulator_runtime; $simulator_state)"
 sw_vers
 xcodebuild -version

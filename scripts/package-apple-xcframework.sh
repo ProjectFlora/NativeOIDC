@@ -6,16 +6,15 @@ set -euo pipefail
 # order and records how long each took (scripts/apple-phase-timing.sh) in the
 # step summary, including a failed run's last phase:
 #
-# 1. Build: UniFFI bindings and the four Rust release slices. Meanwhile the
-#    iOS simulator boots in the background (scripts/boot-ios-simulator.sh).
+# 1. Build: UniFFI bindings and the four Rust release slices.
 # 2. Stage: Swift sources, notices, README, headers and the universal macOS
 #    library in target/apple/release-package.
 # 3. XCFramework: create it, and check that its canonical Info.plist is the
 #    same across two create-xcframework runs.
 # 4. Verify: the macOS static-link smoke test
 #    (scripts/check-apple-static-link-smoke.sh) and the iOS simulator
-#    authorization flow (scripts/check-ios-authorization-flow.sh) on that
-#    simulator, once its background boot has finished.
+#    authorization flow (scripts/check-ios-authorization-flow.sh), which
+#    records its simulator phases separately.
 # 5. Archive: the release zip and its determinism self-test.
 #
 # Each verification script also runs on its own against an existing staging.
@@ -67,61 +66,10 @@ export APPLE_PHASE_TIMING_FILE="$repo_root/target/apple/package-phase-timings.ts
 rm -f "$APPLE_PHASE_TIMING_FILE"
 package_started=$SECONDS
 
-# The iOS simulator boots in the background while the Rust slices build
-# (scripts/boot-ios-simulator.sh); the iOS flow waits for it. The selection
-# file names the device before its boot starts, so cleanup can shut down a
-# device this run booted even if the run stops while it is still booting.
-simulator_selection_file="$repo_root/target/apple/ios-simulator-selection.tsv"
-simulator_boot_log="$repo_root/target/apple/ios-simulator-boot.log"
-simulator_boot_pid=""
-simulator_boot_log_shown=false
-rm -f "$simulator_selection_file" "$simulator_boot_log"
-
-show_simulator_boot_log() {
-    simulator_boot_log_shown=true
-    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-        echo "::group::iOS simulator boot log"
-    else
-        echo "--- iOS simulator boot log ---"
-    fi
-    cat "$simulator_boot_log" 2>/dev/null || true
-    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-        echo "::endgroup::"
-    fi
-}
-
-stop_simulator() {
-    local status=$1 simulator_id simulator_state _
-    if [[ -n "$simulator_boot_pid" ]]; then
-        # Stop the boot script and the simctl call it is waiting on.
-        pkill -TERM -P "$simulator_boot_pid" >/dev/null 2>&1 || true
-        kill "$simulator_boot_pid" >/dev/null 2>&1 || true
-        wait "$simulator_boot_pid" 2>/dev/null || true
-        simulator_boot_pid=""
-    fi
-    if ((status != 0)) && [[ "$simulator_boot_log_shown" == false && -f "$simulator_boot_log" ]]; then
-        show_simulator_boot_log
-    fi
-    if [[ ! -s "$simulator_selection_file" ]]; then
-        return 0
-    fi
-    IFS=$'\t' read -r simulator_id simulator_state _ < "$simulator_selection_file"
-    if [[ "$simulator_state" != Booted ]]; then
-        if ! xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1; then
-            echo "warning: could not shut down iOS simulator $simulator_id; run: xcrun simctl shutdown $simulator_id" >&2
-        fi
-    fi
-    if ((status != 0)); then
-        echo "--- booted iOS simulators after cleanup ---" >&2
-        xcrun simctl list devices booted >&2 || true
-    fi
-}
-
 cleanup() {
     local status=$?
     rm -rf "$scratch_xcframework" "$recheck"
     phase_fail_open
-    stop_simulator "$status"
     if ((status == 0)); then
         phase_record "Total" ok $((SECONDS - package_started))
     else
@@ -130,9 +78,6 @@ cleanup() {
     phase_write_summary "Apple packaging phases"
 }
 trap cleanup EXIT
-
-scripts/boot-ios-simulator.sh "$simulator_selection_file" > "$simulator_boot_log" 2>&1 &
-simulator_boot_pid=$!
 
 export IPHONEOS_DEPLOYMENT_TARGET=18.0
 export MACOSX_DEPLOYMENT_TARGET=15.0
@@ -221,25 +166,9 @@ phase_begin "Verify: macOS static-link smoke"
 scripts/check-apple-static-link-smoke.sh
 phase_end
 
-phase_begin "Wait: iOS simulator boot (started before the build)"
-if wait "$simulator_boot_pid"; then
-    simulator_boot_status=0
-else
-    simulator_boot_status=$?
-fi
-simulator_boot_pid=""
-show_simulator_boot_log
-if ((simulator_boot_status != 0)); then
-    echo "Booting the iOS simulator in the background failed (exit $simulator_boot_status); see the boot log above" >&2
-    exit 1
-fi
-phase_end
-IFS=$'\t' read -r simulator_id _ < "$simulator_selection_file"
-
-# The iOS flow records its own phases (app build, install, launch, result)
-# in the same table. It uses the simulator booted above and leaves its
-# shutdown to cleanup.
-IOS_SIMULATOR_UDID=$simulator_id scripts/check-ios-authorization-flow.sh
+# The iOS flow records its own phases (app build, simulator selection, boot,
+# install, launch, result) in the same table.
+scripts/check-ios-authorization-flow.sh
 
 phase_begin "Archive: zip and determinism self-test"
 

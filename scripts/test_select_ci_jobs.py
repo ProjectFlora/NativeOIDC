@@ -76,7 +76,6 @@ class SharedInputTests(unittest.TestCase):
         self.assertEqual(selected("native/apple/MacOSRealBrowserCheck.swift"), {"apple"})
         self.assertEqual(selected("scripts/generate-bindings.sh"), {"test", "apple", "android", "spm_bindings"})
         self.assertEqual(selected("scripts/apple-phase-timing.sh"), {"test", "apple"})
-        self.assertEqual(selected("scripts/boot-ios-simulator.sh"), {"test", "apple"})
         self.assertEqual(selected("scripts/check-apple-static-link-smoke.sh"), {"test", "apple"})
         self.assertEqual(selected("scripts/test_apple_phase_timing.py"), {"test"})
 
