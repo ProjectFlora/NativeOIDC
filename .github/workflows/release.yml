@@ -20,6 +20,11 @@ on:
         required: true
         default: false
         type: boolean
+      dry_run_maven:
+        description: Without publish, dry-run the Maven Central publication read-only against the real Central Portal
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -503,15 +508,143 @@ jobs:
     if: ${{ inputs.publish }}
     name: Publish Android library to Maven Central
     # Maven Central versions are immutable, so publish only after every
-    # package is validated and the tag and GitHub Release exist.
+    # package is validated and the tag and GitHub Release exist. The job
+    # signs and uploads the AAR attached to the GitHub Release, so both
+    # channels ship the same bytes, and it records the Central Portal
+    # deployment in append-only Release assets maven-central-deployment-<n>.json. A
+    # re-run of this job (Re-run failed jobs) therefore resumes: it verifies
+    # a complete publication, waits for a deployment in flight, or uploads
+    # only when no live deployment exists (Issue #180, docs/releasing.md).
     needs: [validate_version, publish]
     runs-on: ubuntu-latest
+    permissions:
+      # Reads the Release assets and writes the deployment record.
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           # The release commit differs from the dispatched commit only in
-          # Package.swift; build from the tag so the sources jar matches it.
+          # Package.swift; generate the POM and the sources and javadoc jars
+          # from the tag so they match it.
           ref: v${{ needs.validate_version.outputs.version }}
+      - name: Download and check the GitHub Release AAR
+        id: aar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/download-release-aar.sh "$RELEASE_VERSION" "$RUNNER_TEMP/release-aar"
+      - name: Classify the Maven Central state
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MAVEN_USER: ${{ secrets.MAVEN_USER }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+        run: |
+          python3 scripts/android_maven_central_release.py decide "$RELEASE_VERSION" \
+            --expected-sha256 "$EXPECTED_SHA256"
+      - uses: actions/setup-java@v6
+        if: steps.decide.outputs.decision == 'upload'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        if: steps.decide.outputs.decision == 'upload'
+        with:
+          packages: platform-tools
+      # No NDK or cargo-about: the adopted AAR replaces the AAR build, the
+      # only user of the Rust NDK builds and the license notices. The host
+      # Rust, the same toolchain as the android job, generates the UniFFI
+      # bindings for the sources and javadoc jars.
+      - if: steps.decide.outputs.decision == 'upload'
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: dtolnay/rust-toolchain@1.100.0
+        if: steps.decide.outputs.decision == 'upload'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.decide.outputs.decision == 'upload'
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.decide.outputs.decision == 'upload'
+      - name: Build and check the signed Central bundle
+        if: steps.decide.outputs.decision == 'upload'
+        env:
+          ADOPTED_AAR: ${{ steps.aar.outputs.path }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+          BUNDLE_OUT: ${{ runner.temp }}/central-bundle.zip
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+        run: scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
+      - name: Upload to Maven Central
+        if: steps.decide.outputs.decision == 'upload'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MAVEN_USER: ${{ secrets.MAVEN_USER }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+        run: |
+          python3 scripts/android_maven_central_release.py upload "$RELEASE_VERSION" \
+            --expected-sha256 "$EXPECTED_SHA256" --bundle "$RUNNER_TEMP/central-bundle.zip"
+
+  dry_run_maven:
+    if: ${{ !inputs.publish && inputs.dry_run_maven }}
+    name: Dry-run the Maven Central publication
+    # The publish_maven steps on a candidate run, against the real Maven
+    # Central and Central Portal but read-only: it classifies the version,
+    # checks that the Portal accepts the credentials, and builds and checks
+    # the signed bundle, but never uploads, publishes, drops, or writes the
+    # deployment record. Like the key server check, it holds the signing key
+    # and the Portal token, so dispatch it only from a fully trusted branch.
+    needs: [validate_version, android]
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-android
+          path: ${{ runner.temp }}/candidate-aar
+      # A Release of this version, if one exists, is what publish_maven
+      # would adopt; otherwise the candidate AAR from the android job.
+      - name: Select the AAR to adopt
+        id: aar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if view=$(gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json tagName 2>&1); then
+            scripts/download-release-aar.sh "$RELEASE_VERSION" "$RUNNER_TEMP/release-aar"
+            echo "record_args=" >> "$GITHUB_OUTPUT"
+            echo "Adopting the AAR of the GitHub Release v$RELEASE_VERSION." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$view" == *"release not found"* ]]; then
+            path="$RUNNER_TEMP/candidate-aar/native-oidc-android-$RELEASE_VERSION.aar"
+            echo "sha256=$(sha256sum "$path" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+            echo "path=$path" >> "$GITHUB_OUTPUT"
+            echo "record_args=--no-record" >> "$GITHUB_OUTPUT"
+            echo "No GitHub Release v$RELEASE_VERSION: adopting the candidate AAR." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Could not look up the GitHub Release v$RELEASE_VERSION: $view" >&2
+            exit 1
+          fi
+      - name: Classify the Maven Central state (read-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MAVEN_USER: ${{ secrets.MAVEN_USER }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+          RECORD_ARGS: ${{ steps.aar.outputs.record_args }}
+        run: |
+          # RECORD_ARGS is empty or the single flag --no-record.
+          # shellcheck disable=SC2086
+          python3 scripts/android_maven_central_release.py decide "$RELEASE_VERSION" \
+            --read-only --expected-sha256 "$EXPECTED_SHA256" $RECORD_ARGS
+      - name: Check the Central Portal credentials (read-only)
+        env:
+          MAVEN_USER: ${{ secrets.MAVEN_USER }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+        run: python3 scripts/android_maven_central_release.py probe "$RELEASE_VERSION" --read-only
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -519,43 +652,25 @@ jobs:
       - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
-      # The same Rust as the Apple job, so every package links the same
-      # standard library and ships the same notices for it.
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - uses: dtolnay/rust-toolchain@1.100.0
-      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.3
-      - name: Configure Android NDK
-        env:
-          ANDROID_API_LEVEL: '28'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Cache compiled Cargo dependencies for the host and both Android ABIs
-      # that check-android-targets.sh builds under Gradle. The workspace's own
-      # crates are rebuilt each run: caching them too (cache-workspace-crates)
-      # did not shorten warm runs and grew the cache by about 40% (#190).
-      # The key adds the NDK version and native API level, which rust-cache
-      # does not hash on its own, so changing either starts a fresh cache.
       - uses: Swatinem/rust-cache@v2
-        with:
-          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       - uses: gradle/actions/setup-gradle@v6
-      - name: Verify the signed publication locally
+      - name: Build and check the signed Central bundle
         env:
-          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
-        run: scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
-      - name: Publish to Maven Central
-        env:
-          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_USER }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_PASSWORD }}
+          ADOPTED_AAR: ${{ steps.aar.outputs.path }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+          BUNDLE_OUT: ${{ runner.temp }}/central-bundle.zip
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          ./native/android/gradlew -p native/android publishAndReleaseToMavenCentral \
-            -PreleaseVersion="$RELEASE_VERSION"
+          scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
+          {
+            echo "### Central bundle (not uploaded)"
+            echo
+            echo "Adopted AAR SHA-256: \`$EXPECTED_SHA256\`"
+            echo
+            echo '```'
+            unzip -Z1 "$BUNDLE_OUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

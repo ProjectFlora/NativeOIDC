@@ -505,6 +505,35 @@ class PublicationStatusCheckTests(unittest.TestCase):
         self.assertIn("Remove the tag first", r.stderr)
         self.assertIn(RUN_URL, r.stderr)
 
+    def test_successful_dry_run_is_not_publication_evidence(self):
+        # A candidate run with dry_run_maven succeeds on the same commit as
+        # a publish run whose publish_maven job failed, and Central has none
+        # of the files. The dry run publishes nothing, so the failed run's
+        # verdict and recovery guidance must stand (Issue #180).
+        routes = self.full_outcome_routes()
+        routes[route("/actions/workflows/%d/runs?per_page=100&page=1"
+                     % WORKFLOW_ID)] = runs_list_response(
+                         (RUN_ID, "completed", "success"),
+                         (RUN_ID_2, "completed", "failure"))
+        routes[route("/actions/runs/%d/jobs?per_page=100&attempt=1"
+                     % RUN_ID)] = json_body(
+            200,
+            {"total_count": 3,
+             "jobs": [{"id": 1, "name": "Publish GitHub Release",
+                       "status": "completed", "conclusion": "skipped"},
+                      {"id": 2, "name": "Publish Android library to Maven Central",
+                       "status": "completed", "conclusion": "skipped"},
+                      {"id": 3, "name": "Dry-run the Maven Central publication",
+                       "status": "completed", "conclusion": "success"}]})
+        routes[route("/actions/runs/%d/jobs?per_page=100&attempt=1"
+                     % RUN_ID_2)] = jobs_response("completed", "failure")
+        r = self.run_script(VERSION, routes)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertNotIn("Confirmed", r.stdout)
+        self.assertIn("Maven publication did not complete", r.stderr)
+        self.assertIn("Re-run failed jobs", r.stderr)
+        self.assertIn(RUN_URL_2, r.stderr)
+
     def test_maven_skipped_candidate_run(self):
         # A candidate run (publish: false) skips both the publish and the
         # publish_maven jobs on purpose; that is not a publication
