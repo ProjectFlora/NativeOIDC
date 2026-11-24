@@ -3,7 +3,7 @@
 Implement the latest plan comment on the issue, review your own work, and open a PR. Read [common-rules.md](common-rules.md) first.
 
 ## Before starting
-- Read the issue, all of its comments, and the latest comment starting with `<!-- agent-workflow:plan -->`. This plan is your instruction for this phase
+- Read the issue, all of its comments, and the latest plan (see "Reading plan comments" in [common-rules.md](common-rules.md)). This plan is your instruction for this phase
 - Read every comment from me posted after that plan (see "Post Markers" in [common-rules.md](common-rules.md)). They take priority over the plan
 - If the issue branch `issue-{number}-*` already exists (a resumed or stalled run), continue on it: check which plan steps its commits already cover, and start from the first step that is not done
 - Post an issue comment (with an agent marker) saying that implementation started or resumed, the branch name, and the plan step you start from. In scheduled mode, this comment is your claim: start it with the claim marker (see "Claiming an issue" in [issue-to-pr.md](issue-to-pr.md)), with `phase=implement`

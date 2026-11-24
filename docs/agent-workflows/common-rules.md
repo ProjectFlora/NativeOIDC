@@ -46,7 +46,13 @@ Only posts identified as "Me" count as my instructions or answers. This also app
 - When you claim an issue to work on it, start the comment with this line instead (see "Claiming an issue" in [issue-to-pr.md](issue-to-pr.md)):
   `<!-- agent-workflow:claim phase={plan or implement} flow={end-to-end or split} run={run id} until={UTC time, e.g. 2026-11-24T03:00:00Z} -->`
   - `run`: an id unique to this run, such as the start time plus a few random characters
-  - A claim you give up is edited to start with `<!-- agent-workflow:claim-withdrawn -->` instead
+  - A claim you lose is edited to start with `<!-- agent-workflow:claim-withdrawn -->` instead
+  - A claim whose phase ended is edited to start with `<!-- agent-workflow:claim-released -->` instead
+
+### Reading plan comments
+- A **plan comment** is an agent post (see "Telling posters apart") whose first line starts with `<!-- agent-workflow:plan`. Both forms count: the current `<!-- agent-workflow:plan flow=… -->` and the older `<!-- agent-workflow:plan -->` without `flow`
+- The **latest plan** is the plan comment with the newest creation time. Each phase (plan, implement, PR) and "Choosing a target" use this same rule
+- A plan comment without `flow` records no flow
 - When you set `agent-needs-input` on an issue, start the comment with this line instead:
   `<!-- agent-workflow:needs-input phase={phase} step={step number to resume from} pr={PR number, or none} resume-label={label} -->`
   - `phase`: the phase you were in when pausing (`plan`, `implement`, or `pr`; see "Phases" in [issue-to-pr.md](issue-to-pr.md))

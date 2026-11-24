@@ -47,7 +47,7 @@ This phase changes no code and opens no PR.
 ```
 
 - A plan is ready only when it has no open questions. Do not leave "TBD" or "to be decided during implementation"
-- Each new plan comment replaces the previous one. The implement phase uses the latest plan comment
+- Each new plan comment replaces the previous one. The implement phase uses the latest plan (see "Reading plan comments" in [common-rules.md](common-rules.md))
 
 ## When the phase ends
 - Manual mode: share the plan in this session and stop. I start the implement phase separately, or continue in this session if I asked for all phases

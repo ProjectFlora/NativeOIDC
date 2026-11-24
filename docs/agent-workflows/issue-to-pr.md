@@ -92,11 +92,18 @@ Check the following in order, skipping lines for phases this run does not handle
    - Meets the final-report criteria (step 7)
    → Follow [phase-pr.md](phase-pr.md) from step 6 (or go to step 7 if only the last condition applies)
 2. **Stalled work** (needs `plan` or `implement`, as below): the oldest open issue labeled `agent-in-progress` that has no open PR, and whose claim has expired
-   - Expired: the latest claim comment that is not withdrawn has an `until` in the past, and no agent activity (agent-marker comment or commit on its issue branch `issue-{number}-*`) came after that time
+   - Expired: the latest active claim (not withdrawn or released) has an `until` in the past, and no agent activity (agent-marker comment or commit on its issue branch `issue-{number}-*`) came after that time
    - An issue with no claim comment (started before claims existed) is stalled when its last agent activity is more than 2 hours old
-   - If it has a plan comment (needs `implement`): follow [phase-implement.md](phase-implement.md), continuing on the existing issue branch
-   - If it has no plan comment (needs `plan`): follow [phase-plan.md](phase-plan.md). The flow is unknown here, so treat it as the split flow (`agent-plan-review` after the plan)
-   - Claim it (see "Claiming an issue" below), and say in the claim comment that the earlier run stalled and you are resuming it. Keep the `flow` of the previous claim or plan comment
+   - Decide what to resume from the expired claim's `phase` and `flow` (see "Reading plan comments" in [common-rules.md](common-rules.md) for which plan counts):
+     | Expired claim | Plan posted after that claim? | Resume |
+     |---|---|---|
+     | `phase=plan`, `flow=split` | Yes | The plan was not handed over. Change the label to `agent-plan-review` and end; no approval exists yet |
+     | `phase=plan`, `flow=split` | No | Plan phase again (needs `plan`) |
+     | `phase=plan`, `flow=end-to-end` | Yes | Implement phase (needs `implement`) |
+     | `phase=plan`, `flow=end-to-end` | No | Plan phase again (needs `plan`), then implement |
+     | `phase=implement` (either flow) | — | Implement phase (needs `implement`), continuing on the existing issue branch. The implement claim itself shows that the plan was approved (split) or did not need approval (end-to-end) |
+     | No claim (started before claims existed) | — | If the issue has a plan, its approval is unknown: change the label to `agent-plan-review` and end. Otherwise, plan phase as the split flow (needs `plan`) |
+   - Before resuming, claim the issue (see "Claiming an issue" below) with the same `flow`, and say in the claim comment that the earlier run stalled and you are resuming it
 3. **Implement phase** (needs `implement`): the oldest open issue labeled `agent-implement`
    → Follow [phase-implement.md](phase-implement.md)
 4. **End-to-end issue** (needs `plan` and `implement`): the oldest open issue labeled `agent-ready`
@@ -134,10 +141,12 @@ Whenever you start working on a chosen issue, change its label to `agent-in-prog
 A claim keeps two runs from working on the same issue, and tells later runs whether the worker is still active. Plan and implement work in scheduled mode always runs under a claim.
 
 1. Post an issue comment starting with the claim marker (see "Post Markers" in [common-rules.md](common-rules.md)), with `until` set to 2 hours from now and the issue's `flow`
-2. Read the issue comments again. Among claim comments that are not withdrawn and were posted after the last expired claim, the one with the smallest comment ID wins
+2. Read the issue comments again. Among the **active** claims (not withdrawn, not released, and `until` not yet past), the one with the smallest comment ID wins
 3. If yours did not win, edit it to start with `<!-- agent-workflow:claim-withdrawn -->`, do no work on this issue, and continue with the next line of "Choosing a target"
 4. While you work, keep the claim alive: edit your claim comment to move `until` to 2 hours from now after each pushed plan step, and before any action you expect to take more than 30 minutes. If one action may take longer than 2 hours, set `until` far enough to cover it
-5. When the phase ends (PR opened, plan posted, or paused), the claim has done its job. Leave it as it is; the label now tells later runs what to do
+5. When your phase ends, hand the claim over in one of two ways:
+   - **Release** it when the run ends the phase and stops working on the issue (PR opened, split-flow plan posted, or paused): edit it to start with `<!-- agent-workflow:claim-released -->` before changing the label, so the next run's claim is not rejected by yours
+   - **Transfer** it when the same run continues into the next phase (end-to-end: plan, then implement): edit the same claim comment to `phase=implement` and move `until` to 2 hours from now. Do not post a second claim
 
 ### Pauses posted before the phase split
 Older `needs-input` markers have only `step` and `pr`, without `phase` or `resume-label`. Those issues were all in the end-to-end flow, and I resume them with `agent-ready`. When a target's last agent-marker comment is such a marker:
