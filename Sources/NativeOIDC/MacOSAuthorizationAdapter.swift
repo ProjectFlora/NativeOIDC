@@ -33,13 +33,26 @@
     /// The default opens the URL using `NSWorkspace`; a custom closure can be
     /// supplied by hosts that manage browser presentation themselves.
     public init(
-      openAuthorizationURL: @escaping @MainActor @Sendable (URL) async throws -> Void = { url in
-        guard NSWorkspace.shared.open(url) else {
+      openAuthorizationURL: @escaping @MainActor @Sendable (URL) async throws -> Void =
+        MacOSAuthorizationAdapter.browserOpener { NSWorkspace.shared.open($0) }
+    ) {
+      self.openAuthorizationURL = openAuthorizationURL
+    }
+
+    /// Wraps an opener that reports success as a `Bool`, such as
+    /// `NSWorkspace.shared.open`, and maps `false` to `browserCouldNotBeOpened`.
+    ///
+    /// The default initializer argument uses it, and tests pass a fake opener
+    /// so that the failure mapping runs without launching a browser.
+    @usableFromInline
+    nonisolated static func browserOpener(
+      _ open: @escaping @MainActor @Sendable (URL) -> Bool
+    ) -> @MainActor @Sendable (URL) async throws -> Void {
+      { url in
+        guard open(url) else {
           throw MacOSAuthorizationAdapterError.browserCouldNotBeOpened
         }
       }
-    ) {
-      self.openAuthorizationURL = openAuthorizationURL
     }
 
     /// Starts the loopback listener, opens the external browser, and exchanges the callback code.
