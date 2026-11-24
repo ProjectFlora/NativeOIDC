@@ -1064,19 +1064,28 @@ std::filesystem::path state_file_path() {
     return std::filesystem::path(directory) / L"MyApp" / L"native-oidc-state.bin";
 }
 
-int main() {
+// Usage: my_app [--sign-in]
+// --sign-in starts a new sign-in even when a state is stored, for example
+// after the provider rejected its refresh token.
+int main(int argc, char** argv) {
+    const bool force_sign_in = argc > 1 && std::string_view(argv[1]) == "--sign-in";
     try {
         AuthClient client(discovered_config(), state_file_path());
-        if (!client.stored_state()) {
+        if (force_sign_in || !client.stored_state()) {
             std::puts("Opening the browser to sign in...");
             const OperationResult result = client.sign_in(std::chrono::minutes(5));
             if (result.status != OperationStatus::Success) {
+                // A failed sign-in keeps any previously stored state.
                 std::fprintf(stderr, "Sign-in did not complete: %s\n", result.value.c_str());
                 return 1;
             }
         }
         if (!usable_access_token(client)) {
-            std::fputs("No usable access token; sign in again.\n", stderr);
+            // The stored state is kept, so a transient failure can succeed on
+            // the next launch; a rejected refresh token needs a new sign-in.
+            std::fputs("No usable access token. Try again later, or run with --sign-in "
+                       "to sign in again.\n",
+                       stderr);
             return 1;
         }
         std::puts("Signed in. Call the resource server with the access token.");
