@@ -84,6 +84,14 @@ func guideAuthorizationOptions() -> FfiAuthorizationOptions {
   )
 }
 
+// Internal seams: the guide's Keychain sketch uses the fixed service
+// "com.example.app" and calls `SecItemDelete` directly. The checks run the
+// sketch under a dedicated per-run service, so they never read, replace, or
+// delete a record a developer saved while trying the guide, and substitute a
+// scripted deletion status to reach the failure branch through sign-out.
+nonisolated(unsafe) var guideKeychainService = "com.example.app"
+nonisolated(unsafe) var guideKeychainDelete: (CFDictionary) -> OSStatus = SecItemDelete
+
 /// The guide's Keychain persistence sketch.
 enum GuideStateStorageError: Error {
   case update(OSStatus)
@@ -96,7 +104,7 @@ enum GuideStateStorageError: Error {
 func guideSaveState(_ json: String, account: String) throws {
   let query: [CFString: Any] = [
     kSecClass: kSecClassGenericPassword,
-    kSecAttrService: "com.example.app",
+    kSecAttrService: guideKeychainService,
     kSecAttrAccount: account,
   ]
 
@@ -123,7 +131,7 @@ func guideSaveState(_ json: String, account: String) throws {
 func guideLoadState(account: String) throws -> String {
   let query: [CFString: Any] = [
     kSecClass: kSecClassGenericPassword,
-    kSecAttrService: "com.example.app",
+    kSecAttrService: guideKeychainService,
     kSecAttrAccount: account,
     kSecReturnData: true,
     kSecMatchLimit: kSecMatchLimitOne,
@@ -146,13 +154,13 @@ func guideLoadState(account: String) throws -> String {
 func guideDeleteState(account: String) throws {
   let query: [CFString: Any] = [
     kSecClass: kSecClassGenericPassword,
-    kSecAttrService: "com.example.app",
+    kSecAttrService: guideKeychainService,
     kSecAttrAccount: account,
   ]
   // Accept only the two expected outcomes — the record deleted, or already
   // gone — and surface any other status: a failed deletion must not be
   // reported as a completed sign-out.
-  switch SecItemDelete(query as CFDictionary) {
+  switch guideKeychainDelete(query as CFDictionary) {
   case errSecSuccess, errSecItemNotFound:
     return
   case let status:
@@ -738,7 +746,15 @@ private func checkRefreshSignOutInterleaving() async throws {
     ),
   ]
   let session = GuideSessionGuard()
-  try guideDeleteState(account: "native-oidc/state")
+
+  // Run the Keychain sketch under a dedicated per-run service: the record
+  // starts absent, and the cleanup removes only what this run created.
+  guideKeychainService = "com.example.app.native-oidc-guide-check.\(UUID().uuidString)"
+  defer {
+    guideKeychainDelete = SecItemDelete
+    try? guideDeleteState(account: "native-oidc/state")
+    guideKeychainService = "com.example.app"
+  }
 
   // Save twice under one account and confirm the second value is restored:
   // the first save creates the record, the second must replace the existing
@@ -845,6 +861,27 @@ private func checkRefreshSignOutInterleaving() async throws {
     fatalError("guide check: sign-out did not complete after a failing write")
   }
   print("guide check ok: failing write through persistState left sign-out free to complete")
+
+  // A deletion that fails with an unexpected status must surface through the
+  // normal sign-out entry point instead of being reported as a completed
+  // sign-out. Store a record first, so the scripted status replaces a real
+  // deletion, and confirm the record is still there afterwards.
+  let failingDeleteSession = GuideSessionGuard()
+  try guideSaveState("kept-on-failed-delete", account: "native-oidc/state")
+  guideKeychainDelete = { _ in errSecAuthFailed }
+  do {
+    try guideSignOut(session: failingDeleteSession)
+    fatalError("guide check: sign-out reported success after a failed deletion")
+  } catch let error as GuideStateStorageError {
+    guard case .delete(errSecAuthFailed) = error else {
+      fatalError("guide check: unexpected sign-out error: \(error)")
+    }
+  }
+  guideKeychainDelete = SecItemDelete
+  guard (try? guideLoadState(account: "native-oidc/state")) == "kept-on-failed-delete" else {
+    fatalError("guide check: the failed deletion test lost the stored record")
+  }
+  print("guide check ok: sign-out surfaces a failed Keychain deletion (.delete status)")
 }
 
 #if os(macOS)

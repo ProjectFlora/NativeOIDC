@@ -878,13 +878,16 @@ The Swift examples in this guide are exercised at the following scope:
   in-flight discovery ended by cancellation, a provider-rejected refresh,
   malformed stored state, the post-logout callback with a registered redirect
   (a matching state validates, a mismatched one fails; both through the
-  prepared-session lifecycle entry points), the Keychain sketch (a second
-  save under one account replaces the existing record, a failed deletion
-  surfaces, and an absent record is reported as missing), the refresh/sign-out
-  guard (a refresh held on an active session is signed out once while
-  suspended, then released, and its write is suppressed; a failing write
-  injected through the guard's `persistState` leaves a sign-out through its
-  normal entry point free to complete), and the authorization lifecycle (two overlapping authorizations:
+  prepared-session lifecycle entry points), the Keychain sketch (run under a
+  dedicated per-run service, so the check never touches a `com.example.app`
+  record saved while trying the guide; a second save under one account
+  replaces the existing record, a successful sign-out deletion leaves the
+  record reported as missing, and a scripted unexpected `SecItemDelete`
+  status surfaces as `.delete` through the normal sign-out entry point), the
+  refresh/sign-out guard (a refresh held on an active session is signed out
+  once while suspended, then released, and its write is suppressed; a failing
+  write injected through the guard's `persistState` leaves a sign-out through
+  its normal entry point free to complete), and the authorization lifecycle (two overlapping authorizations:
   the second is rejected; after a cancellation while the first discovery is in
   flight, an immediate retry is rejected while the slot stays claimed, a retry
   issued from the completion — inline on the main actor, not through a task
