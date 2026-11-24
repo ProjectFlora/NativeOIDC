@@ -7,12 +7,18 @@
 # -Package is a Windows package ZIP: a release asset
 # (native-oidc-windows-<version>.zip) or the output of
 # scripts/package-windows.ps1.
+#
+# -InProcess runs the check inside a pwsh process (compiled with Add-Type)
+# instead of building and running a program, for machines where an
+# Application Control policy blocks locally built files. The provider,
+# result files, and pass/fail decision are the same in both modes.
 param(
     [Parameter(Mandatory = $true)]
     [string]$Package,
     [string]$ResultDirectory = "target/real-browser/windows",
     [int]$TimeoutSeconds = 120,
-    [string]$Python = "python"
+    [string]$Python = "python",
+    [switch]$InProcess
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,13 +43,39 @@ try {
         throw "Windows package has no package root with dotnet/NativeOidcWindows.cs."
     }
 
-    $build = Join-Path $workDir "real-browser-build"
-    dotnet build (Join-Path $repoRoot "native/consumer-smoke/windows/real-browser/NativeOidcRealBrowserCheck.csproj") `
-        --configuration Release `
-        --runtime win-x64 --self-contained true `
-        "-p:NativeOidcPackage=$($packageRoot.FullName)" `
-        "--output=$build"
-    if ($LASTEXITCODE -ne 0) { throw "Real browser check build failed: $LASTEXITCODE" }
+    $checkSource = Join-Path $repoRoot "native/consumer-smoke/windows/real-browser"
+    if ($InProcess) {
+        $mode = "in-process"
+        # The check loads native_oidc.dll into pwsh itself, so pwsh must
+        # match the DLL's architecture (the default mode builds a win-x64
+        # program instead). Native Arm64 PowerShell cannot load an x64 DLL;
+        # fail here with that reason rather than at the load.
+        $dllBytes = [System.IO.File]::ReadAllBytes((Join-Path $packageRoot.FullName "native_oidc.dll"))
+        $machine = [BitConverter]::ToUInt16($dllBytes, [BitConverter]::ToInt32($dllBytes, 0x3C) + 4)
+        $dllArchitecture = switch ($machine) { 0x8664 { "X64" } 0xAA64 { "Arm64" } 0x14C { "X86" } default { "0x{0:X4}" -f $machine } }
+        $pwshArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+        if ($pwshArchitecture -ne $dllArchitecture) {
+            throw "-InProcess needs PowerShell for the package's architecture: native_oidc.dll is $dllArchitecture, this pwsh is $pwshArchitecture. Run the script with $dllArchitecture PowerShell."
+        }
+        # A separate pwsh process, so that the loaded native_oidc.dll does
+        # not keep the package directory locked, and the check's output and
+        # exit code arrive as they do from the built program.
+        $checkCommand = (Get-Process -Id $PID).Path
+        $checkArguments = @(
+            "-NoProfile", "-NonInteractive", "-File", (Join-Path $checkSource "run-in-process.ps1"),
+            "-PackageRoot", $packageRoot.FullName)
+    } else {
+        $mode = "program"
+        $build = Join-Path $workDir "real-browser-build"
+        dotnet build (Join-Path $checkSource "NativeOidcRealBrowserCheck.csproj") `
+            --configuration Release `
+            --runtime win-x64 --self-contained true `
+            "-p:NativeOidcPackage=$($packageRoot.FullName)" `
+            "--output=$build"
+        if ($LASTEXITCODE -ne 0) { throw "Real browser check build failed: $LASTEXITCODE" }
+        $checkCommand = Join-Path $build "NativeOidcRealBrowserCheck.exe"
+        $checkArguments = @()
+    }
 
     $os = Get-CimInstance Win32_OperatingSystem
     @(
@@ -52,6 +84,7 @@ try {
         "package: $(Split-Path -Leaf $Package)"
         "os: $($os.Caption) $($os.Version) build $($os.BuildNumber)"
         "architecture: $env:PROCESSOR_ARCHITECTURE"
+        "mode: $mode"
     ) | Set-Content (Join-Path $ResultDirectory "environment.txt")
     Get-Content (Join-Path $ResultDirectory "environment.txt")
 
@@ -77,7 +110,7 @@ try {
         # stderr lines arrive as error records, so they must not stop the
         # script, and they are written as plain text.
         $ErrorActionPreference = "Continue"
-        & (Join-Path $build "NativeOidcRealBrowserCheck.exe") $baseUrl $TimeoutSeconds 2>&1 |
+        & $checkCommand @checkArguments $baseUrl $TimeoutSeconds 2>&1 |
             ForEach-Object { "$_" } |
             Tee-Object -FilePath (Join-Path $ResultDirectory "check-output.txt")
         $checkStatus = $LASTEXITCODE
