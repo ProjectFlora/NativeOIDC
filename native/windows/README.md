@@ -93,7 +93,8 @@ internal static extern IntPtr Authorize(
 [`dotnet/NativeOidcWindows.cs`](dotnet/NativeOidcWindows.cs) provides an async C#
 wrapper that runs the blocking call on a worker and connects a
 `CancellationToken` to the native cancellation handle. The wrapper project
-targets .NET Standard 2.1. Add the wrapper and `native_oidc.dll` to a
+targets .NET Standard 2.1. For complete C# usage and examples, see the
+[Windows .NET user guide](https://github.com/ProjectFlora/NativeOIDC/blob/main/docs/windows-dotnet-guide.md). Add the wrapper and `native_oidc.dll` to a
 compatible Windows .NET application:
 
 ```csharp

@@ -76,6 +76,8 @@ RULES = (
     # the Windows package, so it is not treated as documentation.
     (("native/android/**", "native/consumer-smoke/android/**"), {"android"}, "Android adapter, tests or consumer"),
     (("native/windows/**", "native/consumer-smoke/windows/**"), {"windows"}, "Windows adapter or consumer"),
+    # Windows .NET guide rule: docs/windows-dotnet-guide.md selects only windows
+    (("docs/windows-dotnet-guide.md",), {"windows"}, ".NET guide compiled by the Windows consumer"),
     # Scripts. The Tests job runs every scripts/test_*.py, so each script
     # also selects it.
     (("scripts/generate-bindings.sh",), {"test", "apple", "android", "spm_bindings"}, "binding generation script"),

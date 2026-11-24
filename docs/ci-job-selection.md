@@ -81,6 +81,7 @@ package.
 | `docs/swift-xcframework.md` | `apple` | Shipped as the Apple package's README. |
 | `native/android/**`, `native/consumer-smoke/android/**` | `android` | Android adapter, unit and emulator tests (including the API 35 run from #166), and the release consumer. |
 | `native/windows/**`, `native/consumer-smoke/windows/**` | `windows` | Windows header, .NET wrapper, consumers. `native/windows/README.md` is shipped in the Windows package. |
+| `docs/windows-dotnet-guide.md` | `windows` | The Windows .NET guide's examples run in the Windows .NET consumer fixture; see [its verification section](../docs/windows-dotnet-guide.md#9-verification-coverage-and-known-limits). |
 | `scripts/generate-bindings.sh` | `test`, `apple`, `android`, `spm_bindings` | Binding generation. |
 | `scripts/generate-third-party-licenses.sh` | `test`, `licenses`, packages | License notices. |
 | `scripts/check-spm-bindings.sh` | `test`, `spm_bindings` | |

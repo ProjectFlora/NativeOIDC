@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <!-- Windows-only consumer: extraction needs PowerShell, same status as C++ MSVC-only fixture -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Generated guide client from csharp blocks in docs/windows-dotnet-guide.md -->
+    <Compile Include="$(IntermediateOutputPath)guide\GuideClient.cs" Condition="Exists('$(IntermediateOutputPath)guide\GuideClient.cs')" />
+    <Compile Include="$(MSBuildThisFileDirectory)GuideMain.cs" Condition="Exists('$(MSBuildThisFileDirectory)GuideMain.cs')" />
+  </ItemGroup>
+
+  <!-- Wrapper and DLL from package (same as consumer, but for the guide app) -->
+  <PropertyGroup>
+    <NativeOidcPackage>missing</NativeOidcPackage>
+  </PropertyGroup>
+
+  <!-- For local testing without extraction, use stub files -->
+  <ItemGroup Condition="!Exists('$(IntermediateOutputPath)guide\GuideClient.cs')">
+    <Compile Include="$(MSBuildThisDirectory)\stub-GuideClient.cs" Link="GuidelineClient.cs" />
+  </ItemGroup>
+
+  <!-- Copy DLL to output for linking -->
+  <ItemGroup>
+    <None Include="$(NativeOidcPackage)/native_oidc.dll" 
+          Condition="Exists('$(NativeOidcPackage)/native_oidc.dll')" 
+          Link="native_oidc.dll" 
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

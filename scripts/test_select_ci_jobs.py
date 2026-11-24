@@ -42,6 +42,10 @@ class RepresentativeChangeTests(unittest.TestCase):
     def test_windows_adapter_runs_windows_only(self):
         self.assertEqual(selected("native/windows/dotnet/NativeOidcWindows.cs"), {"windows"})
 
+    def test_windows_dotnet_guide_runs_windows_only(self):
+        # The Windows .NET guide's examples run in the Windows consumer fixture.
+        self.assertEqual(selected("docs/windows-dotnet-guide.md"), {"windows"})
+
     def test_workflow_change_runs_everything(self):
         self.assertEqual(selected(".github/workflows/ci.yml"), ALL)
         self.assertEqual(selected(".github/workflows/release.yml"), ALL)

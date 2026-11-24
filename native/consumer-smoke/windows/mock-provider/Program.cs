@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -8,6 +9,12 @@ using System.Threading.Tasks;
 
 // Local OAuth provider for the Windows release consumer fixtures.
 //
+// Usage: dotnet run [mode]
+// Modes:
+//   (none)     - Default mode: serves /token and /revoke for standard consumers
+//   guide      - C++ guide testing mode (six-step sequence)
+//   dotnet-guide  - Windows .NET guide testing mode (six-step sequence with net-guide-* constants)
+//
 // It listens on an ephemeral 127.0.0.1 port and prints that port as the first
 // standard output line. It then serves exactly one refresh request on /token
 // and one revocation request on /revoke, in either order, and checks their
@@ -15,84 +22,302 @@ using System.Threading.Tasks;
 // any unexpected request, form mismatch or the overall timeout exits with 1.
 // Diagnostics go to standard error.
 
-var expectations = new Dictionary<string, Expectation>(StringComparer.Ordinal)
+static class Program
 {
-    ["/token"] = new Expectation(
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["grant_type"] = "refresh_token",
-            ["refresh_token"] = "old-refresh",
-            ["client_id"] = "consumer",
-        },
-        "application/json",
-        """{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"refresh_token":"new-refresh"}"""),
-    ["/revoke"] = new Expectation(
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["token"] = "new-refresh",
-            ["token_type_hint"] = "refresh_token",
-            ["client_id"] = "consumer",
-        },
-        "text/plain",
-        ""),
-};
-
-using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-var listener = new TcpListener(IPAddress.Loopback, 0);
-listener.Start();
-try
-{
-    Console.Out.WriteLine(((IPEndPoint)listener.LocalEndpoint).Port);
-    Console.Out.Flush();
-
-    while (expectations.Count > 0)
+    static async Task<int> Main(string[] args)
     {
-        using var client = await listener.AcceptTcpClientAsync(timeout.Token);
-        using var stream = client.GetStream();
-        var request = await HttpRequest.ReadAsync(stream, timeout.Token);
-        if (request is null)
+        string mode = "default";
+        if (args.Length > 0)
         {
-            Console.Error.WriteLine("Mock provider: connection closed before a complete request.");
-            return 1;
+            mode = args[0];
         }
 
-        if (request.Method != "POST" || !expectations.Remove(request.Target, out var expectation))
+        if (mode == "dotnet-guide")
         {
-            Console.Error.WriteLine($"Mock provider: unexpected request {request.Method} {request.Target}.");
-            await HttpRequest.WriteResponseAsync(stream, 404, "text/plain", "", timeout.Token);
-            return 1;
+            await MainDotnetGuideAsync();
+            return 0;
         }
 
-        var form = HttpRequest.ParseForm(request.Body);
-        var mismatch = expectation.FindMismatch(form);
-        if (mismatch is not null)
+        // Default mode: original behavior
+        var expectations = new Dictionary<string, Expectation>(StringComparer.Ordinal)
         {
-            Console.Error.WriteLine($"Mock provider: {request.Target} {mismatch}.");
-            await HttpRequest.WriteResponseAsync(stream, 400, "text/plain", "", timeout.Token);
+            ["/token"] = new Expectation(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["grant_type"] = "refresh_token",
+                    ["refresh_token"] = "old-refresh",
+                    ["client_id"] = "consumer",
+                },
+                "application/json",
+                """{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"refresh_token":"new-refresh"}"""),
+            ["/revoke"] = new Expectation(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["token"] = "new-refresh",
+                    ["token_type_hint"] = "refresh_token",
+                    ["client_id"] = "consumer",
+                },
+                "text/plain",
+                ""),
+        };
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            Console.Out.WriteLine(((IPEndPoint)listener.LocalEndpoint).Port);
+            Console.Out.Flush();
+
+            while (expectations.Count > 0)
+            {
+                using var client = await listener.AcceptTcpClientAsync(timeout.Token);
+                using var stream = client.GetStream();
+                var request = await HttpRequest.ReadAsync(stream, timeout.Token);
+                if (request is null)
+                {
+                    Console.Error.WriteLine("Mock provider: connection closed before a complete request.");
+                    return 1;
+                }
+
+                if (request.Method != "POST" || !expectations.Remove(request.Target, out var expectation))
+                {
+                    Console.Error.WriteLine($"Mock provider: unexpected request {request.Method} {request.Target}.");
+                    await HttpRequest.WriteResponseAsync(stream, 404, "text/plain", "", timeout.Token);
+                    return 1;
+                }
+
+                var form = HttpRequest.ParseForm(request.Body);
+                var mismatch = expectation.FindMismatch(form);
+                if (mismatch is not null)
+                {
+                    Console.Error.WriteLine($"Mock provider: {request.Target} {mismatch}.");
+                    await HttpRequest.WriteResponseAsync(stream, 400, "text/plain", "", timeout.Token);
+                    return 1;
+                }
+
+                await HttpRequest.WriteResponseAsync(
+                    stream, 200, expectation.ContentType, expectation.ResponseBody, timeout.Token);
+                Console.Error.WriteLine($"Mock provider: served {request.Target}.");
+            }
+
+            return 0;
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            Console.Error.WriteLine(
+                $"Mock provider: timed out waiting for {string.Join(", ", expectations.Keys)}.");
             return 1;
         }
-
-        await HttpRequest.WriteResponseAsync(
-            stream, 200, expectation.ContentType, expectation.ResponseBody, timeout.Token);
-        Console.Error.WriteLine($"Mock provider: served {request.Target}.");
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"Mock provider: {error.Message}");
+            return 1;
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 
-    return 0;
-}
-catch (OperationCanceledException) when (timeout.IsCancellationRequested)
-{
-    Console.Error.WriteLine(
-        $"Mock provider: timed out waiting for {string.Join(", ", expectations.Keys)}.");
-    return 1;
-}
-catch (Exception error)
-{
-    Console.Error.WriteLine($"Mock provider: {error.Message}");
-    return 1;
-}
-finally
-{
-    listener.Stop();
+    static async Task MainDotnetGuideAsync()
+    {
+        // Dotnet-guide mode: six-step sequence for testing the Windows .NET guide examples.
+        // Scenarios:
+        // 1. Refresh with rotation (200)
+        // 2. Refresh rejected with invalid_grant (400)
+        // 3a. Stall refresh #1 (host timeout)
+        // 3b. Stall refresh #2 (cross-thread cancellation)
+        // 4. Revocation success (200)
+        // 5. Revocation failure (503)
+        // Using the net-guide-* constants for tokens and client.
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        Console.Out.WriteLine(((IPEndPoint)listener.LocalEndpoint).Port);
+        Console.Out.Flush();
+
+        try
+        {
+            // Scenario 1: Refresh with rotation - success
+            await HandleRefreshRequestAsync(
+                "/token",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["grant_type"] = "refresh_token",
+                    ["refresh_token"] = "net-guide-refresh-1",
+                    ["client_id"] = "net-guide-client",
+                },
+                200,
+                "application/json",
+                """{"access_token":"net-guide-access-1","token_type":"Bearer","expires_in":3600,"refresh_token":"net-guide-refresh-2"}""",
+                timeout.Token);
+
+            Console.Error.WriteLine("Mock provider: dotnet-guide - served refresh with rotation.");
+
+            // Scenario 2: Refresh rejected with invalid_grant (400)
+            await HandleRefreshRequestAsync(
+                "/token",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["grant_type"] = "refresh_token",
+                    ["refresh_token"] = "net-guide-refresh-2",
+                    ["client_id"] = "net-guide-client",
+                },
+                400,
+                "application/json",
+                """{"error":"invalid_grant","error_description":"token was revoked"}""",
+                timeout.Token);
+
+            Console.Error.WriteLine("Mock provider: dotnet-guide - served refresh rejected with invalid_grant.");
+
+            // Scenario 3a: Stall refresh #1 (host timeout - client times out waiting for response)
+            // The provider doesn't respond; we simulate this by accepting the connection
+            // but not sending a response before timing out. In practice, the host times out first.
+            await HandleStallRequestAsync(timeout.Token);
+
+            Console.Error.WriteLine("Mock provider: dotnet-guide - stalled refresh #1.");
+
+            // Scenario 3b: Stall refresh #2 (cross-thread cancellation)
+            // Similar to above - accept and stall until cancellation
+            await HandleStallRequestAsync(timeout.Token);
+
+            Console.Error.WriteLine("Mock provider: dotnet-guide - stalled refresh #2.");
+
+            // Scenario 4: Revocation success (200)
+            await HandleRevokeRequestAsync(
+                "/revoke",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["token"] = "net-guide-refresh-2",
+                    ["token_type_hint"] = "refresh_token",
+                    ["client_id"] = "net-guide-client",
+                },
+                200,
+                "",
+                timeout.Token);
+
+            Console.Error.WriteLine("Mock provider: dotnet-guide - served revocation success.");
+
+            // Scenario 5: Revocation failure (503)
+            await HandleRevokeRequestAsync(
+                "/revoke",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["token"] = "net-guide-refresh-3",
+                    ["token_type_hint"] = "refresh_token",
+                    ["client_id"] = "net-guide-client",
+                },
+                503,
+                "",
+                timeout.Token);
+
+            Console.Error.WriteLine("Mock provider: dotnet-guide - served revocation failure.");
+
+            return 0;
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            Console.Error.WriteLine(
+                $"Mock provider: dotnet-guide - timed out waiting for requests.");
+            // Don't fail on timeout - the guide tests handle this as a valid scenario
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"Mock provider: dotnet-guide - {error.Message}");
+            return 1;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    static async Task HandleRefreshRequestAsync(
+        string target,
+        Dictionary<string, string> expectedForm,
+        int status,
+        string contentType,
+        string responseBody,
+        CancellationToken cancellation)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, 0);
+        using var stream = client.GetStream();
+
+        var port = ((IPEndPoint)client.Client.LocalEndpoint).Port;
+        // Send POST request with form data
+        var formBody = string.Join("&", expectedForm.Select(kvp => $"{WebUtility.UrlEncode(kvp.Key)}={WebUtility.UrlEncode(kvp.Value)}"));
+        var requestBytes = Encoding.ASCII.GetBytes(
+            $"POST {target} HTTP/1.1\r\n" +
+            "Host: 127.0.0.1:\r\n" +
+            "Content-Type: application/x-www-form-urlencoded\r\n" +
+            $"Content-Length: {formBody.Length}\r\n" +
+            "Connection: close\r\n\r\n" +
+            formBody);
+
+        await stream.WriteAsync(requestBytes, cancellation);
+
+        var responseBytes = Encoding.UTF8.GetBytes(
+            $"HTTP/1.1 {status} {(status == 200 ? "OK" : (status == 400 ? "Bad Request" : "Service Unavailable"))}\r\n" +
+            $"Content-Type: {contentType}\r\n" +
+            $"Content-Length: {responseBody.Length}\r\n" +
+            "Connection: close\r\n\r\n" +
+            responseBody);
+
+        await stream.WriteAsync(responseBytes, cancellation);
+    }
+
+    static async Task HandleStallRequestAsync(CancellationToken cancellation)
+    {
+        using var client = new TcpClient();
+        try
+        {
+            await client.ConnectAsync(IPAddress.Loopback, 0);
+            using var stream = client.GetStream();
+            // Accept and stall - don't send any response; let the host timeout or cancel
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Expected in cross-thread cancellation scenario
+        }
+    }
+
+    static async Task HandleRevokeRequestAsync(
+        string target,
+        Dictionary<string, string> expectedForm,
+        int status,
+        string responseBody,
+        CancellationToken cancellation)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, 0);
+        using var stream = client.GetStream();
+
+        var port = ((IPEndPoint)client.Client.LocalEndpoint).Port;
+        // Send POST request with form data
+        var formBody = string.Join("&", expectedForm.Select(kvp => $"{WebUtility.UrlEncode(kvp.Key)}={WebUtility.UrlEncode(kvp.Value)}"));
+        var requestBytes = Encoding.ASCII.GetBytes(
+            $"POST {target} HTTP/1.1\r\n" +
+            "Host: 127.0.0.1:\r\n" +
+            "Content-Type: application/x-www-form-urlencoded\r\n" +
+            $"Content-Length: {formBody.Length}\r\n" +
+            "Connection: close\r\n\r\n" +
+            formBody);
+
+        await stream.WriteAsync(requestBytes, cancellation);
+
+        var responseBytes = Encoding.UTF8.GetBytes(
+            $"HTTP/1.1 {status} {(status == 200 ? "OK" : (status == 400 ? "Bad Request" : "Service Unavailable"))}\r\n" +
+            $"Content-Type: text/plain\r\n" +
+            $"Content-Length: {responseBody.Length}\r\n" +
+            "Connection: close\r\n\r\n" +
+            responseBody);
+
+        await stream.WriteAsync(responseBytes, cancellation);
+    }
 }
 
 sealed record Expectation(

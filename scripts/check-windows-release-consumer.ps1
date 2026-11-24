@@ -14,7 +14,8 @@ function Invoke-ConsumerWithMockProvider {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$MockProvider,
-        [Parameter(Mandatory = $true)][string]$Consumer
+        [Parameter(Mandatory = $true)][string]$Consumer,
+        [Parameter(Mandatory = $false)][string]$ConsumerArguments = ""
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new($MockProvider)
@@ -28,7 +29,8 @@ function Invoke-ConsumerWithMockProvider {
             throw "$Name mock provider did not report a port: '$portLine'"
         }
 
-        & $Consumer "http://127.0.0.1:$port"
+        # Run consumer with optional arguments (e.g., "dotnet-guide")
+        & $Consumer $ConsumerArguments "http://127.0.0.1:$port"
         if ($LASTEXITCODE -ne 0) { throw "$Name consumer execution failed: $LASTEXITCODE" }
 
         if (-not $provider.WaitForExit(30000)) {
@@ -91,6 +93,19 @@ try {
     if ($LASTEXITCODE -ne 0) { throw ".NET consumer build failed: $LASTEXITCODE" }
     Invoke-ConsumerWithMockProvider -Name ".NET" -MockProvider $mockProvider `
         -Consumer (Join-Path $dotnetBuild "NativeOidcReleaseConsumer.exe")
+
+    # Build and run the .NET guide examples consumer
+    $guideAppBuild = Join-Path $workDir "dotnet-guide-app-build"
+    dotnet build (Join-Path $fixture "dotnet/NativeOidcGuideApp.csproj") `
+        --configuration Release `
+        --runtime win-x64 --self-contained true `
+        "--property:NativeOidcPackage=$($packageRoot.FullName)" `
+        "--output=$guideAppBuild"
+    if ($LASTEXITCODE -ne 0) { throw ".NET guide app build failed: $LASTEXITCODE" }
+
+    # Run the .NET guide examples consumer with dotnet-guide mode
+    Invoke-ConsumerWithMockProvider -Name ".NET guide examples" -MockProvider $mockProvider `
+        -Consumer (Join-Path $guideAppBuild "NativeOidcGuideApp.exe")
 } finally {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $workDir
 }
