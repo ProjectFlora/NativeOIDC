@@ -92,7 +92,7 @@ Check the following in order, skipping lines for phases this run does not handle
    - Meets the final-report criteria (step 7)
    → Follow [phase-pr.md](phase-pr.md) from step 6 (or go to step 7 if only the last condition applies)
 2. **Stalled work** (needs `plan` or `implement`, as below): the oldest open issue labeled `agent-in-progress` that has no open PR, and whose claim has expired or whose handoff is unfinished (both defined below)
-   - Expired: the latest active claim (not withdrawn or released) has an `until` in the past, and no agent activity (agent-marker comment or commit on its issue branch `issue-{number}-*`) came after that time
+   - Expired: the latest active claim (not withdrawn or released) has an `until` in the past, and the latest agent activity (agent-marker comment or commit on its issue branch `issue-{number}-*`) is either before that `until` or more than 2 hours old. Activity just after the deadline only delays recovery by up to 2 hours; it never blocks it
    - An issue with no claim comment (started before claims existed) is stalled when its last agent activity is more than 2 hours old
    - **Unfinished handoff**: the run stopped after posting its handoff but before changing the label. Check these first, before any phase recovery below, and if one applies, finish the handoff and end without resuming any phase:
      - A `needs-input` pause comment from an agent was posted after the latest claim (whether or not that claim was released): release the claim if it is not released yet (`next-label=agent-needs-input`), then change the label to `agent-needs-input`
@@ -146,8 +146,9 @@ A claim keeps two runs from working on the same issue, and tells later runs whet
 1. Post an issue comment starting with the claim marker (see "Post Markers" in [common-rules.md](common-rules.md)), with `until` set to 2 hours from now and the issue's `flow`
 2. Read the issue comments again. Among the **active** claims (not withdrawn, not released, and `until` not yet past), the one with the smallest comment ID wins
 3. If yours did not win, edit it to start with `<!-- agent-workflow:claim-withdrawn -->`, do no work on this issue, and continue with the next line of "Choosing a target"
-4. While you work, keep the claim alive: edit your claim comment to move `until` to 2 hours from now after each pushed plan step, and before any action you expect to take more than 30 minutes. If one action may take longer than 2 hours, set `until` far enough to cover it
-5. When your phase ends, hand the claim over in one of two ways:
+4. If you find that your own claim's `until` has already passed, renew it and read the comments again before doing anything else. If another active claim now exists, withdraw yours and stop working on the issue
+5. While you work, keep the claim alive: edit your claim comment to move `until` to 2 hours from now after each pushed plan step, and before any action you expect to take more than 30 minutes. If one action may take longer than 2 hours, set `until` far enough to cover it
+6. When your phase ends, hand the claim over in one of two ways:
    - **Release** it when the run ends the phase and stops working on the issue (PR opened, split-flow plan posted, or paused). Do the writes in this order, so that a run that stops between them can be finished by a later run ("Unfinished handoff" under "Stalled work"):
      1. Post what the next step needs: the PR, the plan comment, or the pause comment
      2. Edit the claim to start with `<!-- agent-workflow:claim-released next-label={label} -->`, with the label you are about to set (`agent-in-progress` when a PR was opened, `agent-plan-review`, or `agent-needs-input`)
