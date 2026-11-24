@@ -47,8 +47,13 @@ args = sys.argv[1:]
 if os.environ.get("FAKE_GH_NO_RELEASE"):
     sys.exit("release not found")
 if args[:2] == ["release", "view"]:
+    # "<name> <state>"; a file <name>.starter is an incomplete asset, as
+    # GitHub leaves after a failed upload.
     for name in sorted(os.listdir(store)):
-        print(name)
+        if name.endswith(".starter"):
+            print(name[:-len(".starter")], "starter")
+        else:
+            print(name, "uploaded")
 elif args[:2] == ["release", "download"]:
     shutil.copy(os.path.join(store, args[args.index("--pattern") + 1]), args[args.index("--dir") + 1])
 elif args[:2] == ["release", "upload"]:
@@ -57,10 +62,15 @@ elif args[:2] == ["release", "upload"]:
     allowed = os.environ.get("FAKE_GH_UPLOADS_ALLOWED")
     with open(os.environ["FAKE_GH_LOG"]) as log:
         earlier = sum(1 for line in log if json.loads(line)[:2] == ["release", "upload"]) - 1
-    if os.environ.get("FAKE_GH_FAIL_UPLOAD") or (allowed is not None and earlier >= int(allowed)):
-        sys.exit("upload refused")
-    if os.path.exists(os.path.join(store, os.path.basename(args[3]))):
+    target = os.path.join(store, os.path.basename(args[3]))
+    if os.path.exists(target) or os.path.exists(target + ".starter"):
         sys.exit("asset already exists")
+    if os.environ.get("FAKE_GH_FAIL_UPLOAD") or (allowed is not None and earlier >= int(allowed)):
+        # FAKE_GH_LEAVE_STARTER: fail the way a 502 can, leaving an empty
+        # "starter" asset behind.
+        if os.environ.get("FAKE_GH_LEAVE_STARTER"):
+            open(target + ".starter", "w").close()
+        sys.exit("upload refused")
     shutil.copy(args[3], store)
 else:
     sys.exit("unexpected gh call %r" % args)
@@ -433,6 +443,37 @@ class UploadTest(ReleaseTestCase):
         self.assertEqual(code, 1)
         self.assertIn("never recorded", err)
         self.assertEqual(len([r for r in self.state.requests if "/upload?" in r[1]]), 1)
+
+    def test_starter_snapshot_after_accepted_upload_is_skipped_and_fails_closed(self):
+        # Writing the ID leaves an empty "starter" asset (a 502). The re-run
+        # must read the intact upload-started snapshot below it.
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        env = {"FAKE_GH_UPLOADS_ALLOWED": "1", "FAKE_GH_LEAVE_STARTER": "1"}
+        code, _, _ = self.upload(extra_env=env)
+        self.assertEqual(code, 1)
+        self.assertTrue(os.path.exists(os.path.join(self.store, release.record_asset(2) + ".starter")))
+        code, _, err = self.upload()
+        self.assertEqual(code, 1)
+        self.assertIn("never recorded", err)
+        self.assertEqual(len([r for r in self.state.requests if "/upload?" in r[1]]), 1)
+        # The documented manual recovery: a new snapshot above every asset,
+        # the starter included, with the deployment ID.
+        with open(os.path.join(self.store, release.record_asset(3)), "w") as handle:
+            json.dump({"version": VERSION, "attempts": [{"state": "uploaded", "deploymentId": DEPLOYMENT_ID}]}, handle)
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHED"}]
+        self.state.central_after = self.state.central_checks + 2
+        code, _, err = self.decide()
+        self.assertEqual(code, 0, err)
+        self.assertIn("decision=verified", self.decision())
+        self.assertEqual(len([r for r in self.state.requests if "/upload?" in r[1]]), 1)
+
+    def test_only_a_starter_snapshot_means_no_upload_started(self):
+        # The upload-started write itself failed, so the bundle was never posted.
+        open(os.path.join(self.store, release.record_asset(1) + ".starter"), "w").close()
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        code, _, err = self.upload()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.snapshots(), [2, 3])
 
     def test_failed_validation_after_upload_is_recorded(self):
         self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "FAILED", "errors": {"sig": ["bad"]}}]

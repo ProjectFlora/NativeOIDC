@@ -8,9 +8,10 @@ deployment ID. Each upload is recorded in the GitHub Release: an
 "upload-started" attempt is written before the bundle is posted, and the
 deployment ID is added once the Portal returns it. The record is
 append-only: every write adds a new asset maven-central-deployment-<n>.json,
-a full snapshot, without replacing an earlier one, and the highest <n> is
-the current record. A failed or interrupted write leaves the previous
-snapshot, so the "upload-started" marker cannot be lost (`gh release upload
+a full snapshot, without replacing an earlier one, and the highest <n> in
+the "uploaded" state is the current record ("starter" assets, which a
+failed upload can leave, are skipped, and their numbers are never reused).
+A failed or interrupted write leaves the previous snapshot, so the "upload-started" marker cannot be lost (`gh release upload
 --clobber` would delete the old asset before uploading the new one). A later
 run (Re-run failed jobs) reads that record and
 the state on Maven Central and the Portal, and either verifies the existing
@@ -306,16 +307,27 @@ def read_record(ctx: Context) -> dict | None:
     if not ctx.use_record:
         ctx.note("No GitHub Release exists for this version, so there is no deployment record.")
         return None
-    listing = gh("release", "view", ctx.tag, "--json", "assets", "--jq", ".assets[].name")
+    listing = gh("release", "view", ctx.tag, "--json", "assets", "--jq", '.assets[] | "\\(.name) \\(.state)"')
     if listing.returncode != 0:
         raise ReleaseError(f"Could not list the assets of the GitHub Release {ctx.tag}: {listing.stderr.strip()}")
-    seqs = [int(match.group(1)) for match in map(RECORD_PATTERN.match, listing.stdout.split()) if match]
-    if not seqs:
-        ctx.record_seq = 0
-        ctx.note(f"The GitHub Release {ctx.tag} has no {RECORD_PREFIX}<n>.json: no upload was started.")
+    complete: list[int] = []
+    incomplete: list[int] = []
+    for line in listing.stdout.splitlines():
+        asset_name, _, state = line.strip().partition(" ")
+        match = RECORD_PATTERN.match(asset_name)
+        if match:
+            (complete if state == "uploaded" else incomplete).append(int(match.group(1)))
+    # The next snapshot takes a number no asset holds, incomplete ones included.
+    ctx.record_seq = max(complete + incomplete, default=0)
+    if incomplete:
+        # A failed asset upload can leave an empty asset in the "starter"
+        # state. It is a write that did not happen: the snapshot before it
+        # is the record, so it is skipped (never read, never removed).
+        ctx.note(f"Skipped incomplete record snapshots {sorted(incomplete)} (failed writes).")
+    if not complete:
+        ctx.note(f"The GitHub Release {ctx.tag} has no complete {RECORD_PREFIX}<n>.json: no upload was started.")
         return None
-    ctx.record_seq = max(seqs)
-    name = record_asset(ctx.record_seq)
+    name = record_asset(max(complete))
     with tempfile.TemporaryDirectory() as directory:
         download = gh("release", "download", ctx.tag, "--pattern", name, "--dir", directory)
         if download.returncode != 0:

@@ -177,10 +177,13 @@ unsigned publication that builds its own AAR.
 `upload-started` attempt is written before the bundle is posted, and the
 deployment ID once the Portal returns it. If the record cannot be written,
 nothing is uploaded. The record is append-only. Each write adds a new asset
-`maven-central-deployment-<n>.json` holding the full record, and the highest
-`<n>` is the current one. No asset is ever replaced: `gh release upload --clobber`
-deletes the old asset before uploading, so an interrupted replacement
-could lose the `upload-started` marker and let a re-run upload twice. The Gradle plugin's
+`maven-central-deployment-<n>.json` holding the full record, and the
+highest `<n>` whose asset is complete (state `uploaded`) is the current one.
+An incomplete `starter` asset, which a failed upload can leave, is a write
+that did not happen. It is skipped, but its number is never reused. No asset
+is ever replaced: `gh release upload --clobber` deletes the old asset before
+uploading, so an interrupted replacement could lose the `upload-started`
+marker and let a re-run upload twice. The Gradle plugin's
 own upload (`publishAndReleaseToMavenCentral`) is not used, because it does
 not report the deployment ID. Only documented
 [Publisher API](https://central.sonatype.org/publish/publish-portal-api/)
@@ -451,17 +454,21 @@ fails closed instead of uploading a second deployment. To resume:
    `Uploaded the bundle as Central Portal deployment <id>`, or at
    <https://central.sonatype.com/publishing/deployments> for a deployment
    named `net.project-flora.nativeoidc-native-oidc-android-X.Y.Z`.
-2. Download the current snapshot, the `maven-central-deployment-<n>.json`
-   asset with the highest `<n>`
-   (`gh release download vX.Y.Z --pattern maven-central-deployment-<n>.json`),
+2. List the record snapshots with their states:
+   `gh release view vX.Y.Z --json assets --jq '.assets[] | select(.name | startswith("maven-central-deployment-")) | "\(.name) \(.state)"'`.
+   The current snapshot is the highest-numbered one in the `uploaded` state.
+   An asset in the `starter` state is a failed write (GitHub can leave one
+   after a 502 during an upload): skip it, and do not delete it.
+3. Download the current snapshot
+   (`gh release download vX.Y.Z --pattern maven-central-deployment-<n>.json`)
    and edit its last attempt:
    - If a deployment exists, set `"state": "uploaded"` and
      `"deploymentId": "<id>"`.
    - If none exists, set `"state": "failed"`.
-3. Save it as `maven-central-deployment-<n+1>.json` and upload it as a new
-   asset (`gh release upload vX.Y.Z maven-central-deployment-<n+1>.json`,
-   without `--clobber`; never replace or delete a snapshot), then
-   **Re-run failed jobs**.
+4. Save it under a number above every listed asset, `starter` ones included
+   (`maven-central-deployment-<m>.json`). Upload it as a new asset
+   (`gh release upload vX.Y.Z maven-central-deployment-<m>.json`) without
+   `--clobber`; never replace or delete a snapshot. Then **Re-run failed jobs**.
 
 - **Consumer validation (`release-consumer.yml`) failed**: the `android_maven`
   job logs four distinct causes. The publication-status check failing means
