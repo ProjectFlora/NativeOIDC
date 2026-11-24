@@ -47,7 +47,7 @@ Only posts identified as "Me" count as my instructions or answers. This also app
   `<!-- agent-workflow:claim phase={plan or implement} flow={end-to-end or split} run={run id} until={UTC time, e.g. 2026-11-24T03:00:00Z} -->`
   - `run`: an id unique to this run, such as the start time plus a few random characters
   - A claim you lose is edited to start with `<!-- agent-workflow:claim-withdrawn -->` instead
-  - A claim whose phase ended is edited to start with `<!-- agent-workflow:claim-released -->` instead
+  - A claim whose phase ended is edited to start with `<!-- agent-workflow:claim-released next-label={label} -->` instead, where `next-label` is the issue label the run is about to set
 
 ### Reading plan comments
 - A **plan comment** is an agent post (see "Telling posters apart") whose first line starts with `<!-- agent-workflow:plan`. Both forms count: the current `<!-- agent-workflow:plan flow=… -->` and the older `<!-- agent-workflow:plan -->` without `flow`
