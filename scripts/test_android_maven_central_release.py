@@ -488,6 +488,27 @@ class UploadTest(ReleaseTestCase):
         self.assertEqual([a["state"] for a in self.read_record()["attempts"]], ["uploaded"])
         self.assertEqual(len([r for r in self.state.requests if "/upload?" in r[1]]), 1)
 
+    def test_refused_connection_marks_the_attempt_failed_and_rerun_uploads(self):
+        code, _, err = self.upload(extra_env={"CENTRAL_PORTAL_BASE_URL": "http://127.0.0.1:9"})
+        self.assertEqual(code, 1)
+        self.assertIn("did not answer", err)
+        self.assertEqual(self.read_record()["attempts"][-1]["state"], "failed")
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        code, _, err = self.upload()
+        self.assertEqual(code, 0, err)
+        self.assertEqual([a["state"] for a in self.read_record()["attempts"]], ["failed", "uploaded"])
+
+    def test_server_error_on_upload_keeps_the_marker(self):
+        # The Portal received the request, so a deployment may exist.
+        self.state.upload_answer = (500, "internal error")
+        code, _, _ = self.upload()
+        self.assertEqual(code, 1)
+        self.assertEqual(self.read_record()["attempts"][-1]["state"], "upload-started")
+        code, _, err = self.upload()
+        self.assertEqual(code, 1)
+        self.assertIn("never recorded", err)
+        self.assertEqual(len([r for r in self.state.requests if "/upload?" in r[1]]), 1)
+
     def test_failed_validation_after_upload_is_recorded(self):
         self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "FAILED", "errors": {"sig": ["bad"]}}]
         code, _, err = self.upload()

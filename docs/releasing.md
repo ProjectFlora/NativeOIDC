@@ -176,7 +176,11 @@ unsigned publication that builds its own AAR.
 `publish_maven` records each upload in the GitHub Release: an
 `upload-started` attempt is written before the bundle is posted, and the
 deployment ID once the Portal returns it. If the record cannot be written,
-nothing is uploaded. The record is append-only. Each write adds a new asset
+nothing is uploaded. Local failures, such as a missing Portal secret, happen
+before the marker is written. An upload POST that never connected (name
+resolution failed, or the connection was refused) marks its attempt
+`failed`, so a re-run can upload. Any other failure keeps the marker,
+because the bundle may have arrived. The record is append-only. Each write adds a new asset
 `maven-central-deployment-<n>.json` holding the full record, and the
 highest `<n>` whose asset is complete (state `uploaded`) is the current one.
 An incomplete `starter` asset, which a failed upload can leave, is a write

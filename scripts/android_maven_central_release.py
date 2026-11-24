@@ -60,6 +60,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -83,6 +84,16 @@ PROBE_DEPLOYMENT_ID = "00000000-0000-0000-0000-000000000000"
 
 class ReleaseError(Exception):
     """A state the job must not continue from; the message says what to do."""
+
+
+class NotSentError(ReleaseError):
+    """The request certainly never reached the Portal: no connection was made."""
+
+
+def never_connected(error: BaseException) -> bool:
+    """True for failures before a connection exists: name resolution, refused connections."""
+    reason = getattr(error, "reason", error)
+    return isinstance(reason, (socket.gaierror, ConnectionRefusedError))
 
 
 def env_int(name: str, default: int) -> int:
@@ -241,6 +252,7 @@ def portal_request(
         headers["Content-Type"] = content_type
     attempts = env_int("PORTAL_RETRIES", 3) if retry else 1
     last_error = ""
+    sent = False
     for attempt in range(1, attempts + 1):
         request = urllib.request.Request(url, data=body, method=method, headers=headers)
         try:
@@ -251,12 +263,15 @@ def portal_request(
             if error.code < 500:
                 return error.code, payload
             last_error = f"HTTP {error.code}: {payload.decode(errors='replace')[:500]}"
+            sent = True
         except (urllib.error.URLError, OSError) as error:
             last_error = str(error)
+            sent = sent or not never_connected(error)
         print(f"Portal {method} {path} attempt {attempt}/{attempts} failed: {last_error}", file=sys.stderr, flush=True)
         if attempt < attempts:
             time.sleep(env_int("PORTAL_RETRY_INTERVAL", 10))
-    raise ReleaseError(f"The Central Portal did not answer {method} {path}: {last_error}. Failing closed.")
+    message = f"The Central Portal did not answer {method} {path}: {last_error}. Failing closed."
+    raise ReleaseError(message) if sent else NotSentError(message)
 
 
 def deployment_status(ctx: Context, deployment_id: str) -> dict:
@@ -489,15 +504,21 @@ def upload(ctx: Context, bundle: str) -> str:
     write_record(ctx, record)
 
     name = f"{GROUP}-{ARTIFACT}-{ctx.version}"
-    status, payload = portal_request(
-        ctx,
-        "POST",
-        f"/api/v1/publisher/upload?name={name}&publishingType=AUTOMATIC",
-        body=body,
-        content_type=content_type,
-        timeout=env_int("UPLOAD_TIMEOUT", 600),
-        retry=False,
-    )
+    try:
+        status, payload = portal_request(
+            ctx,
+            "POST",
+            f"/api/v1/publisher/upload?name={name}&publishingType=AUTOMATIC",
+            body=body,
+            content_type=content_type,
+            timeout=env_int("UPLOAD_TIMEOUT", 600),
+            retry=False,
+        )
+    except NotSentError as error:
+        # No connection was made, so no deployment exists; a re-run may upload.
+        # Any other transport failure keeps the marker: the bundle may have arrived.
+        mark_failed(ctx, record, attempt, f"Upload not sent: {error}")
+        raise
     text = payload.decode(errors="replace").strip()
     if status not in (200, 201):
         # A 4xx answer means the Portal refused the bundle; no deployment exists.
