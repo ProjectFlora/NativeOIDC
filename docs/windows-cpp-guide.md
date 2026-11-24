@@ -14,8 +14,9 @@ The guide targets the published **v0.8.0** release. The Windows header, C
 ABI, and request/response JSON on current `main` are unchanged from v0.8.0.
 Check the matching tag when you install another version.
 
-Every `cpp` block in this guide is compiled, in order, as one translation
-unit by the Windows consumer fixture, which also runs the representative
+Every `cpp` block in this guide, together with the `main.cpp` of the
+[minimal application](#minimal-application), is compiled by the Windows
+consumer fixture, which also runs the representative
 paths against a local mock provider. See
 [section 9](#9-verification-coverage-and-known-limits).
 
@@ -85,7 +86,10 @@ add_custom_command(TARGET my_app POST_BUILD
         "$<TARGET_FILE:native_oidc>" "$<TARGET_FILE_DIR:my_app>")
 ```
 
-Configure for x64, build, and run:
+The project has two source files next to `CMakeLists.txt`: `auth_client.hpp`,
+which holds every `cpp` block of this guide in order, and the `main.cpp` of
+the [minimal application](#minimal-application). Configure for x64, build,
+and run:
 
 ```powershell
 cmake -S . -B build -A x64
@@ -759,13 +763,18 @@ public:
 
     // Also removes a temporary file left by an interrupted save, which can
     // hold a newer refresh token than the stored state.
+    // Attempts both deletions, then reports the first failure.
     void remove() const {
-        for (const std::filesystem::path& path : {temporary_file(), file_}) {
+        std::error_code first_error;
+        for (const std::filesystem::path& path : {file_, temporary_file()}) {
             std::error_code error;
             std::filesystem::remove(path, error);  // a missing file is not an error
-            if (error) {
-                throw std::system_error(error, "could not delete the protected state");
+            if (error && !first_error) {
+                first_error = error;
             }
+        }
+        if (first_error) {
+            throw std::system_error(first_error, "could not delete the protected state");
         }
     }
 
@@ -1030,24 +1039,79 @@ operations, and `winrt::hresult_error` from parsing an invalid state.
 - The adapter cannot detect that the user closed the browser; only the host
   timeout or cancellation ends the wait.
 
+### Minimal application
+
+This `main.cpp` completes the CMake project from
+[section 1](#cmake). `auth_client.hpp` holds the `cpp` blocks above, in
+order. Because those blocks define functions, include the header from one
+source file only, or split it into a header and a source file. A console
+application may block its main thread; a GUI uses `start_sign_in` instead:
+
+```cpp main.cpp
+#include "auth_client.hpp"  // every cpp block of this guide, in order
+
+#include <cstdio>
+
+// The per-user state file, under %LOCALAPPDATA%.
+std::filesystem::path state_file_path() {
+    std::wstring directory(MAX_PATH, L'\0');
+    const DWORD length =
+        GetEnvironmentVariableW(L"LOCALAPPDATA", directory.data(), static_cast<DWORD>(directory.size()));
+    if (length == 0 || length >= directory.size()) {
+        throw std::runtime_error("LOCALAPPDATA is not set");
+    }
+    directory.resize(length);
+    return std::filesystem::path(directory) / L"MyApp" / L"native-oidc-state.bin";
+}
+
+int main() {
+    try {
+        AuthClient client(discovered_config(), state_file_path());
+        if (!client.stored_state()) {
+            std::puts("Opening the browser to sign in...");
+            const OperationResult result = client.sign_in(std::chrono::minutes(5));
+            if (result.status != OperationStatus::Success) {
+                std::fprintf(stderr, "Sign-in did not complete: %s\n", result.value.c_str());
+                return 1;
+            }
+        }
+        if (!usable_access_token(client)) {
+            std::fputs("No usable access token; sign in again.\n", stderr);
+            return 1;
+        }
+        std::puts("Signed in. Call the resource server with the access token.");
+        return 0;
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "%s\n", error.what());
+    } catch (const winrt::hresult_error& error) {
+        std::fprintf(stderr, "%s\n", winrt::to_string(error.message()).c_str());
+    }
+    return 1;
+}
+```
+
 ## 9. Verification, coverage, and known limits
 
 ### What the examples are checked against
 
 The C++ consumer fixture in
 [`native/consumer-smoke/windows/cpp`](../native/consumer-smoke/windows/cpp)
-extracts every `cpp` block of this guide, in order, into one header at
-CMake configure time, and compiles it with
+extracts every `cpp` block of this guide, in order, into `auth_client.hpp`
+at CMake configure time, and compiles it with
 [`guide_examples.cpp`](../native/consumer-smoke/windows/cpp/guide_examples.cpp)
 against the package's header, import library, and DLL, using the CMake
-target shown in [section 1](#cmake). The example runs against a fresh local
+target shown in [section 1](#cmake). It also builds the
+[minimal application](#minimal-application) from the `cpp main.cpp` block
+and that header; that program is linked but not run, because it opens a
+browser. The example runs against a fresh local
 mock provider in its `guide` mode
 ([`mock-provider`](../native/consumer-smoke/windows/mock-provider/Program.cs)),
 which checks every request it receives:
 
 - DPAPI save, load (the file does not contain the token in plain text), and
-  removal. A failed replace leaves no temporary file, and removal also
-  deletes a temporary file left by an interrupted save.
+  removal. A failed replace leaves no temporary file. Removal also deletes a
+  temporary file left by an interrupted save, and still deletes the state
+  when that temporary file cannot be deleted.
 - `usable_access_token` refreshes an expired state, the provider rotates the
   refresh token, and the replacement state is saved.
 - A refresh rejected with `invalid_grant`, a refresh cancelled by the host

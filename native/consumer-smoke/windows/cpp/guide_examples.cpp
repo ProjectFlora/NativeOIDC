@@ -7,7 +7,7 @@
 // The requests sent must match GuideSteps in ../mock-provider/Program.cs.
 // Everything after them fails before any network request or browser launch.
 
-#include "native_oidc_guide.hpp"
+#include "auth_client.hpp"
 
 #include <cstdio>
 
@@ -64,6 +64,21 @@ void check_storage(const std::filesystem::path& file) {
     store.remove();
     check(!std::filesystem::exists(temporary) && !std::filesystem::exists(file),
           "remove also deletes a temporary file left by an interrupted save");
+
+    // A temporary path that cannot be deleted (a non-empty directory) must
+    // not keep the state itself from being deleted.
+    store.save(state);
+    std::filesystem::create_directories(temporary / L"locked");
+    bool remove_failed = false;
+    try {
+        store.remove();
+    } catch (const std::system_error&) {
+        remove_failed = true;
+    }
+    check(remove_failed, "remove reports a temporary file it cannot delete");
+    check(!std::filesystem::exists(file),
+          "remove deletes the state even when the temporary file cannot be deleted");
+    std::filesystem::remove_all(temporary);
 
     // MoveFileExW cannot replace a directory, so this save fails after
     // writing the temporary file.
