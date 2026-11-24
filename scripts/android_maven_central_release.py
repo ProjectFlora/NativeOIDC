@@ -377,7 +377,17 @@ def write_record(ctx: Context, record: dict) -> None:
 
 
 def failed_count(record: dict | None) -> int:
-    return sum(1 for attempt in (record or {}).get("attempts", []) if attempt.get("state") == "failed")
+    """Counts failed deployments: failed attempts the Portal gave a deployment ID.
+
+    An upload the Portal refused (a 401 for a revoked token, a 400) or that
+    never connected created no deployment, so it does not count toward
+    MAX_FAILED_ATTEMPTS: once the cause is fixed, a re-run can upload.
+    """
+    return sum(
+        1
+        for attempt in (record or {}).get("attempts", [])
+        if attempt.get("state") == "failed" and attempt.get("deploymentId")
+    )
 
 
 def mark_failed(ctx: Context, record: dict, attempt: dict, reason: str) -> None:

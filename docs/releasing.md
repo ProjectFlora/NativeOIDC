@@ -208,7 +208,7 @@ deployment:
 | Incomplete | Deployment ID | `PENDING`, `VALIDATING`, `VALIDATED`, `PUBLISHING` | Wait (30 × 60 s), then continue with the state reached; fail with "re-run later" if still in flight. `VALIDATED` that persists fails closed: it waits for a manual publish, which this pipeline never requests |
 | Incomplete | Deployment ID | `PUBLISHED` | Wait for the ten files (30 × 60 s), then check the AAR: `verified`; fail with "re-run later" if the sync has not completed |
 | Incomplete | Deployment ID | `FAILED` | Show the Portal's `errors`, mark the attempt `failed`, and `upload` if all ten files answer 404 (otherwise fail closed as above). The deployment is not dropped, because Sonatype asks to keep failed deployments for support requests |
-| All ten answer 404 | `failed` | Not queried | `upload`, unless three attempts have failed: then fail closed, since the failure is not transient |
+| All ten answer 404 | `failed` | Not queried | `upload`, unless three deployments have failed: then fail closed, since the failure is not transient. Only failed attempts with a deployment ID count; an upload the Portal refused (for example a 401 for a revoked token) or that never connected created no deployment and does not count |
 | Any | Deployment ID | Unknown ID, 4xx, or no answer after retries | Fail closed |
 
 An upload needs affirmative evidence of absence: every one of the ten files
@@ -445,7 +445,7 @@ published again, so fix forward with a new patch version.
 | GitHub Release created, no upload started | `publish_maven` failed before **Upload to Maven Central**, or `upload` failed before writing the record; the Release has no `maven-central-deployment-<n>.json` | Fix the cause (credentials, signing key), then **Re-run failed jobs**. The job adopts the Release AAR again; no rebuild |
 | Upload started but not recorded | `decide` fails with "deployment ID was never recorded" | See [below](#upload-started-but-not-recorded) |
 | Deployment validating or publishing | `decide` or `upload` fails with "still … after the wait" | **Re-run failed jobs** later. The job resumes from the recorded deployment and uploads nothing |
-| Deployment failed | `upload` fails with "failed validation" and the Portal's `errors` | Fix the cause if it is outside the bundle (for example, the key not on the key server), then **Re-run failed jobs**: the job uploads a new deployment. A problem in the bundle itself needs a code change, so fix forward with a new patch version. After three failed attempts the job refuses to upload |
+| Deployment failed | `upload` fails with "failed validation" and the Portal's `errors` | Fix the cause if it is outside the bundle (for example, the key not on the key server), then **Re-run failed jobs**: the job uploads a new deployment. A problem in the bundle itself needs a code change, so fix forward with a new patch version. After three failed deployments the job refuses to upload; refused uploads (such as a 401 from a revoked token) do not count |
 | Published, sync propagating | `decide` fails with "Maven Central still lacks files" | Nothing to fix. **Re-run failed jobs** later, or dispatch `release-consumer.yml` once the files are visible |
 | Fully published | `decide` reports `verified` | Done. A version on Maven Central cannot be replaced or deleted. If the AAR on Central differs from the Release asset, the job fails and the version must be fixed forward |
 
