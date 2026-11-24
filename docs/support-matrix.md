@@ -55,7 +55,7 @@ Configuration evidence:
   remain visible and are not ignored.
 - Apple targets and deployment settings:
   [target builds, XCFramework packaging and slice assertions](../scripts/package-apple-xcframework.sh),
-  [simulator selection](../scripts/check-ios-authorization-flow.sh).
+  [simulator selection and boot](../scripts/boot-ios-simulator.sh).
 - Android minimums: [library Gradle configuration](../native/android/build.gradle.kts),
   [consumer Gradle configuration](../native/consumer-smoke/android/app/build.gradle.kts),
   [NDK target builds](../scripts/check-android-targets.sh).

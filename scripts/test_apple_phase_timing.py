@@ -99,7 +99,7 @@ class PhaseTimingTestCase(unittest.TestCase):
 @unittest.skipUnless(BASH, "bash is not installed")
 class AppleScriptSyntaxTestCase(unittest.TestCase):
     def test_apple_packaging_scripts_parse(self):
-        for name in ("apple-phase-timing.sh", "check-apple-static-link-smoke.sh",
+        for name in ("apple-phase-timing.sh", "boot-ios-simulator.sh", "check-apple-static-link-smoke.sh",
                      "check-ios-authorization-flow.sh", "package-apple-xcframework.sh"):
             with self.subTest(script=name):
                 result = subprocess.run((BASH, "-n", os.path.join(SCRIPTS, name).replace("\\", "/")),
