@@ -475,6 +475,19 @@ class UploadTest(ReleaseTestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.snapshots(), [2, 3])
 
+    def test_missing_secret_records_nothing_and_rerun_uploads(self):
+        for missing in ("MAVEN_USER", "MAVEN_PASSWORD"):
+            code, _, err = self.upload(extra_env={missing: ""})
+            self.assertEqual(code, 1)
+            self.assertIn("MAVEN_USER and MAVEN_PASSWORD", err)
+            self.assertEqual(self.snapshots(), [])
+            self.assertFalse([r for r in self.state.requests if "/upload?" in r[1]])
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        code, _, err = self.upload()
+        self.assertEqual(code, 0, err)
+        self.assertEqual([a["state"] for a in self.read_record()["attempts"]], ["uploaded"])
+        self.assertEqual(len([r for r in self.state.requests if "/upload?" in r[1]]), 1)
+
     def test_failed_validation_after_upload_is_recorded(self):
         self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "FAILED", "errors": {"sig": ["bad"]}}]
         code, _, err = self.upload()

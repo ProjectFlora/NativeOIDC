@@ -468,6 +468,11 @@ def upload(ctx: Context, bundle: str) -> str:
         ctx.note(f"Decision: {decision}; nothing to upload.")
         return decision
 
+    # Everything that can fail locally happens before the marker, so a run
+    # that never sent the bundle (a missing secret, an unreadable bundle)
+    # leaves no upload-started attempt behind.
+    portal_token()
+    body, content_type = multipart(bundle)
     record = read_record(ctx) or {"version": ctx.version, "attempts": []}
     attempt = {
         "state": "upload-started",
@@ -483,7 +488,6 @@ def upload(ctx: Context, bundle: str) -> str:
     # instead of uploading again.
     write_record(ctx, record)
 
-    body, content_type = multipart(bundle)
     name = f"{GROUP}-{ARTIFACT}-{ctx.version}"
     status, payload = portal_request(
         ctx,
