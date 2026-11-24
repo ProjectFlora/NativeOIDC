@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
+# shellcheck source=scripts/apple-phase-timing.sh
+source "$repo_root/scripts/apple-phase-timing.sh"
 
 bundle_id=net.project-flora.nativeoidc.ios-flow-smoke
 app_bundle="$repo_root/target/apple/ios-authorization-flow-smoke.app"
@@ -26,6 +28,11 @@ if [[ ! -f "$simulator_slice/libnative_oidc.a" ]]; then
     exit 1
 fi
 
+# Phases that stop the script before the cleanup trap below is set are
+# recorded as failed here; cleanup takes over once it is set.
+trap phase_fail_open EXIT
+
+phase_begin "iOS flow: build and sign app"
 rm -rf "$app_bundle"
 mkdir -p "$app_bundle"
 cp native/apple/IOSAuthorizationFlowSmoke-Info.plist "$app_bundle/Info.plist"
@@ -48,12 +55,15 @@ xcrun --sdk iphonesimulator swiftc \
     Sources/NativeOIDC/URLSessionNativeHttpTransport.swift
 
 codesign --force --sign - --timestamp=none "$app_bundle"
+phase_end
 
+phase_begin "iOS flow: select simulator"
 simulator_selection=$(
     xcrun simctl list devices available -j |
         python3 scripts/select_ios_simulator.py "${IOS_SIMULATOR_MAJOR_VERSION:-}"
 )
 IFS=$'\t' read -r simulator_id simulator_state simulator_runtime <<< "$simulator_selection"
+phase_end
 echo "iOS flow simulator: $simulator_id ($simulator_runtime; $simulator_state)"
 sw_vers
 xcodebuild -version
@@ -61,11 +71,14 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "iOS authorization: $simulator_runtime on $(uname -m), simulator $simulator_id" >> "$GITHUB_STEP_SUMMARY"
 fi
 if [[ "$simulator_state" != Booted ]]; then
+    phase_begin "iOS flow: simctl boot"
     xcrun simctl boot "$simulator_id"
     booted_by_script=true
+    phase_end
 fi
 
 cleanup() {
+    phase_fail_open
     xcrun simctl terminate "$simulator_id" "$bundle_id" >/dev/null 2>&1 || true
     if [[ -n "$provider_pid" ]]; then
         kill "$provider_pid" >/dev/null 2>&1 || true
@@ -103,8 +116,11 @@ for runtime, devices in json.load(sys.stdin).get("devices", {}).items():
     cat "$provider_log" >&2
 }
 
+phase_begin "iOS flow: simctl bootstatus"
 xcrun simctl bootstatus "$simulator_id" -b
+phase_begin "iOS flow: uninstall previous app"
 xcrun simctl uninstall "$simulator_id" "$bundle_id" >/dev/null 2>&1 || true
+phase_begin "iOS flow: start mock provider"
 rm -f "$provider_port_file"
 python3 scripts/ios-mock-oauth-provider.py --port-file "$provider_port_file" \
     > "$provider_log" 2>&1 &
@@ -126,7 +142,9 @@ if [[ ! -s "$provider_port_file" ]]; then
     exit 1
 fi
 provider_port=$(<"$provider_port_file")
+phase_begin "iOS flow: install app"
 xcrun simctl install "$simulator_id" "$app_bundle"
+phase_begin "iOS flow: launch app"
 # Anchor the diagnostics log window at launch, not a fixed recent span, so an
 # app that dies early still leaves its failure context (see diagnostics). The
 # in-simulator `log` tool does not parse ISO 8601, so use a local timestamp.
@@ -136,6 +154,7 @@ if ! xcrun simctl launch "$simulator_id" "$bundle_id" --oauth-provider-port "$pr
     exit 1
 fi
 
+phase_begin "iOS flow: wait for result"
 data_container=$(xcrun simctl get_app_container "$simulator_id" "$bundle_id" data)
 result_file="$data_container/Documents/authorization-flow-result"
 # The app waits up to 90s for its scene to be foreground active before
@@ -145,6 +164,7 @@ for ((attempt = 0; attempt < 150; attempt++)); do
     if [[ -f "$result_file" ]]; then
         result=$(<"$result_file")
         if [[ "$result" == success ]]; then
+            phase_end
             echo "iOS ASWebAuthenticationSession mock-provider flow passed"
             exit 0
         fi
