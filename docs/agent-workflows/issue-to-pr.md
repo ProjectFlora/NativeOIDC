@@ -138,7 +138,7 @@ A final report can stop being true before I merge: a review arrives late, CI sta
 
 When resuming any issue, read the comments posted after your last agent-marker comment. Only comments identified as "Me" (see "Post Markers" in [common-rules.md](common-rules.md)) count as my answers or instructions. If there is none, treat the label change itself as "continue as is".
 
-Whenever you start working on a chosen issue, change its label to `agent-in-progress` first, then claim it.
+Whenever you start working on a chosen issue, claim it first (see "Claiming an issue" below), and change its label to `agent-in-progress` only after your claim wins. A run that stops between the two leaves the issue on its previous label with an active claim, which a later run handles normally once the claim expires. Because the new claim is always the latest one, a claim released by an earlier phase is never mistaken for an unfinished handoff.
 
 ### Claiming an issue
 A claim keeps two runs from working on the same issue, and tells later runs whether the worker is still active. Plan and implement work in scheduled mode always runs under a claim.
