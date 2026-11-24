@@ -3,17 +3,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use url::form_urlencoded;
 
 use super::{
-    http::send_token_request,
+    http::{send_token_request, serialize_token_form},
     json::{take_optional_string, take_optional_u64, take_required_string, UniqueJsonObject},
     validation::validate_additional_token_parameters,
     ServiceConfiguration,
 };
 use crate::{
-    id_token::{validate_id_token, IdTokenValidation},
-    AuthError, CancellationHandle, HttpTransport, Result,
+    id_token::validate_id_token_if_present, AuthError, CancellationHandle, HttpTransport, Result,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -168,16 +166,14 @@ impl AuthenticationState {
                 "authentication state has no refresh token",
             ))?;
 
-        let body = {
-            let mut form = form_urlencoded::Serializer::new(String::new());
-            form.append_pair("grant_type", "refresh_token")
-                .append_pair("refresh_token", refresh_token)
-                .append_pair("client_id", client_id);
-            for (name, value) in additional_parameters {
-                form.append_pair(name, value);
-            }
-            form.finish().into_bytes()
-        };
+        let body = serialize_token_form(
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+                ("client_id", client_id),
+            ],
+            additional_parameters,
+        );
         let mut refreshed = send_token_request(
             &configuration.token_endpoint,
             body,
@@ -185,35 +181,18 @@ impl AuthenticationState {
             cancellation.clone(),
         )
         .await?;
-        if let Some(id_token) = &refreshed.id_token {
-            let issuer = configuration
-                .issuer
-                .as_ref()
-                .ok_or(AuthError::InvalidConfiguration(
-                    "OIDC issuer is required to validate ID Tokens",
-                ))?;
-            let jwks_uri =
-                configuration
-                    .jwks_uri
-                    .as_ref()
-                    .ok_or(AuthError::InvalidConfiguration(
-                        "JWKS endpoint is required to validate ID Tokens",
-                    ))?;
-            validate_id_token(
-                IdTokenValidation {
-                    token: id_token,
-                    issuer,
-                    jwks_uri,
-                    client_id,
-                    expected_nonce: self.oidc_nonce.as_deref(),
-                    require_nonce: false,
-                },
-                &configuration.jwks_cache,
-                transport,
-                cancellation,
-            )
-            .await?;
-        }
+        validate_id_token_if_present(
+            refreshed.id_token.as_deref(),
+            configuration.issuer.as_ref(),
+            configuration.jwks_uri.as_ref(),
+            client_id,
+            self.oidc_nonce.as_deref(),
+            false,
+            &configuration.jwks_cache,
+            transport,
+            cancellation,
+        )
+        .await?;
 
         if refreshed.refresh_token.is_none() {
             refreshed.refresh_token = Some(refresh_token.to_owned());
@@ -274,7 +253,7 @@ pub(super) fn parse_token_response(body: &[u8]) -> Result<TokenResponse> {
 #[cfg(test)]
 mod tests {
     use http::{Method, StatusCode};
-    use url::Url;
+    use url::{form_urlencoded, Url};
 
     use super::*;
     use crate::authorization::{test_support::*, validation::RESERVED_TOKEN_PARAMETERS};

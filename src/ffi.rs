@@ -1,14 +1,14 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use http::{header::HeaderName, HeaderMap, HeaderValue, StatusCode};
 use url::Url;
 
 use crate::{
-    revoke_token, AuthError, AuthenticationState, AuthorizationRequest, AuthorizationResponse,
-    AuthorizationSession, CancellationHandle, ClientRegistrationRequest, EndSessionRequest,
-    HttpRequest, HttpResponse, HttpTransport, Result, RevocationTokenType, ServiceConfiguration,
-    TokenResponse,
+    parameters::are_parameter_names_unique, revoke_token, AuthError, AuthenticationState,
+    AuthorizationRequest, AuthorizationResponse, AuthorizationSession, CancellationHandle,
+    ClientRegistrationRequest, EndSessionRequest, HttpRequest, HttpResponse, HttpTransport, Result,
+    RevocationTokenType, ServiceConfiguration, TokenResponse,
 };
 
 /// Errors exposed to Swift and Kotlin callers.
@@ -455,11 +455,7 @@ fn apply_parameters(
 }
 
 fn ensure_unique_parameter_names(parameters: &[FfiParameter]) -> std::result::Result<(), FfiError> {
-    let mut names = BTreeSet::new();
-    if parameters
-        .iter()
-        .any(|parameter| !names.insert(parameter.name.as_str()))
-    {
+    if !are_parameter_names_unique(parameters.iter().map(|parameter| parameter.name.as_str())) {
         return Err(FfiError::InvalidRequest(
             "parameter names must be unique".to_owned(),
         ));

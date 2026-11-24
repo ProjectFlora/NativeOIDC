@@ -15,6 +15,7 @@ mod authorization;
 mod cancellation;
 mod error;
 mod id_token;
+mod parameters;
 mod pkce;
 mod transport;
 

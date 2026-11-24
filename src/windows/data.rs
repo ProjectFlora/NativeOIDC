@@ -1,9 +1,8 @@
-use std::collections::BTreeSet;
 use std::io;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AuthError, AuthenticationState};
+use crate::{parameters::are_parameter_names_unique, AuthError, AuthenticationState};
 
 #[derive(Debug, Deserialize)]
 pub(super) struct WindowsAuthorizationRequest {
@@ -142,11 +141,7 @@ pub(super) struct EndpointSelection<'a> {
 pub(super) fn ensure_unique_parameter_names(
     parameters: &[WindowsParameter],
 ) -> std::result::Result<(), WindowsAuthorizationError> {
-    let mut names = BTreeSet::new();
-    if parameters
-        .iter()
-        .any(|parameter| !names.insert(parameter.name.as_str()))
-    {
+    if !are_parameter_names_unique(parameters.iter().map(|parameter| parameter.name.as_str())) {
         return Err(WindowsAuthorizationError::DuplicateParameter);
     }
     Ok(())

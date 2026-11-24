@@ -240,6 +240,46 @@ pub(super) fn reject_reserved_endpoint_parameters(endpoint: &Url) -> Result<()> 
     Ok(())
 }
 
+/// A failure of the callback query checks shared by authorization and
+/// end-session redirects. Each caller maps it to its own error variant and message.
+pub(super) enum CallbackQueryError {
+    /// The raw query has malformed percent encoding or invalid UTF-8.
+    InvalidEncoding,
+    /// A parameter name appears more than once.
+    DuplicateParameter,
+    /// The registered redirect URI's fixed query is missing or differs.
+    FixedQueryMismatch,
+}
+
+/// Validates the callback query and returns its parameters, minus the fixed
+/// query parameters of the registered redirect URI.
+pub(super) fn parse_callback_query(
+    redirect: &Url,
+    expected_redirect_uri: &Url,
+    error: impl Fn(CallbackQueryError) -> AuthError,
+) -> Result<BTreeMap<String, String>> {
+    if !has_valid_query_encoding(redirect) {
+        return Err(error(CallbackQueryError::InvalidEncoding));
+    }
+
+    let mut parameters = BTreeMap::new();
+    let mut names = HashSet::new();
+    for (name, value) in redirect.query_pairs() {
+        if !names.insert(name.to_string()) {
+            return Err(error(CallbackQueryError::DuplicateParameter));
+        }
+        parameters.insert(name.into_owned(), value.into_owned());
+    }
+
+    for (name, expected_value) in expected_redirect_uri.query_pairs() {
+        if parameters.get(name.as_ref()) != Some(&expected_value.into_owned()) {
+            return Err(error(CallbackQueryError::FixedQueryMismatch));
+        }
+        parameters.remove(name.as_ref());
+    }
+    Ok(parameters)
+}
+
 // url::query_pairs uses lossy decoding. Check the raw query first so malformed
 // escapes and invalid UTF-8 cannot silently become literal '%' or U+FFFD.
 pub(super) fn has_valid_query_encoding(url: &Url) -> bool {

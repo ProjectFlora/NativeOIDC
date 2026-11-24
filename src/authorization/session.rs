@@ -1,18 +1,18 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
-use url::{form_urlencoded, Url};
+use url::Url;
 
 use super::{
-    http::send_token_request,
+    http::{send_token_request, serialize_token_form},
     validation::{
-        has_valid_query_encoding, reject_reserved_endpoint_parameters,
+        parse_callback_query, reject_reserved_endpoint_parameters,
         validate_additional_token_parameter, validate_redirect_uri, validate_redirect_uri_match,
-        validate_scope, RESERVED_AUTHORIZATION_PARAMETERS,
+        validate_scope, CallbackQueryError, RESERVED_AUTHORIZATION_PARAMETERS,
     },
     AuthenticationState, ServiceConfiguration, TokenResponse,
 };
 use crate::{
-    id_token::{validate_id_token, IdTokenValidation, JwksCache},
+    id_token::{validate_id_token_if_present, JwksCache},
     pkce::{random_token, PkcePair},
     AuthError, CancellationHandle, HttpTransport, Result,
 };
@@ -209,31 +209,18 @@ impl AuthorizationSession {
     /// responses are returned as [`AuthError::AuthorizationServer`].
     pub fn parse_redirect(&self, redirect: &Url) -> Result<AuthorizationResponse> {
         validate_redirect_uri_match(&self.redirect_uri, redirect)?;
-        if !has_valid_query_encoding(redirect) {
-            return Err(AuthError::InvalidAuthorizationResponse(
-                "response query has invalid percent encoding or UTF-8",
-            ));
-        }
-
-        let mut parameters = BTreeMap::new();
-        let mut names = HashSet::new();
-        for (name, value) in redirect.query_pairs() {
-            if !names.insert(name.to_string()) {
-                return Err(AuthError::InvalidAuthorizationResponse(
+        let mut parameters =
+            parse_callback_query(redirect, &self.redirect_uri, |error| match error {
+                CallbackQueryError::InvalidEncoding => AuthError::InvalidAuthorizationResponse(
+                    "response query has invalid percent encoding or UTF-8",
+                ),
+                CallbackQueryError::DuplicateParameter => AuthError::InvalidAuthorizationResponse(
                     "response contains a duplicate parameter",
-                ));
-            }
-            parameters.insert(name.into_owned(), value.into_owned());
-        }
-
-        for (name, expected_value) in self.redirect_uri.query_pairs() {
-            if parameters.get(name.as_ref()) != Some(&expected_value.into_owned()) {
-                return Err(AuthError::InvalidAuthorizationResponse(
-                    "redirect URI query does not match",
-                ));
-            }
-            parameters.remove(name.as_ref());
-        }
+                ),
+                CallbackQueryError::FixedQueryMismatch => {
+                    AuthError::InvalidAuthorizationResponse("redirect URI query does not match")
+                }
+            })?;
 
         if parameters.get("state").map(String::as_str) != Some(self.state.as_str()) {
             return Err(AuthError::InvalidAuthorizationResponse("state mismatch"));
@@ -294,18 +281,16 @@ impl AuthorizationSession {
             ));
         }
 
-        let body = {
-            let mut form = form_urlencoded::Serializer::new(String::new());
-            form.append_pair("grant_type", "authorization_code")
-                .append_pair("code", &response.code)
-                .append_pair("redirect_uri", self.redirect_uri.as_str())
-                .append_pair("client_id", &self.client_id)
-                .append_pair("code_verifier", self.pkce.verifier());
-            for (name, value) in &self.additional_token_parameters {
-                form.append_pair(name, value);
-            }
-            form.finish().into_bytes()
-        };
+        let body = serialize_token_form(
+            &[
+                ("grant_type", "authorization_code"),
+                ("code", &response.code),
+                ("redirect_uri", self.redirect_uri.as_str()),
+                ("client_id", &self.client_id),
+                ("code_verifier", self.pkce.verifier()),
+            ],
+            &self.additional_token_parameters,
+        );
         let token_response =
             send_token_request(&self.token_endpoint, body, transport, cancellation.clone()).await?;
         if self.nonce.is_some() && token_response.id_token.is_none() {
@@ -313,34 +298,18 @@ impl AuthorizationSession {
                 "openid token response is missing an ID Token",
             ));
         }
-        if let Some(id_token) = &token_response.id_token {
-            let issuer = self
-                .oidc_issuer
-                .as_ref()
-                .ok_or(AuthError::InvalidConfiguration(
-                    "OIDC issuer is required to validate ID Tokens",
-                ))?;
-            let jwks_uri = self
-                .jwks_uri
-                .as_ref()
-                .ok_or(AuthError::InvalidConfiguration(
-                    "JWKS endpoint is required to validate ID Tokens",
-                ))?;
-            validate_id_token(
-                IdTokenValidation {
-                    token: id_token,
-                    issuer,
-                    jwks_uri,
-                    client_id: &self.client_id,
-                    expected_nonce: self.nonce.as_deref(),
-                    require_nonce: self.nonce.is_some(),
-                },
-                &self.jwks_cache,
-                transport,
-                cancellation,
-            )
-            .await?;
-        }
+        validate_id_token_if_present(
+            token_response.id_token.as_deref(),
+            self.oidc_issuer.as_ref(),
+            self.jwks_uri.as_ref(),
+            &self.client_id,
+            self.nonce.as_deref(),
+            self.nonce.is_some(),
+            &self.jwks_cache,
+            transport,
+            cancellation,
+        )
+        .await?;
         Ok(token_response)
     }
 }
@@ -374,6 +343,8 @@ mod tests {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use http::{Method, StatusCode};
     use sha2::{Digest, Sha256};
+
+    use url::form_urlencoded;
 
     use super::*;
     use crate::authorization::{test_support::*, validation::RESERVED_TOKEN_PARAMETERS};

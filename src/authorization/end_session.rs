@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use url::Url;
 
 use super::{
     validation::{
-        has_valid_query_encoding, reject_reserved_end_session_parameters,
-        validate_end_session_redirect_uri_match, validate_redirect_uri,
+        parse_callback_query, reject_reserved_end_session_parameters,
+        validate_end_session_redirect_uri_match, validate_redirect_uri, CallbackQueryError,
     },
     ServiceConfiguration,
 };
@@ -117,31 +117,18 @@ impl EndSessionSession {
                     "no post-logout redirect URI was requested",
                 ))?;
         validate_end_session_redirect_uri_match(expected_redirect_uri, redirect)?;
-        if !has_valid_query_encoding(redirect) {
-            return Err(AuthError::InvalidEndSessionResponse(
-                "response query has invalid percent encoding or UTF-8",
-            ));
-        }
-
-        let mut parameters = BTreeMap::new();
-        let mut names = HashSet::new();
-        for (name, value) in redirect.query_pairs() {
-            if !names.insert(name.to_string()) {
-                return Err(AuthError::InvalidEndSessionResponse(
-                    "response contains a duplicate parameter",
-                ));
-            }
-            parameters.insert(name.into_owned(), value.into_owned());
-        }
-
-        for (name, expected_value) in expected_redirect_uri.query_pairs() {
-            if parameters.get(name.as_ref()) != Some(&expected_value.into_owned()) {
-                return Err(AuthError::InvalidEndSessionResponse(
+        let mut parameters =
+            parse_callback_query(redirect, expected_redirect_uri, |error| match error {
+                CallbackQueryError::InvalidEncoding => AuthError::InvalidEndSessionResponse(
+                    "response query has invalid percent encoding or UTF-8",
+                ),
+                CallbackQueryError::DuplicateParameter => {
+                    AuthError::InvalidEndSessionResponse("response contains a duplicate parameter")
+                }
+                CallbackQueryError::FixedQueryMismatch => AuthError::InvalidEndSessionResponse(
                     "post-logout redirect URI query does not match",
-                ));
-            }
-            parameters.remove(name.as_ref());
-        }
+                ),
+            })?;
 
         let returned_state =
             parameters
