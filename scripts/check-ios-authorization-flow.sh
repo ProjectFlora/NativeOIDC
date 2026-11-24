@@ -12,25 +12,44 @@ executable=NativeOIDCIOSFlowSmoke
 generated="$repo_root/target/uniffi/swift"
 xcframework="$repo_root/target/apple/release-package/NativeOIDC-Apple/NativeOIDC.xcframework"
 simulator_slice="$xcframework/ios-arm64-simulator"
-simulator_sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
 provider_port_file="$repo_root/target/apple/ios-mock-provider.port"
 provider_log="$repo_root/target/apple/ios-mock-provider.log"
 provider_pid=""
+simulator_id=""
 booted_by_script=false
 
+# Installed before any phase or resource, so every exit path records the
+# phase that stopped the script (timing writes are best-effort and cannot
+# interrupt the rest) and then stops the app, the mock provider and a
+# simulator this script booted.
+cleanup() {
+    phase_fail_open
+    if [[ -n "$simulator_id" ]]; then
+        xcrun simctl terminate "$simulator_id" "$bundle_id" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "$provider_pid" ]]; then
+        kill "$provider_pid" >/dev/null 2>&1 || true
+        wait "$provider_pid" 2>/dev/null || true
+    fi
+    if [[ "$booted_by_script" == true ]]; then
+        xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
+
+phase_begin "iOS flow: check host, SDK and simulator slice"
 if [[ "$(uname -m)" != arm64 ]]; then
     echo "iOS simulator smoke test requires an arm64 Apple host" >&2
     exit 1
 fi
 
+simulator_sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+
 if [[ ! -f "$simulator_slice/libnative_oidc.a" ]]; then
     echo "iOS simulator library is missing: $simulator_slice/libnative_oidc.a" >&2
     exit 1
 fi
-
-# Phases that stop the script before the cleanup trap below is set are
-# recorded as failed here; cleanup takes over once it is set.
-trap phase_fail_open EXIT
+phase_end
 
 phase_begin "iOS flow: build and sign app"
 rm -rf "$app_bundle"
@@ -72,23 +91,12 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 fi
 if [[ "$simulator_state" != Booted ]]; then
     phase_begin "iOS flow: simctl boot"
-    xcrun simctl boot "$simulator_id"
+    # Set before the boot, so cleanup also shuts down a device whose boot
+    # started but did not complete.
     booted_by_script=true
+    xcrun simctl boot "$simulator_id"
     phase_end
 fi
-
-cleanup() {
-    phase_fail_open
-    xcrun simctl terminate "$simulator_id" "$bundle_id" >/dev/null 2>&1 || true
-    if [[ -n "$provider_pid" ]]; then
-        kill "$provider_pid" >/dev/null 2>&1 || true
-        wait "$provider_pid" 2>/dev/null || true
-    fi
-    if [[ "$booted_by_script" == true ]]; then
-        xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
-    fi
-}
-trap cleanup EXIT
 
 # Record what the app and the simulator saw when the flow did not pass. The
 # app logs its scene and window state on failure and carries it in the result

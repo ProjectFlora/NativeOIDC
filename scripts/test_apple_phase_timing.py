@@ -9,8 +9,7 @@ HELPER = os.path.join(SCRIPTS, "apple-phase-timing.sh")
 BASH = shutil.which("bash")
 
 
-@unittest.skipUnless(BASH, "bash is not installed")
-class PhaseTimingTestCase(unittest.TestCase):
+class BashHelperMixin:
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -41,6 +40,9 @@ class PhaseTimingTestCase(unittest.TestCase):
             self.assertIn(row[2], ("0", "1"), row)
         return [row[:2] for row in rows]
 
+
+@unittest.skipUnless(BASH, "bash is not installed")
+class PhaseTimingTestCase(BashHelperMixin, unittest.TestCase):
     def test_begin_and_end_record_an_ok_row(self):
         result = self.run_bash("phase_begin 'Build: one'\nphase_end\n")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -94,6 +96,59 @@ class PhaseTimingTestCase(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stderr, r"\[timing\] alone: [01]s \(ok\)")
         self.assertFalse(os.path.exists(self.summary_file))
+
+
+@unittest.skipUnless(BASH, "bash is not installed")
+class UnwritableDestinationTestCase(BashHelperMixin, unittest.TestCase):
+    """Timing is best-effort: a failed write must not stop a script or its cleanup."""
+
+    def setUp(self):
+        super().setUp()
+        # A directory cannot be appended to, so every write to it fails.
+        os.mkdir(self.timing_file)
+        os.mkdir(self.summary_file)
+
+    def test_failed_writes_warn_and_continue(self):
+        result = self.run_bash("phase_begin one\nphase_end\nphase_record two ok 3\necho after\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "after\n")
+        self.assertIn("warning: could not write phase timing to", result.stderr)
+
+    def test_failed_write_in_exit_trap_reaches_cleanup_and_keeps_status(self):
+        result = self.run_bash("cleanup() {\n    phase_fail_open\n    echo cleanup-reached\n}\n"
+                               "trap cleanup EXIT\nphase_begin broken\nexit 3\n")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(result.stdout, "cleanup-reached\n")
+        self.assertIn("warning: could not write phase timing to", result.stderr)
+
+    def test_failed_summary_write_continues(self):
+        os.rmdir(self.timing_file)
+        with open(self.timing_file, "w", encoding="utf-8") as handle:
+            handle.write("one\tok\t1\n")
+        result = self.run_bash("phase_write_summary title\necho after\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.endswith("| one | ok | 1s |\nafter\n"), result.stdout)
+        self.assertIn("warning: could not write phase timing to", result.stderr)
+
+    def test_standalone_failed_summary_write_continues(self):
+        result = self.run_bash("phase_record one ok 1\necho after\n", timing_file=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "after\n")
+        self.assertIn("warning: could not write phase timing to", result.stderr)
+
+
+class IOSFlowCleanupOrderTestCase(unittest.TestCase):
+    def test_cleanup_is_installed_before_any_phase_sdk_lookup_or_boot(self):
+        with open(os.path.join(SCRIPTS, "check-ios-authorization-flow.sh"), encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+
+        def first(text):
+            return next(index for index, line in enumerate(lines) if text in line)
+
+        trap = first("trap cleanup EXIT")
+        for text in ("phase_begin", "--show-sdk-path", "simctl boot", "ios-mock-oauth-provider.py"):
+            with self.subTest(text=text):
+                self.assertLess(trap, first(text))
 
 
 @unittest.skipUnless(BASH, "bash is not installed")

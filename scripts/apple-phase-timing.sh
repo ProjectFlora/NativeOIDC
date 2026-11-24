@@ -32,14 +32,27 @@ phase_format_seconds() {
     fi
 }
 
-phase_record() {
-    local name=$1 status=$2 seconds=$3
-    echo "[timing] $name: $(phase_format_seconds "$seconds") ($status)" >&2
-    if [[ -n "${APPLE_PHASE_TIMING_FILE:-}" ]]; then
-        printf '%s\t%s\t%s\n' "$name" "$status" "$seconds" >> "$APPLE_PHASE_TIMING_FILE"
-    elif [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-        echo "- $name: $(phase_format_seconds "$seconds") ($status)" >> "$GITHUB_STEP_SUMMARY"
+# Timing is diagnostic only. Every write is best-effort: a failed write prints
+# a warning and returns 0, so under `set -e` it can never stop the script or
+# an EXIT trap's cleanup, or change the exit status.
+_phase_append() {
+    local destination=$1 line=$2
+    if ! { printf '%s\n' "$line" >> "$destination"; } 2>/dev/null; then
+        echo "warning: could not write phase timing to $destination" >&2 || true
     fi
+    return 0
+}
+
+phase_record() {
+    local name=$1 status=$2 seconds=$3 formatted
+    formatted=$(phase_format_seconds "$seconds")
+    echo "[timing] $name: $formatted ($status)" >&2 || true
+    if [[ -n "${APPLE_PHASE_TIMING_FILE:-}" ]]; then
+        _phase_append "$APPLE_PHASE_TIMING_FILE" "$name"$'\t'"$status"$'\t'"$seconds"
+    elif [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        _phase_append "$GITHUB_STEP_SUMMARY" "- $name: $formatted ($status)"
+    fi
+    return 0
 }
 
 phase_begin() {
@@ -76,9 +89,10 @@ phase_write_summary() {
     table="### $title"$'\n\n'"| Phase | Result | Time |"$'\n'"|---|---|---:|"
     while IFS=$'\t' read -r name status seconds; do
         table+=$'\n'"| $name | $status | $(phase_format_seconds "$seconds") |"
-    done < "$APPLE_PHASE_TIMING_FILE"
-    printf '%s\n' "$table"
+    done < "$APPLE_PHASE_TIMING_FILE" || true
+    printf '%s\n' "$table" || true
     if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-        printf '%s\n\n' "$table" >> "$GITHUB_STEP_SUMMARY"
+        _phase_append "$GITHUB_STEP_SUMMARY" "$table"$'\n'
     fi
+    return 0
 }
