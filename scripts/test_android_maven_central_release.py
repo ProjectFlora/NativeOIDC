@@ -436,7 +436,7 @@ class UploadTest(ReleaseTestCase):
         )
 
     def test_upload_records_before_posting_and_records_the_id(self):
-        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "VALIDATING"}, {"deploymentState": "PUBLISHING"}]
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "VALIDATING"}, {"deploymentState": "PUBLISHING"}, {"deploymentState": "PUBLISHED"}]
         code, _, err = self.upload()
         self.assertEqual(code, 0, err)
         self.assertIn("decision=uploaded", self.decision())
@@ -458,7 +458,7 @@ class UploadTest(ReleaseTestCase):
         self.assertFalse([r for r in self.state.requests if "/upload?" in r[1]])
 
     def test_snapshots_are_appended_and_never_replaced(self):
-        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}, {"deploymentState": "PUBLISHED"}]
         code, _, err = self.upload()
         self.assertEqual(code, 0, err)
         self.assertEqual(self.snapshots(), [1, 2])
@@ -468,7 +468,7 @@ class UploadTest(ReleaseTestCase):
     def test_lost_id_write_after_accepted_upload_never_uploads_again(self):
         # The Portal accepts the bundle, then writing the ID fails: the
         # upload-started snapshot must survive, so a re-run fails closed.
-        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}, {"deploymentState": "PUBLISHED"}]
         code, _, err = self.upload(extra_env={"FAKE_GH_UPLOADS_ALLOWED": "1"})
         self.assertEqual(code, 1)
         self.assertIn("Could not write", err)
@@ -481,7 +481,7 @@ class UploadTest(ReleaseTestCase):
     def test_starter_snapshot_after_accepted_upload_is_skipped_and_fails_closed(self):
         # Writing the ID leaves an empty "starter" asset (a 502). The re-run
         # must read the intact upload-started snapshot below it.
-        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}, {"deploymentState": "PUBLISHED"}]
         env = {"FAKE_GH_UPLOADS_ALLOWED": "1", "FAKE_GH_LEAVE_STARTER": "1"}
         code, _, _ = self.upload(extra_env=env)
         self.assertEqual(code, 1)
@@ -504,7 +504,7 @@ class UploadTest(ReleaseTestCase):
     def test_only_a_starter_snapshot_means_no_upload_started(self):
         # The upload-started write itself failed, so the bundle was never posted.
         open(os.path.join(self.store, release.record_asset(1) + ".starter"), "w").close()
-        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}, {"deploymentState": "PUBLISHED"}]
         code, _, err = self.upload()
         self.assertEqual(code, 0, err)
         self.assertEqual(self.snapshots(), [2, 3])
@@ -516,7 +516,7 @@ class UploadTest(ReleaseTestCase):
             self.assertIn("MAVEN_USER and MAVEN_PASSWORD", err)
             self.assertEqual(self.snapshots(), [])
             self.assertFalse([r for r in self.state.requests if "/upload?" in r[1]])
-        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}, {"deploymentState": "PUBLISHED"}]
         code, _, err = self.upload()
         self.assertEqual(code, 0, err)
         self.assertEqual([a["state"] for a in self.read_record()["attempts"]], ["uploaded"])
@@ -527,7 +527,7 @@ class UploadTest(ReleaseTestCase):
         self.assertEqual(code, 1)
         self.assertIn("did not answer", err)
         self.assertEqual(self.read_record()["attempts"][-1]["state"], "failed")
-        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}, {"deploymentState": "PUBLISHED"}]
         code, _, err = self.upload()
         self.assertEqual(code, 0, err)
         self.assertEqual([a["state"] for a in self.read_record()["attempts"]], ["failed", "uploaded"])
@@ -550,18 +550,46 @@ class UploadTest(ReleaseTestCase):
             code, _, err = self.upload(extra_env={"MAVEN_PASSWORD": "revoked"})
             self.assertEqual(code, 1)
             self.assertIn("HTTP 401", err)
-        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}, {"deploymentState": "PUBLISHED"}]
         code, _, err = self.upload()
         self.assertEqual(code, 0, err)
         self.assertEqual([a["state"] for a in self.read_record()["attempts"]], ["failed"] * 3 + ["uploaded"])
         accepted = [r for r in self.state.requests if "/upload?" in r[1]]
         self.assertEqual(len(accepted), 4)  # three refused, one accepted
 
+    def test_publishing_that_then_fails_fails_the_upload(self):
+        # Publishing can fail after validation: PUBLISHING is not success.
+        self.state.statuses[DEPLOYMENT_ID] = [
+            {"deploymentState": "VALIDATING"},
+            {"deploymentState": "PUBLISHING"},
+            {"deploymentState": "FAILED", "errors": {"publish": ["sync rejected"]}},
+        ]
+        code, _, err = self.upload()
+        self.assertEqual(code, 1)
+        self.assertIn("the Portal reported FAILED", err)
+        attempt = self.read_record()["attempts"][-1]
+        self.assertEqual(attempt["state"], "failed")
+        self.assertEqual(attempt["deploymentId"], DEPLOYMENT_ID)
+
+    def test_publishing_past_the_wait_fails_and_the_rerun_resumes(self):
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        code, _, err = self.upload()
+        self.assertEqual(code, 1)
+        self.assertIn("still PUBLISHING", err)
+        self.assertEqual(self.read_record()["attempts"][-1]["state"], "uploaded")
+        # The re-run resumes from the recorded deployment and does not upload.
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHED"}]
+        self.state.central_after = self.state.central_checks + 2
+        code, _, err = self.upload()
+        self.assertEqual(code, 0, err)
+        self.assertIn("decision=verified", self.decision())
+        self.assertEqual(len([r for r in self.state.requests if "/upload?" in r[1]]), 1)
+
     def test_failed_validation_after_upload_is_recorded(self):
         self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "FAILED", "errors": {"sig": ["bad"]}}]
         code, _, err = self.upload()
         self.assertEqual(code, 1)
-        self.assertIn("failed validation", err)
+        self.assertIn("the Portal reported FAILED", err)
         self.assertEqual(self.read_record()["attempts"][0]["state"], "failed")
 
     def test_refused_upload_is_recorded_as_failed(self):

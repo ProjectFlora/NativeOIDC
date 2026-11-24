@@ -164,8 +164,12 @@ After the GitHub Release is created, the `publish_maven` job publishes
    SHA-256, and requires every file's signature and `.md5`/`.sha1` checksums.
 4. It uploads the bundle to the Central Portal (`android_maven_central_release.py upload`,
    `publishingType=AUTOMATIC`), records the deployment, and waits until the
-   Portal starts publishing it. It does not wait for the Central sync; the
-   consumer validation in step 4 does.
+   Portal reports it `PUBLISHED` (30 × 60 s). Publishing can still fail
+   after validation, so `PUBLISHING` is not success. A `FAILED` deployment
+   fails the job and is recorded. A timeout fails the job with "re-run
+   later", and the re-run resumes from the recorded deployment. The job
+   does not wait for the Central sync; the consumer validation in step 4
+   does.
 
 So Maven Central and the GitHub Release ship the same AAR bytes. The
 candidate run and pull request CI run the same publication check on an
@@ -445,7 +449,7 @@ published again, so fix forward with a new patch version.
 | GitHub Release created, no upload started | `publish_maven` failed before **Upload to Maven Central**, or `upload` failed before writing the record; the Release has no `maven-central-deployment-<n>.json` | Fix the cause (credentials, signing key), then **Re-run failed jobs**. The job adopts the Release AAR again; no rebuild |
 | Upload started but not recorded | `decide` fails with "deployment ID was never recorded" | See [below](#upload-started-but-not-recorded) |
 | Deployment validating or publishing | `decide` or `upload` fails with "still … after the wait" | **Re-run failed jobs** later. The job resumes from the recorded deployment and uploads nothing |
-| Deployment failed | `upload` fails with "failed validation" and the Portal's `errors` | Fix the cause if it is outside the bundle (for example, the key not on the key server), then **Re-run failed jobs**: the job uploads a new deployment. A problem in the bundle itself needs a code change, so fix forward with a new patch version. After three failed deployments the job refuses to upload; refused uploads (such as a 401 from a revoked token) do not count |
+| Deployment failed | `upload` fails with "the Portal reported FAILED" and the Portal's `errors` (validation or publishing failed) | Fix the cause if it is outside the bundle (for example, the key not on the key server), then **Re-run failed jobs**: the job uploads a new deployment. A problem in the bundle itself needs a code change, so fix forward with a new patch version. After three failed deployments the job refuses to upload; refused uploads (such as a 401 from a revoked token) do not count |
 | Published, sync propagating | `decide` fails with "Maven Central still lacks files" | Nothing to fix. **Re-run failed jobs** later, or dispatch `release-consumer.yml` once the files are visible |
 | Fully published | `decide` reports `verified` | Done. A version on Maven Central cannot be replaced or deleted. If the AAR on Central differs from the Release asset, the job fails and the version must be fixed forward |
 

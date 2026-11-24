@@ -25,7 +25,8 @@ Subcommands:
            "upload" (no deployment exists, or every one has failed). Anything
            else fails.
   upload   Run decide, then upload the bundle if the decision is "upload",
-           and wait until the Portal starts publishing it.
+           and wait until the Portal reports it PUBLISHED (publishing can
+           still fail after validation, so PUBLISHING is not success).
   verify   Check only that Maven Central serves the complete publication and
            the expected AAR.
   probe    Read-only check that the Portal accepts the credentials, with a
@@ -432,7 +433,7 @@ def decide(ctx: Context) -> str:
         return wait_for_central(ctx)
     if portal_state == "FAILED":
         errors = json.dumps(answer.get("errors"), indent=2)
-        ctx.note(f"The deployment failed validation:\n```\n{errors}\n```")
+        ctx.note(f"The deployment failed:\n```\n{errors}\n```")
         mark_failed(ctx, record, latest, f"Portal FAILED: {errors}")
         return upload_after_failures(record, statuses)
     if portal_state == "VALIDATED":
@@ -562,16 +563,19 @@ def upload(ctx: Context, bundle: str) -> str:
     attempt["deploymentId"] = deployment_id
     write_record(ctx, record)
 
-    answer = wait_while_in_flight(ctx, deployment_id, {"PUBLISHING", "PUBLISHED"})
+    # Polls through PUBLISHING: publishing can still fail after validation,
+    # and a job that passed before PUBLISHED would hide that failure from
+    # the consumer check and leave no failed job to re-run.
+    answer = wait_while_in_flight(ctx, deployment_id, {"PUBLISHED"})
     portal_state = answer["deploymentState"]
     ctx.note(f"Central Portal deployment {deployment_id}: {portal_state}.")
-    if portal_state in ("PUBLISHING", "PUBLISHED"):
+    if portal_state == "PUBLISHED":
         return "uploaded"
     if portal_state == "FAILED":
         errors = json.dumps(answer.get("errors"), indent=2)
-        ctx.note(f"The deployment failed validation:\n```\n{errors}\n```")
+        ctx.note(f"The deployment failed:\n```\n{errors}\n```")
         mark_failed(ctx, record, attempt, f"Portal FAILED: {errors}")
-        raise ReleaseError(f"Deployment {deployment_id} failed validation.")
+        raise ReleaseError(f"Deployment {deployment_id} failed (the Portal reported FAILED).")
     raise ReleaseError(
         f"Deployment {deployment_id} is still {portal_state} after the wait. Re-run the failed job later; "
         "it resumes from the recorded deployment."
