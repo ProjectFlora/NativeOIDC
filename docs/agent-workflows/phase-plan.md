@@ -4,6 +4,9 @@ Investigate the issue and write a plan concrete enough that another agent, possi
 
 This phase changes no code and opens no PR.
 
+## Before starting
+- In scheduled mode, claim the issue first (see "Claiming an issue" in [issue-to-pr.md](issue-to-pr.md)), with `phase=plan`
+
 ## 1. Understand the issue
 - Read the issue body and comments with `gh issue view {number} --comments`, and review the related code
 - If an earlier plan comment exists, read it and every comment from me after it (see "Post Markers" in [common-rules.md](common-rules.md)). My comments after a plan are change requests for the next plan
@@ -13,10 +16,10 @@ This phase changes no code and opens no PR.
 - If something cannot be decided on your own, or requires a specification decision, present options (pros, cons, recommendation) and do not post a plan until you get an answer
   - Manual mode: ask in this session and wait for my answer
   - Scheduled mode: follow "Pausing for input" in [issue-to-pr.md](issue-to-pr.md)
-- Post the plan as an issue comment, starting with `<!-- agent-workflow:plan -->`, in this format:
+- Post the plan as an issue comment, starting with `<!-- agent-workflow:plan flow={end-to-end or split} -->`, in this format:
 
 ```markdown
-<!-- agent-workflow:plan -->
+<!-- agent-workflow:plan flow={end-to-end or split} -->
 ## Plan for #{number}
 
 ### Goal
@@ -44,7 +47,7 @@ This phase changes no code and opens no PR.
 ```
 
 - A plan is ready only when it has no open questions. Do not leave "TBD" or "to be decided during implementation"
-- Each new plan comment replaces the previous one. The implement phase uses the latest plan comment
+- Each new plan comment replaces the previous one. The implement phase uses the latest plan (see "Reading plan comments" in [common-rules.md](common-rules.md))
 
 ## When the phase ends
 - Manual mode: share the plan in this session and stop. I start the implement phase separately, or continue in this session if I asked for all phases
