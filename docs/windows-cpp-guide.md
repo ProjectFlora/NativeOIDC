@@ -711,20 +711,26 @@ public:
         if (file_.has_parent_path()) {
             std::filesystem::create_directories(file_.parent_path());
         }
-        std::filesystem::path temporary = file_;
-        temporary += L".tmp";
-        {
-            std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-            out.write(reinterpret_cast<const char*>(encrypted.pbData),
-                      static_cast<std::streamsize>(encrypted.cbData));
-            out.close();
-            if (!out) {
-                throw std::runtime_error("could not write the protected state");
+        const std::filesystem::path temporary = temporary_file();
+        try {
+            {
+                std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+                out.write(reinterpret_cast<const char*>(encrypted.pbData),
+                          static_cast<std::streamsize>(encrypted.cbData));
+                out.close();
+                if (!out) {
+                    throw std::runtime_error("could not write the protected state");
+                }
             }
-        }
-        if (!MoveFileExW(temporary.c_str(), file_.c_str(),
-                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            throw_last_error("MoveFileExW");
+            if (!MoveFileExW(temporary.c_str(), file_.c_str(),
+                             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                throw_last_error("MoveFileExW");
+            }
+        } catch (...) {
+            // Do not leave a copy of the tokens behind when the save fails.
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
+            throw;
         }
     }
 
@@ -751,15 +757,25 @@ public:
         return state;
     }
 
+    // Also removes a temporary file left by an interrupted save, which can
+    // hold a newer refresh token than the stored state.
     void remove() const {
-        std::error_code error;
-        std::filesystem::remove(file_, error);  // a missing file is not an error
-        if (error) {
-            throw std::system_error(error, "could not delete the protected state");
+        for (const std::filesystem::path& path : {temporary_file(), file_}) {
+            std::error_code error;
+            std::filesystem::remove(path, error);  // a missing file is not an error
+            if (error) {
+                throw std::system_error(error, "could not delete the protected state");
+            }
         }
     }
 
 private:
+    std::filesystem::path temporary_file() const {
+        std::filesystem::path temporary = file_;
+        temporary += L".tmp";
+        return temporary;
+    }
+
     std::filesystem::path file_;
 };
 
@@ -1030,7 +1046,8 @@ mock provider in its `guide` mode
 which checks every request it receives:
 
 - DPAPI save, load (the file does not contain the token in plain text), and
-  removal.
+  removal. A failed replace leaves no temporary file, and removal also
+  deletes a temporary file left by an interrupted save.
 - `usable_access_token` refreshes an expired state, the provider rotates the
   refresh token, and the replacement state is saved.
 - A refresh rejected with `invalid_grant`, a refresh cancelled by the host

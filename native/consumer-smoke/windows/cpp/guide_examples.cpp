@@ -55,8 +55,30 @@ void check_storage(const std::filesystem::path& file) {
     check(!bytes.empty() && bytes.find("guide-access-1") == std::string::npos &&
               bytes.find("guide-refresh-1") == std::string::npos,
           "the stored file does not contain the tokens in plain text");
-    check(!std::filesystem::exists(std::filesystem::path(file) += L".tmp"),
+    const std::filesystem::path temporary = std::filesystem::path(file) += L".tmp";
+    check(!std::filesystem::exists(temporary),
           "no temporary file is left after the atomic replace");
+
+    // A temporary file left by an interrupted save is deleted with the state.
+    std::ofstream(temporary, std::ios::binary) << "orphan";
+    store.remove();
+    check(!std::filesystem::exists(temporary) && !std::filesystem::exists(file),
+          "remove also deletes a temporary file left by an interrupted save");
+
+    // MoveFileExW cannot replace a directory, so this save fails after
+    // writing the temporary file.
+    std::filesystem::create_directories(file);
+    bool save_failed = false;
+    try {
+        store.save(state);
+    } catch (const std::system_error&) {
+        save_failed = true;
+    }
+    check(save_failed, "a failed replace throws");
+    check(!std::filesystem::exists(temporary), "a failed replace leaves no temporary file");
+    std::filesystem::remove(file);
+
+    store.save(state);  // the state the refresh checks start from
 }
 
 void check_refresh(AuthClient& client) {
