@@ -128,7 +128,8 @@ This roadmap tracks work remaining for the initial scope in
   documentation, and language-guide work. Adding Objective-C or Java entry
   points later would not break compatibility, while removing ones shipped at
   1.0.0 would; keep the initial scope narrow and revisit the decision if
-  demand appears.
+  demand appears. The guidance for Objective-C hosts is documented in
+  [swift-guide.md](docs/swift-guide.md#objective-c-interoperability).
 
 ## Open decisions
 
