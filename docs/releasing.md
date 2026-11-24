@@ -99,6 +99,19 @@ workflows together, after checking the
 [runner-images README](https://github.com/actions/runner-images/tree/main/images/macos)
 for the image's installed Xcode versions and simulator runtimes.
 
+When a change touches the Maven Central publication, add
+`-f dry_run_maven=true` to the candidate run. The `dry_run_maven` job runs the
+`publish_maven` steps against the real Maven Central and Central Portal, but
+read-only. It adopts the AAR of the GitHub Release `vX.Y.Z` if one exists,
+and otherwise the candidate AAR from the `android` job. It classifies the
+version (`decide --read-only`, see [the Maven Central state](#the-maven-central-state)),
+checks that the Portal accepts the token with a status query for a
+deployment ID that does not exist, and builds and checks the signed bundle.
+It never uploads, publishes, drops, or writes the deployment record. Its
+step summary lists the decision, its evidence, and the bundle's files. Like
+the key server check, it holds the signing key and the Portal token, so
+dispatch it only from `main` or a fully trusted branch.
+
 ## 3. Publish
 
 Before dispatching, confirm the signing key's public part is resolvable at
@@ -132,12 +145,62 @@ Then the `publish` job:
    assets plus `SHA256SUMS`, and release notes generated from the previous
    release (see [Release notes range](#release-notes-range)).
 
-After the GitHub Release is created, the `publish_maven` job checks out the
-`vX.Y.Z` tag, builds the Android library, checks the signed publication with
-`scripts/check-android-maven-publication.sh`, and publishes
-`net.project-flora.nativeoidc:native-oidc-android:X.Y.Z` to Maven Central through
-the Central Portal (`publishAndReleaseToMavenCentral`). The candidate run
-and pull request CI run the same check on an unsigned publication.
+After the GitHub Release is created, the `publish_maven` job publishes
+`net.project-flora.nativeoidc:native-oidc-android:X.Y.Z` to Maven Central:
+
+1. It checks out the `vX.Y.Z` tag, downloads `native-oidc-android-X.Y.Z.aar`
+   and `SHA256SUMS` from the GitHub Release, and checks the AAR against its
+   `SHA256SUMS` line (`scripts/download-release-aar.sh`). This SHA-256 is the
+   expected value for every later check.
+2. It classifies the version (`scripts/android_maven_central_release.py decide`,
+   see [the Maven Central state](#the-maven-central-state)). A version that
+   is already complete on Maven Central with the same AAR passes here.
+3. Otherwise it builds the signed Central bundle with
+   `scripts/check-android-maven-publication.sh`. Gradle adopts the Release
+   AAR instead of building one (`-PadoptedAar`, with the AAR build excluded),
+   so the job runs no Rust NDK build. The POM, the module metadata, and the
+   sources and javadoc jars are generated from the tag. The check requires
+   the AAR, and its entry in the module metadata, to have the expected
+   SHA-256, and requires every file's signature and `.md5`/`.sha1` checksums.
+4. It uploads the bundle to the Central Portal (`android_maven_central_release.py upload`,
+   `publishingType=AUTOMATIC`), records the deployment, and waits until the
+   Portal starts publishing it. It does not wait for the Central sync; the
+   consumer validation in step 4 does.
+
+So Maven Central and the GitHub Release ship the same AAR bytes. The
+candidate run and pull request CI run the same publication check on an
+unsigned publication that builds its own AAR.
+
+### The Maven Central state
+
+`publish_maven` records each upload in the GitHub Release asset
+`maven-central-deployment.json`: an `upload-started` attempt is written
+before the bundle is posted, and the deployment ID once the Portal returns
+it. If the record cannot be written, nothing is uploaded. The Gradle plugin's
+own upload (`publishAndReleaseToMavenCentral`) is not used, because it does
+not report the deployment ID. Only documented
+[Publisher API](https://central.sonatype.org/publish/publish-portal-api/)
+endpoints are called: upload and status. Nothing publishes or drops a
+deployment; `AUTOMATIC` deployments publish themselves after validation.
+
+`decide` reads Maven Central (the same ten files as the consumer
+availability gate), the record, and the Portal status of the latest recorded
+deployment:
+
+| Maven Central | Latest record attempt | Portal status | Outcome |
+| --- | --- | --- | --- |
+| All ten files | Any | Not queried | The AAR on Central must have the expected SHA-256: `verified`, or a failure on a mismatch |
+| Incomplete | None | Not queried | `upload` |
+| Incomplete | `upload-started`, no ID | Not queried | Fail closed (see [Upload started but not recorded](#upload-started-but-not-recorded)) |
+| Incomplete | Deployment ID | `PENDING`, `VALIDATING`, `VALIDATED`, `PUBLISHING` | Wait (30 × 60 s), then continue with the state reached; fail with "re-run later" if still in flight. `VALIDATED` that persists fails closed: it waits for a manual publish, which this pipeline never requests |
+| Incomplete | Deployment ID | `PUBLISHED` | Wait for the ten files (30 × 60 s), then check the AAR: `verified`; fail with "re-run later" if the sync has not completed |
+| Incomplete | Deployment ID | `FAILED` | Show the Portal's `errors`, mark the attempt `failed`, and `upload`. The deployment is not dropped, because Sonatype asks to keep failed deployments for support requests |
+| Incomplete | `failed` | Not queried | `upload`, unless three attempts have failed: then fail closed, since the failure is not transient |
+| Any | Deployment ID | Unknown ID, 4xx, or no answer after retries | Fail closed |
+
+`upload` runs `decide` again and uploads only on `upload`. A run therefore
+never uploads a version that is on Maven Central or has a deployment in
+flight or published.
 
 Publishing is refused unless the run is dispatched from `main`, the commit is
 on `main`, and the `vX.Y.Z` tag does not already exist.
@@ -355,24 +418,42 @@ of previous runs, so move any archive you keep somewhere else first.
   reason. In the latter cases, fix the repository secret
   (`gpg --armor --export-secret-keys <fpr>`) and dispatch the run again.
 
-- **Failed before "Create release commit and tag"**: nothing was published.
-  Fix the cause and dispatch the workflow again.
+A publish run moves through these states. Find the state from the failed
+job and the evidence it names, then follow its procedure. **Re-run failed
+jobs** reuses the run's built artifacts and job outputs. GitHub allows it
+for 30 days after the run; after that, a version whose tag exists cannot be
+published again, so fix forward with a new patch version.
 
-- **Tag pushed, but the GitHub Release was not created**: SPM cannot resolve
-  the tag yet because its binary asset does not exist. Delete the tag, then
-  use **Re-run failed jobs** so that the same built artifacts are reused:
-
-```sh
-git push origin :refs/tags/vX.Y.Z
-```
+| State | How to recognize it | Resume |
+| --- | --- | --- |
+| Before the tag | A job before **Create release commit and tag** failed | Nothing was published. Fix the cause and dispatch the workflow again |
+| Tag pushed, no GitHub Release | **Generate checksums and publish assets** failed; `vX.Y.Z` exists, the Release does not | SPM cannot resolve the tag, because its binary asset does not exist. Delete the tag (`git push origin :refs/tags/vX.Y.Z`), then **Re-run failed jobs**, so the same built artifacts are reused |
+| GitHub Release created, no upload started | `publish_maven` failed before **Upload to Maven Central**, or `upload` failed before writing the record; the Release has no `maven-central-deployment.json` | Fix the cause (credentials, signing key), then **Re-run failed jobs**. The job adopts the Release AAR again; no rebuild |
+| Upload started but not recorded | `decide` fails with "deployment ID was never recorded" | See [below](#upload-started-but-not-recorded) |
+| Deployment validating or publishing | `decide` or `upload` fails with "still … after the wait" | **Re-run failed jobs** later. The job resumes from the recorded deployment and uploads nothing |
+| Deployment failed | `upload` fails with "failed validation" and the Portal's `errors` | Fix the cause if it is outside the bundle (for example, the key not on the key server), then **Re-run failed jobs**: the job uploads a new deployment. A problem in the bundle itself needs a code change, so fix forward with a new patch version. After three failed attempts the job refuses to upload |
+| Published, sync propagating | `decide` fails with "Maven Central still lacks files" | Nothing to fix. **Re-run failed jobs** later, or dispatch `release-consumer.yml` once the files are visible |
+| Fully published | `decide` reports `verified` | Done. A version on Maven Central cannot be replaced or deleted. If the AAR on Central differs from the Release asset, the job fails and the version must be fixed forward |
 
 - **Release published with a problem**: do not move or recreate the tag or replace its assets. Consumers may already have resolved it, and SPM caches the checksum. Fix forward with a new patch version.
 
-- **GitHub Release created, but `publish_maven` failed**: if the Central
-  Portal deployment was not released, fix the cause (for example, credentials
-  or the signing key) and use **Re-run failed jobs**. If the version already
-  appears on Maven Central, it cannot be replaced or deleted; fix forward with
-  a new patch version.
+### Upload started but not recorded
+
+The record says an upload began, but the run stopped before the deployment
+ID was written: the bundle may or may not have reached the Portal. The job
+fails closed instead of uploading a second deployment. To resume:
+
+1. Look in the failed run's **Upload to Maven Central** log for
+   `Uploaded the bundle as Central Portal deployment <id>`, or at
+   <https://central.sonatype.com/publishing/deployments> for a deployment
+   named `net.project-flora.nativeoidc-native-oidc-android-X.Y.Z`.
+2. Download the record (`gh release download vX.Y.Z --pattern maven-central-deployment.json`)
+   and edit its last attempt:
+   - If a deployment exists, set `"state": "uploaded"` and
+     `"deploymentId": "<id>"`.
+   - If none exists, set `"state": "failed"`.
+3. Upload it back (`gh release upload vX.Y.Z maven-central-deployment.json --clobber`)
+   and **Re-run failed jobs**.
 
 - **Consumer validation (`release-consumer.yml`) failed**: the `android_maven`
   job logs four distinct causes. The publication-status check failing means
@@ -380,10 +461,10 @@ git push origin :refs/tags/vX.Y.Z
   mistyped version has no Maven publication at all, so dispatch a published
   version; a release whose `publish_maven` job failed or was cancelled
   fails the check only when the artifact is also absent from Maven Central
-  (the job can fail after the Central Portal deployment was released): if
-  the deployment was not released, **Re-run failed jobs** on the release
-  run (remove the tag first if the tag-pushing job also did not complete);
-  if it was released, re-dispatch once the sync completes. The
+  (the job can fail after the Central Portal deployment was released):
+  resume the release run as the state table above says (remove the tag
+  first if the tag-pushing job also did not complete); if the deployment
+  was published, re-dispatch once the sync completes. The
   availability gate
   404ing means the Central sync is still propagating: re-dispatch once the
   portal deployment is released. A strict-resolution or emulator-smoke
@@ -414,7 +495,14 @@ git push origin :refs/tags/vX.Y.Z
 
 - Branch protection on `main` is unaffected: the workflow pushes only tags.
 
-- The `publish_maven` job reads these repository secrets:
+- The `publish_maven` job needs `contents: write` to read the Release assets
+  and write the deployment record `maven-central-deployment.json`. If GitHub
+  immutable releases are enabled, a published Release no longer accepts new
+  assets: the record write fails, so the job stops before uploading, and
+  the record would have to move elsewhere before the next release.
+
+- The `publish_maven` job, and `dry_run_maven` on a candidate run, read
+  these repository secrets:
   - `MAVEN_USER` and `MAVEN_PASSWORD`: a Central Portal user token with
     publishing rights to the verified `net.project-flora` namespace.
   - `GPG_PRIVATE_KEY`: the ASCII-armored private signing key. Its public key

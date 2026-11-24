@@ -98,7 +98,8 @@ RULES = (
     # Used only by the release workflows, which keep their full checks, or
     # by the manual real-browser verification; the Tests job runs their
     # unit tests.
-    (("scripts/check-android-maven-consumer.sh", "scripts/check-android-maven-publication-status.sh",
+    (("scripts/android_maven_central_release.py", "scripts/download-release-aar.sh",
+      "scripts/check-android-maven-consumer.sh", "scripts/check-android-maven-publication-status.sh",
       "scripts/verify-android-maven-consumer.sh", "scripts/check-gpg-keyserver.sh",
       "scripts/check-macos-real-browser.sh", "scripts/check-windows-real-browser.ps1",
       "scripts/real_browser_mock_provider.py", "scripts/test_*.py"),

@@ -6,6 +6,15 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+### Changed
+
+- The Android library on Maven Central is now the exact AAR attached to the
+  GitHub Release (the same SHA-256 as in `SHA256SUMS`), instead of a rebuild
+  from the tag. A failed Maven Central publication can be resumed with
+  **Re-run failed jobs** without a rebuild: the release workflow records
+  each Central Portal deployment and never uploads a version twice
+  ([#180](https://github.com/ProjectFlora/NativeOIDC/issues/180)).
+
 ## [0.8.0] - 2026-11-22
 
 ### Security
