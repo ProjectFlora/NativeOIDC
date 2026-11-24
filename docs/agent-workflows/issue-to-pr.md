@@ -94,7 +94,9 @@ Check the following in order, skipping lines for phases this run does not handle
 2. **Stalled work** (needs `plan` or `implement`, as below): the oldest open issue labeled `agent-in-progress` that has no open PR, and whose claim has expired or whose handoff is unfinished (both defined below)
    - Expired: the latest active claim (not withdrawn or released) has an `until` in the past, and no agent activity (agent-marker comment or commit on its issue branch `issue-{number}-*`) came after that time
    - An issue with no claim comment (started before claims existed) is stalled when its last agent activity is more than 2 hours old
-   - **Unfinished handoff**: if the latest claim is released with a `next-label` other than `agent-in-progress`, the run stopped between releasing and changing the label. Finish the handoff: change the label to that `next-label` and end. Do not resume any phase. (A `needs-input` handoff has already posted its pause comment, because the pause comment comes first)
+   - **Unfinished handoff**: the run stopped after posting its handoff but before changing the label. Check these first, before any phase recovery below, and if one applies, finish the handoff and end without resuming any phase:
+     - A `needs-input` pause comment from an agent was posted after the latest claim (whether or not that claim was released): release the claim if it is not released yet (`next-label=agent-needs-input`), then change the label to `agent-needs-input`
+     - The latest claim is released with a `next-label` other than `agent-in-progress`: change the label to that `next-label`
    - Decide what to resume from the expired claim's `phase` and `flow` (see "Reading plan comments" in [common-rules.md](common-rules.md) for which plan counts):
      | Expired claim | Plan posted after that claim? | Resume |
      |---|---|---|
