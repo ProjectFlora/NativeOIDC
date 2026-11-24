@@ -511,7 +511,7 @@ jobs:
     # package is validated and the tag and GitHub Release exist. The job
     # signs and uploads the AAR attached to the GitHub Release, so both
     # channels ship the same bytes, and it records the Central Portal
-    # deployment in the Release asset maven-central-deployment.json. A
+    # deployment in append-only Release assets maven-central-deployment-<n>.json. A
     # re-run of this job (Re-run failed jobs) therefore resumes: it verifies
     # a complete publication, waits for a deployment in flight, or uploads
     # only when no live deployment exists (Issue #180, docs/releasing.md).

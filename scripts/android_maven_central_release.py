@@ -4,10 +4,15 @@
 The release workflow's publish_maven job uploads the signed bundle to the
 Central Portal with this script instead of the Gradle plugin's
 publishAndReleaseToMavenCentral, which neither reports nor keeps the
-deployment ID. Each upload is recorded in the GitHub Release asset
-maven-central-deployment.json: an "upload-started" attempt is written before
-the bundle is posted, and the deployment ID is added once the Portal returns
-it. A later run (Re-run failed jobs, or a manual run) reads that record and
+deployment ID. Each upload is recorded in the GitHub Release: an
+"upload-started" attempt is written before the bundle is posted, and the
+deployment ID is added once the Portal returns it. The record is
+append-only: every write adds a new asset maven-central-deployment-<n>.json,
+a full snapshot, without replacing an earlier one, and the highest <n> is
+the current record. A failed or interrupted write leaves the previous
+snapshot, so the "upload-started" marker cannot be lost (`gh release upload
+--clobber` would delete the old asset before uploading the new one). A later
+run (Re-run failed jobs) reads that record and
 the state on Maven Central and the Portal, and either verifies the existing
 publication, waits for a deployment in flight, or uploads, so a version is
 never uploaded twice (Issue #180). Only documented Publisher API endpoints are
@@ -53,6 +58,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -65,7 +71,8 @@ from dataclasses import dataclass, field
 
 GROUP = "net.project-flora.nativeoidc"
 ARTIFACT = "native-oidc-android"
-RECORD_ASSET = "maven-central-deployment.json"
+RECORD_PREFIX = "maven-central-deployment-"
+RECORD_PATTERN = re.compile(r"^maven-central-deployment-([1-9][0-9]*)\.json$")
 # More failed deployments than this means the failure is not transient.
 MAX_FAILED_ATTEMPTS = 3
 IN_FLIGHT_STATES = {"PENDING", "VALIDATING", "VALIDATED", "PUBLISHING"}
@@ -121,6 +128,8 @@ class Context:
         default_factory=lambda: os.environ.get("CENTRAL_PORTAL_BASE_URL", "https://central.sonatype.com").rstrip("/")
     )
     evidence: list[str] = field(default_factory=list)
+    # The <n> of the current record snapshot; 0 when there is none.
+    record_seq: int = 0
 
     @property
     def tag(self) -> str:
@@ -289,6 +298,10 @@ def gh(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([*command, *args], capture_output=True, text=True)
 
 
+def record_asset(seq: int) -> str:
+    return f"{RECORD_PREFIX}{seq}.json"
+
+
 def read_record(ctx: Context) -> dict | None:
     if not ctx.use_record:
         ctx.note("No GitHub Release exists for this version, so there is no deployment record.")
@@ -296,35 +309,44 @@ def read_record(ctx: Context) -> dict | None:
     listing = gh("release", "view", ctx.tag, "--json", "assets", "--jq", ".assets[].name")
     if listing.returncode != 0:
         raise ReleaseError(f"Could not list the assets of the GitHub Release {ctx.tag}: {listing.stderr.strip()}")
-    if RECORD_ASSET not in listing.stdout.split():
-        ctx.note(f"The GitHub Release {ctx.tag} has no {RECORD_ASSET}: no upload was started.")
+    seqs = [int(match.group(1)) for match in map(RECORD_PATTERN.match, listing.stdout.split()) if match]
+    if not seqs:
+        ctx.record_seq = 0
+        ctx.note(f"The GitHub Release {ctx.tag} has no {RECORD_PREFIX}<n>.json: no upload was started.")
         return None
+    ctx.record_seq = max(seqs)
+    name = record_asset(ctx.record_seq)
     with tempfile.TemporaryDirectory() as directory:
-        download = gh("release", "download", ctx.tag, "--pattern", RECORD_ASSET, "--dir", directory)
+        download = gh("release", "download", ctx.tag, "--pattern", name, "--dir", directory)
         if download.returncode != 0:
-            raise ReleaseError(f"Could not download {RECORD_ASSET} from {ctx.tag}: {download.stderr.strip()}")
-        with open(os.path.join(directory, RECORD_ASSET), encoding="utf-8") as handle:
+            raise ReleaseError(f"Could not download {name} from {ctx.tag}: {download.stderr.strip()}")
+        with open(os.path.join(directory, name), encoding="utf-8") as handle:
             try:
                 record = json.load(handle)
             except json.JSONDecodeError as error:
-                raise ReleaseError(f"{RECORD_ASSET} on {ctx.tag} is not valid JSON.") from error
+                raise ReleaseError(f"{name} on {ctx.tag} is not valid JSON.") from error
     if not isinstance(record, dict) or record.get("version") != ctx.version or not isinstance(record.get("attempts"), list):
-        raise ReleaseError(f"{RECORD_ASSET} on {ctx.tag} is not a record for {ctx.version}.")
-    ctx.note(f"Deployment record: {json.dumps(record['attempts'])}")
+        raise ReleaseError(f"{name} on {ctx.tag} is not a record for {ctx.version}.")
+    ctx.note(f"Deployment record {name}: {json.dumps(record['attempts'])}")
     return record
 
 
 def write_record(ctx: Context, record: dict) -> None:
+    """Adds the next snapshot; an existing asset is never replaced."""
     if ctx.read_only:
         raise ReleaseError("Internal error: a read-only run tried to write the deployment record.")
+    name = record_asset(ctx.record_seq + 1)
     with tempfile.TemporaryDirectory() as directory:
-        path = os.path.join(directory, RECORD_ASSET)
+        path = os.path.join(directory, name)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(record, handle, indent=2)
             handle.write("\n")
-        result = gh("release", "upload", ctx.tag, path, "--clobber")
+        # No --clobber: it deletes the existing asset before the upload, and
+        # an asset of this name already existing must fail the write.
+        result = gh("release", "upload", ctx.tag, path)
     if result.returncode != 0:
-        raise ReleaseError(f"Could not write {RECORD_ASSET} to {ctx.tag}: {result.stderr.strip()}")
+        raise ReleaseError(f"Could not write {name} to {ctx.tag}: {result.stderr.strip()}")
+    ctx.record_seq += 1
 
 
 def failed_count(record: dict | None) -> int:

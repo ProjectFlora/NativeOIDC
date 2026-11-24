@@ -3,7 +3,7 @@
 A local HTTP server plays Maven Central (HEAD/GET of the publication's
 files) and the Central Portal (POST /api/v1/publisher/status and
 /api/v1/publisher/upload), and a fake GitHub CLI keeps the deployment record
-(the Release asset maven-central-deployment.json) in a directory. Every row
+(the Release assets maven-central-deployment-<n>.json) in a directory. Every row
 of the decision table in docs/releasing.md is covered, plus the upload
 sequence and --read-only (Issue #180).
 
@@ -35,7 +35,9 @@ DEPLOYMENT_ID = "11111111-2222-3333-4444-555555555555"
 
 # A fake `gh` for the record: `release view` lists the assets in FAKE_GH_DIR,
 # `release download` copies the record out, `release upload` copies it in.
-# FAKE_GH_FAIL_UPLOAD makes uploads fail; FAKE_GH_LOG lists every call.
+# Like GitHub without --clobber, an upload of an existing asset name fails.
+# FAKE_GH_FAIL_UPLOAD makes uploads fail; FAKE_GH_UPLOADS_ALLOWED makes every
+# upload after that many successful ones fail; FAKE_GH_LOG lists every call.
 FAKE_GH = r'''
 import json, os, shutil, sys
 store = os.environ["FAKE_GH_DIR"]
@@ -50,8 +52,15 @@ if args[:2] == ["release", "view"]:
 elif args[:2] == ["release", "download"]:
     shutil.copy(os.path.join(store, args[args.index("--pattern") + 1]), args[args.index("--dir") + 1])
 elif args[:2] == ["release", "upload"]:
-    if os.environ.get("FAKE_GH_FAIL_UPLOAD"):
+    if "--clobber" in args:
+        sys.exit("--clobber deletes the existing asset first")
+    allowed = os.environ.get("FAKE_GH_UPLOADS_ALLOWED")
+    with open(os.environ["FAKE_GH_LOG"]) as log:
+        earlier = sum(1 for line in log if json.loads(line)[:2] == ["release", "upload"]) - 1
+    if os.environ.get("FAKE_GH_FAIL_UPLOAD") or (allowed is not None and earlier >= int(allowed)):
         sys.exit("upload refused")
+    if os.path.exists(os.path.join(store, os.path.basename(args[3]))):
+        sys.exit("asset already exists")
     shutil.copy(args[3], store)
 else:
     sys.exit("unexpected gh call %r" % args)
@@ -199,12 +208,19 @@ class ReleaseTestCase(unittest.TestCase):
     def decide(self, *extra, **kwargs):
         return self.run_script("decide", VERSION, "--expected-sha256", AAR_SHA256, *extra, **kwargs)
 
+    def snapshots(self):
+        return sorted(
+            int(match.group(1)) for match in map(release.RECORD_PATTERN.match, os.listdir(self.store)) if match
+        )
+
     def write_record(self, *attempts):
-        with open(os.path.join(self.store, release.RECORD_ASSET), "w") as handle:
+        seq = max(self.snapshots(), default=0) + 1
+        with open(os.path.join(self.store, release.record_asset(seq)), "w") as handle:
             json.dump({"version": VERSION, "attempts": list(attempts)}, handle)
 
-    def read_record(self):
-        with open(os.path.join(self.store, release.RECORD_ASSET)) as handle:
+    def read_record(self, seq=None):
+        seq = seq or max(self.snapshots())
+        with open(os.path.join(self.store, release.record_asset(seq))) as handle:
             return json.load(handle)
 
     def gh_calls(self):
@@ -396,6 +412,27 @@ class UploadTest(ReleaseTestCase):
         self.assertEqual(code, 1)
         self.assertIn("Could not write", err)
         self.assertFalse([r for r in self.state.requests if "/upload?" in r[1]])
+
+    def test_snapshots_are_appended_and_never_replaced(self):
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        code, _, err = self.upload()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.snapshots(), [1, 2])
+        self.assertEqual(self.read_record(1)["attempts"][0]["state"], "upload-started")
+        self.assertEqual(self.read_record(2)["attempts"][0]["state"], "uploaded")
+
+    def test_lost_id_write_after_accepted_upload_never_uploads_again(self):
+        # The Portal accepts the bundle, then writing the ID fails: the
+        # upload-started snapshot must survive, so a re-run fails closed.
+        self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "PUBLISHING"}]
+        code, _, err = self.upload(extra_env={"FAKE_GH_UPLOADS_ALLOWED": "1"})
+        self.assertEqual(code, 1)
+        self.assertIn("Could not write", err)
+        self.assertEqual(self.read_record()["attempts"][-1]["state"], "upload-started")
+        code, _, err = self.upload()
+        self.assertEqual(code, 1)
+        self.assertIn("never recorded", err)
+        self.assertEqual(len([r for r in self.state.requests if "/upload?" in r[1]]), 1)
 
     def test_failed_validation_after_upload_is_recorded(self):
         self.state.statuses[DEPLOYMENT_ID] = [{"deploymentState": "FAILED", "errors": {"sig": ["bad"]}}]

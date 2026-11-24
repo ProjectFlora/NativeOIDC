@@ -173,10 +173,14 @@ unsigned publication that builds its own AAR.
 
 ### The Maven Central state
 
-`publish_maven` records each upload in the GitHub Release asset
-`maven-central-deployment.json`: an `upload-started` attempt is written
-before the bundle is posted, and the deployment ID once the Portal returns
-it. If the record cannot be written, nothing is uploaded. The Gradle plugin's
+`publish_maven` records each upload in the GitHub Release: an
+`upload-started` attempt is written before the bundle is posted, and the
+deployment ID once the Portal returns it. If the record cannot be written,
+nothing is uploaded. The record is append-only. Each write adds a new asset
+`maven-central-deployment-<n>.json` holding the full record, and the highest
+`<n>` is the current one. No asset is ever replaced: `gh release upload --clobber`
+deletes the old asset before uploading, so an interrupted replacement
+could lose the `upload-started` marker and let a re-run upload twice. The Gradle plugin's
 own upload (`publishAndReleaseToMavenCentral`) is not used, because it does
 not report the deployment ID. Only documented
 [Publisher API](https://central.sonatype.org/publish/publish-portal-api/)
@@ -428,7 +432,7 @@ published again, so fix forward with a new patch version.
 | --- | --- | --- |
 | Before the tag | A job before **Create release commit and tag** failed | Nothing was published. Fix the cause and dispatch the workflow again |
 | Tag pushed, no GitHub Release | **Generate checksums and publish assets** failed; `vX.Y.Z` exists, the Release does not | SPM cannot resolve the tag, because its binary asset does not exist. Delete the tag (`git push origin :refs/tags/vX.Y.Z`), then **Re-run failed jobs**, so the same built artifacts are reused |
-| GitHub Release created, no upload started | `publish_maven` failed before **Upload to Maven Central**, or `upload` failed before writing the record; the Release has no `maven-central-deployment.json` | Fix the cause (credentials, signing key), then **Re-run failed jobs**. The job adopts the Release AAR again; no rebuild |
+| GitHub Release created, no upload started | `publish_maven` failed before **Upload to Maven Central**, or `upload` failed before writing the record; the Release has no `maven-central-deployment-<n>.json` | Fix the cause (credentials, signing key), then **Re-run failed jobs**. The job adopts the Release AAR again; no rebuild |
 | Upload started but not recorded | `decide` fails with "deployment ID was never recorded" | See [below](#upload-started-but-not-recorded) |
 | Deployment validating or publishing | `decide` or `upload` fails with "still … after the wait" | **Re-run failed jobs** later. The job resumes from the recorded deployment and uploads nothing |
 | Deployment failed | `upload` fails with "failed validation" and the Portal's `errors` | Fix the cause if it is outside the bundle (for example, the key not on the key server), then **Re-run failed jobs**: the job uploads a new deployment. A problem in the bundle itself needs a code change, so fix forward with a new patch version. After three failed attempts the job refuses to upload |
@@ -447,13 +451,17 @@ fails closed instead of uploading a second deployment. To resume:
    `Uploaded the bundle as Central Portal deployment <id>`, or at
    <https://central.sonatype.com/publishing/deployments> for a deployment
    named `net.project-flora.nativeoidc-native-oidc-android-X.Y.Z`.
-2. Download the record (`gh release download vX.Y.Z --pattern maven-central-deployment.json`)
+2. Download the current snapshot, the `maven-central-deployment-<n>.json`
+   asset with the highest `<n>`
+   (`gh release download vX.Y.Z --pattern maven-central-deployment-<n>.json`),
    and edit its last attempt:
    - If a deployment exists, set `"state": "uploaded"` and
      `"deploymentId": "<id>"`.
    - If none exists, set `"state": "failed"`.
-3. Upload it back (`gh release upload vX.Y.Z maven-central-deployment.json --clobber`)
-   and **Re-run failed jobs**.
+3. Save it as `maven-central-deployment-<n+1>.json` and upload it as a new
+   asset (`gh release upload vX.Y.Z maven-central-deployment-<n+1>.json`,
+   without `--clobber`; never replace or delete a snapshot), then
+   **Re-run failed jobs**.
 
 - **Consumer validation (`release-consumer.yml`) failed**: the `android_maven`
   job logs four distinct causes. The publication-status check failing means
@@ -496,7 +504,7 @@ fails closed instead of uploading a second deployment. To resume:
 - Branch protection on `main` is unaffected: the workflow pushes only tags.
 
 - The `publish_maven` job needs `contents: write` to read the Release assets
-  and write the deployment record `maven-central-deployment.json`. If GitHub
+  and add the deployment record snapshots `maven-central-deployment-<n>.json`. If GitHub
   immutable releases are enabled, a published Release no longer accepts new
   assets: the record write fails, so the job stops before uploading, and
   the record would have to move elsewhere before the next release.
