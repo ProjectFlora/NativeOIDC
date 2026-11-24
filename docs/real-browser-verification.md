@@ -63,7 +63,8 @@ macOS:
 
 Windows:
 
-- Windows 10 or 11 with the .NET 8 SDK.
+- Windows 10 or 11 with PowerShell 7, and the .NET 8 SDK (or later) unless
+  you use `-InProcess` (see [Run on Windows](#run-on-windows)).
 - A Windows package ZIP: the `native-oidc-windows-X.Y.Z.zip` release asset,
   or the output of `scripts/package-windows.ps1` for an unreleased commit.
 
@@ -99,7 +100,31 @@ against the package, starts the provider, and runs the check. The default
 browser opens a tab with the completion message. Options:
 `-ResultDirectory` (default `target/real-browser/windows`),
 `-TimeoutSeconds` (default 120), and `-Python` (default `python`; use `py`
-if that is how Python is installed).
+if that is how Python is installed), and `-InProcess`.
+
+On a machine where an Application Control policy (for example Smart App
+Control or a WDAC policy) blocks locally built files, the built check fails
+to start with `An Application Control policy has blocked this file.
+(0x800711C7)` and no browser opens. Run it with `-InProcess` instead:
+
+```powershell
+scripts/check-windows-real-browser.ps1 -InProcess -Package native-oidc-windows-X.Y.Z.zip
+```
+
+This mode builds nothing. A separate `pwsh` process compiles the package's
+`dotnet/NativeOidcWindows.cs` and the check
+([`RealBrowserCheck.cs`](../native/consumer-smoke/windows/real-browser/RealBrowserCheck.cs),
+the same code the built check runs) with `Add-Type`, loads the package's
+`native_oidc.dll`, and runs the check
+([`run-in-process.ps1`](../native/consumer-smoke/windows/real-browser/run-in-process.ps1)).
+The provider, the result files, and the pass/fail decision are the same as in
+the default mode, and `environment.txt` records the mode. Because the DLL is
+loaded into PowerShell itself, run it from PowerShell of the package's
+architecture (x64 PowerShell for the x64 package, also on Windows on Arm);
+the script stops with an architecture message otherwise. It still needs the
+policy to allow the package's `native_oidc.dll`: if `check-output.txt` shows
+that loading `native_oidc.dll` was blocked, this machine cannot run the
+check; record that and run it on another machine.
 
 ## Check the result
 
@@ -111,8 +136,8 @@ missing.
 
 | File | Content |
 | --- | --- |
-| `environment.txt` | Date, commit, OS version, and architecture (and the package on Windows) |
-| `check-output.txt` | The default browser (macOS: the application `NSWorkspace` opens for `http` URLs; Windows: the `http` `UserChoice` ProgId) and the outcome |
+| `environment.txt` | Date, commit, OS version, and architecture (and, on Windows, the package and the mode: `program` or `in-process`) |
+| `check-output.txt` | The default browser (macOS: the application `NSWorkspace` opens for `http` URLs; Windows: the `http` ProgId from `UserChoiceLatest\ProgId`, or from `UserChoice` when the former is absent, with the key it came from) and the outcome |
 | `provider-result.json` | `completed`, the browser's `authorization_user_agent`, the `redirect_uri` it was given, and any `errors`. It is rewritten as the flow progresses, so it is kept even when the script stops the provider early; `"final": false` marks such a partial result |
 | `provider-log.txt` | The provider's request log |
 
@@ -146,7 +171,8 @@ Real system-browser verification for vX.Y.Z (docs/real-browser-verification.md)
 | macOS |  |  |  | pass / fail |  |
 | Windows |  |  |  | pass / fail |  |
 
-Notes: (failures, prompts that had to be dismissed, other browsers tried)
+Notes: (failures, prompts that had to be dismissed, other browsers tried,
+and on Windows whether the run used -InProcess)
 ```
 
 Attach or paste `provider-result.json` from each run. Record a failure as a

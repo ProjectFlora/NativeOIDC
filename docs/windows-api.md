@@ -2,7 +2,8 @@
 
 Return to the [documentation index](README.md). This reference supplements
 the release's Linux-generated rustdoc, which excludes the Windows module.
-Use the [Windows user guide](../native/windows/README.md) for JSON examples
+Use the [Windows user guide](../native/windows/README.md) for JSON examples,
+the [Windows C++ user guide](windows-cpp-guide.md) for complete C++ usage,
 and the [public header](../native/windows/include/native_oidc_windows.h) for
 declarations. This describes the source revision being read, not a new ABI.
 
