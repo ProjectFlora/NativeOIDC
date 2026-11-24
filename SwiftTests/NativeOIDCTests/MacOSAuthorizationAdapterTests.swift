@@ -237,13 +237,19 @@
     @MainActor
     func testDefaultOpenerFalseReturnsErrorAndReleasesListener() async throws {
       let opened = OpenedRedirects()
-      let adapter = MacOSAuthorizationAdapter()
+      // The default opener's wrapper, given an opener that refuses the URL
+      // the way `NSWorkspace.shared.open` does, so no browser is launched.
+      let adapter = MacOSAuthorizationAdapter(
+        openAuthorizationURL: MacOSAuthorizationAdapter.browserOpener { url in
+          opened.uris.append((try? Self.redirectURI(in: url)) ?? "")
+          return false
+        })
       let configuration = try FfiServiceConfiguration(
         authorizationEndpoint: "https://idp.example/authorize",
         tokenEndpoint: "https://idp.example/token"
       )
 
-      // The default opener fails with NSWorkspace.shared.open returning false.
+      // The second attempt proves the adapter cleared its running state.
       for attempt in 1...2 {
         do {
           _ = try await adapter.authorize(
