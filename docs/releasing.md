@@ -423,6 +423,28 @@ so re-running requires removing it in full
 (`rm -rf target/apple/release-package`). The removal also deletes archives
 of previous runs, so move any archive you keep somewhere else first.
 
+### Packaging phases and timings
+
+`scripts/package-apple-xcframework.sh` runs five phases in order: build
+(UniFFI bindings and the four Rust slices), stage, XCFramework (with the
+plist check above), verify (the macOS static-link smoke test in
+`scripts/check-apple-static-link-smoke.sh` and the iOS authorization flow in
+`scripts/check-ios-authorization-flow.sh`), and archive (with the zip check
+above). It writes an **Apple packaging phases** table to the step summary,
+with each phase's result and duration and the iOS flow's own rows (app
+build, simulator selection, `simctl boot`, `simctl bootstatus`, uninstall,
+mock provider, install, launch, result). A failed run still writes the table, and
+the phase that stopped it is marked `failed`.
+
+The iOS flow boots its simulator after the build, not during it. Booting it
+in the background while the Rust slices build was measured in Issue #178:
+the wait for the boot disappeared, but the simulator's boot and settling
+competed with cargo for the hosted runner's CPU. The overlapped builds
+slowed down by more than the boot time saved, so the whole step was slower
+in both CI lanes.
+
+Each verification script also runs on its own against an existing staging.
+
 ## Recovering from a failed run
 
 - **Key server check failed** (no package was built): the job fails when a
