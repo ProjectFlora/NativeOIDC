@@ -93,7 +93,7 @@ Check the following in order, skipping lines for phases this run does not handle
    → Follow [phase-pr.md](phase-pr.md) from step 6 (or go to step 7 if only the last condition applies)
 2. **Stalled work** (needs `plan` or `implement`, as below): the oldest open issue labeled `agent-in-progress` that has no open PR, and whose claim has expired or whose handoff is unfinished (both defined below)
    - Expired: the latest active claim (not withdrawn or released) has an `until` in the past, and the latest agent activity (agent-marker comment or commit on its issue branch `issue-{number}-*`) is either before that `until` or more than 2 hours old. Activity just after the deadline only delays recovery by up to 2 hours; it never blocks it
-   - An issue with no claim comment (started before claims existed) is stalled when its last agent activity is more than 2 hours old
+   - An issue with no claim comment (started before claims existed), or whose claims are all withdrawn, is stalled when its last agent activity is more than 2 hours old
    - **Unfinished handoff**: the run stopped after posting its handoff but before changing the label. Check these first, before any phase recovery below, and if one applies, finish the handoff and end without resuming any phase:
      - A `needs-input` pause comment from an agent was posted after the latest claim (whether or not that claim was released): release the claim if it is not released yet (`next-label=agent-needs-input`), then change the label to `agent-needs-input`
      - The latest claim is released with a `next-label` other than `agent-in-progress`: change the label to that `next-label`
@@ -105,7 +105,7 @@ Check the following in order, skipping lines for phases this run does not handle
      | `phase=plan`, `flow=end-to-end` | Yes | Implement phase (needs `implement`) |
      | `phase=plan`, `flow=end-to-end` | No | Plan phase again (needs `plan`), then implement |
      | `phase=implement` (either flow) | — | Implement phase (needs `implement`), continuing on the existing issue branch. The implement claim itself shows that the plan was approved (split) or did not need approval (end-to-end) |
-     | No claim (started before claims existed) | — | If the issue has a plan, its approval is unknown: change the label to `agent-plan-review` and end. Otherwise, plan phase as the split flow (needs `plan`) |
+     | No claim (started before claims existed), or all claims withdrawn | — | If the issue has a plan, its approval is unknown: change the label to `agent-plan-review` and end. Otherwise, plan phase as the split flow (needs `plan`) |
    - Before resuming, claim the issue (see "Claiming an issue" below) with the same `flow`, and say in the claim comment that the earlier run stalled and you are resuming it
 3. **Implement phase** (needs `implement`): the oldest open issue labeled `agent-implement`
    → Follow [phase-implement.md](phase-implement.md)
@@ -146,7 +146,7 @@ A claim keeps two runs from working on the same issue, and tells later runs whet
 1. Post an issue comment starting with the claim marker (see "Post Markers" in [common-rules.md](common-rules.md)), with `until` set to 2 hours from now and the issue's `flow`
 2. Read the issue comments again. Among the **active** claims (not withdrawn, not released, and `until` not yet past), the one with the smallest comment ID wins
 3. If yours did not win, edit it to start with `<!-- agent-workflow:claim-withdrawn -->`, do no work on this issue, and continue with the next line of "Choosing a target"
-4. If you find that your own claim's `until` has already passed, renew it and read the comments again before doing anything else. If another active claim now exists, withdraw yours and stop working on the issue
+4. If you find that your own claim's `until` has already passed, do not renew it: an expired claim belongs to scheduled recovery. Stop writing to the issue and its branch, leave the expired claim as it is, and end the run. A later run resumes from what was pushed. (If you must keep working in the same run, post a fresh claim with a new `run` id and compete under step 2 like any other run; never revive the expired one)
 5. While you work, keep the claim alive: edit your claim comment to move `until` to 2 hours from now after each pushed plan step, and before any action you expect to take more than 30 minutes. If one action may take longer than 2 hours, set `until` far enough to cover it
 6. When your phase ends, hand the claim over in one of two ways:
    - **Release** it when the run ends the phase and stops working on the issue (PR opened, split-flow plan posted, or paused). Do the writes in this order, so that a run that stops between them can be finished by a later run ("Unfinished handoff" under "Stalled work"):
