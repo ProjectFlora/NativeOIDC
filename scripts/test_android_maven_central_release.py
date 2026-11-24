@@ -91,6 +91,7 @@ class MockState:
         self.central = {}  # file name -> bytes; a missing name answers 404
         self.central_after = None  # (status checks until visible, files) for a sync in progress
         self.central_checks = 0
+        self.central_errors = {}  # file name -> HTTP status that overrides the file
         self.statuses = {}  # deployment id -> list of answers, the last one repeats
         self.upload_answer = (201, DEPLOYMENT_ID)
         self.requests = []  # (method, path)
@@ -109,6 +110,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _central(self, send_body):
         name = self.path[len(BASE):]
+        if name in self.state.central_errors:
+            self.send_response(self.state.central_errors[name])
+            self.end_headers()
+            return
         content = self.state.central.get(name)
         if content is None:
             self.send_response(404)
@@ -270,13 +275,42 @@ class DecideTest(ReleaseTestCase):
         self.assertEqual(code, 1)
         self.assertIn("different bytes", err)
 
-    def test_partial_publication_without_record_uploads(self):
+    def test_partial_publication_without_record_does_not_upload(self):
+        # Some files on Central mean a publication exists (still syncing, or
+        # published before deployment records existed).
         publish_everything(self.state)
         del self.state.central["native-oidc-android-%s.aar.asc" % VERSION]
-        code, _, _ = self.decide()
-        self.assertEqual(code, 0)
-        self.assertIn("decision=upload", self.decision())
+        code, _, err = self.decide()
+        self.assertEqual(code, 1)
+        self.assertIn("already serves part", err)
         self.assertEqual(self.portal_requests(), [])
+
+    def test_existing_publication_with_a_503_never_uploads(self):
+        publish_everything(self.state)
+        self.state.central_errors["native-oidc-android-%s.pom" % VERSION] = 503
+        code, _, err = self.run_script(
+            "upload", VERSION, "--expected-sha256", AAR_SHA256, "--bundle", self.bundle()
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("inconclusive", err)
+        self.assertFalse([r for r in self.state.requests if "/upload?" in r[1]])
+        self.assertEqual(self.snapshots(), [])
+
+    def test_unreachable_central_never_uploads(self):
+        code, _, err = self.run_script(
+            "upload", VERSION, "--expected-sha256", AAR_SHA256, "--bundle", self.bundle(),
+            extra_env={"MAVEN_CENTRAL_BASE_URL": "http://127.0.0.1:9/maven2"},
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("inconclusive", err)
+        self.assertFalse([r for r in self.state.requests if "/upload?" in r[1]])
+
+    def test_failed_attempt_with_inconclusive_central_does_not_upload(self):
+        self.write_record({"state": "failed", "deploymentId": DEPLOYMENT_ID})
+        self.state.central_errors["native-oidc-android-%s.aar" % VERSION] = 500
+        code, _, err = self.decide()
+        self.assertEqual(code, 1)
+        self.assertIn("inconclusive", err)
 
     def test_no_release_means_no_record(self):
         code, _, _ = self.decide("--no-record")

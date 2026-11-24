@@ -402,11 +402,11 @@ def decide(ctx: Context) -> str:
     record = read_record(ctx)
     attempts = (record or {}).get("attempts", [])
     if not attempts:
-        return "upload"
+        return upload_after_failures(record, statuses)
     latest = attempts[-1]
     state = latest.get("state")
     if state == "failed":
-        return upload_after_failures(record)
+        return upload_after_failures(record, statuses)
     deployment_id = latest.get("deploymentId")
     if not deployment_id:
         raise ReleaseError(
@@ -424,7 +424,7 @@ def decide(ctx: Context) -> str:
         errors = json.dumps(answer.get("errors"), indent=2)
         ctx.note(f"The deployment failed validation:\n```\n{errors}\n```")
         mark_failed(ctx, record, latest, f"Portal FAILED: {errors}")
-        return upload_after_failures(record)
+        return upload_after_failures(record, statuses)
     if portal_state == "VALIDATED":
         raise ReleaseError(
             f"Deployment {deployment_id} is VALIDATED and waits for a manual publish, which this pipeline "
@@ -438,7 +438,29 @@ def decide(ctx: Context) -> str:
     raise ReleaseError(f"Deployment {deployment_id} has the unknown state {portal_state}. Failing closed.")
 
 
-def upload_after_failures(record: dict | None) -> str:
+def require_absent(statuses: dict[str, int]) -> None:
+    """Allows an upload only on affirmative evidence that Central has none of the files.
+
+    Every file must answer 404. A file that answers 200 means a publication
+    exists (still syncing, or published before deployment records existed),
+    and any other answer (a transport failure, 5xx, 403, 410) proves nothing.
+    """
+    if all(status == 404 for status in statuses.values()):
+        return
+    if all(status in (200, 404) for status in statuses.values()):
+        raise ReleaseError(
+            f"Maven Central already serves part of this version ({gate_summary(statuses)}) but no live "
+            "deployment is recorded: a publication exists and is still syncing. Not uploading; re-run "
+            "the failed job once the sync completes."
+        )
+    raise ReleaseError(
+        f"Maven Central's answer is inconclusive ({gate_summary(statuses)}), so the absence of this "
+        "version is not established. Not uploading; re-run the failed job later."
+    )
+
+
+def upload_after_failures(record: dict | None, statuses: dict[str, int]) -> str:
+    require_absent(statuses)
     failures = failed_count(record)
     if failures >= MAX_FAILED_ATTEMPTS:
         raise ReleaseError(

@@ -200,16 +200,19 @@ deployment:
 
 | Maven Central | Latest record attempt | Portal status | Outcome |
 | --- | --- | --- | --- |
-| All ten files | Any | Not queried | The AAR on Central must have the expected SHA-256: `verified`, or a failure on a mismatch |
-| Incomplete | None | Not queried | `upload` |
+| All ten answer 200 | Any | Not queried | The AAR on Central must have the expected SHA-256: `verified`, or a failure on a mismatch |
+| All ten answer 404 | None | Not queried | `upload` |
+| Some answer 200, the rest 404 | None or `failed` | Not queried | Fail closed: a publication exists (still syncing, or published before deployment records existed); re-run later |
+| Any file answers something other than 200 or 404 (no answer, 5xx, 403, 410) | None or `failed` | Not queried | Fail closed: the absence of the version is not established; re-run later |
 | Incomplete | `upload-started`, no ID | Not queried | Fail closed (see [Upload started but not recorded](#upload-started-but-not-recorded)) |
 | Incomplete | Deployment ID | `PENDING`, `VALIDATING`, `VALIDATED`, `PUBLISHING` | Wait (30 × 60 s), then continue with the state reached; fail with "re-run later" if still in flight. `VALIDATED` that persists fails closed: it waits for a manual publish, which this pipeline never requests |
 | Incomplete | Deployment ID | `PUBLISHED` | Wait for the ten files (30 × 60 s), then check the AAR: `verified`; fail with "re-run later" if the sync has not completed |
-| Incomplete | Deployment ID | `FAILED` | Show the Portal's `errors`, mark the attempt `failed`, and `upload`. The deployment is not dropped, because Sonatype asks to keep failed deployments for support requests |
-| Incomplete | `failed` | Not queried | `upload`, unless three attempts have failed: then fail closed, since the failure is not transient |
+| Incomplete | Deployment ID | `FAILED` | Show the Portal's `errors`, mark the attempt `failed`, and `upload` if all ten files answer 404 (otherwise fail closed as above). The deployment is not dropped, because Sonatype asks to keep failed deployments for support requests |
+| All ten answer 404 | `failed` | Not queried | `upload`, unless three attempts have failed: then fail closed, since the failure is not transient |
 | Any | Deployment ID | Unknown ID, 4xx, or no answer after retries | Fail closed |
 
-`upload` runs `decide` again and uploads only on `upload`. A run therefore
+An upload needs affirmative evidence of absence: every one of the ten files
+must answer 404. `upload` runs `decide` again and uploads only on `upload`. A run therefore
 never uploads a version that is on Maven Central or has a deployment in
 flight or published.
 
