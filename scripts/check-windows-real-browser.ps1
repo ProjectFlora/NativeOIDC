@@ -46,6 +46,17 @@ try {
     $checkSource = Join-Path $repoRoot "native/consumer-smoke/windows/real-browser"
     if ($InProcess) {
         $mode = "in-process"
+        # The check loads native_oidc.dll into pwsh itself, so pwsh must
+        # match the DLL's architecture (the default mode builds a win-x64
+        # program instead). Native Arm64 PowerShell cannot load an x64 DLL;
+        # fail here with that reason rather than at the load.
+        $dllBytes = [System.IO.File]::ReadAllBytes((Join-Path $packageRoot.FullName "native_oidc.dll"))
+        $machine = [BitConverter]::ToUInt16($dllBytes, [BitConverter]::ToInt32($dllBytes, 0x3C) + 4)
+        $dllArchitecture = switch ($machine) { 0x8664 { "X64" } 0xAA64 { "Arm64" } 0x14C { "X86" } default { "0x{0:X4}" -f $machine } }
+        $pwshArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+        if ($pwshArchitecture -ne $dllArchitecture) {
+            throw "-InProcess needs PowerShell for the package's architecture: native_oidc.dll is $dllArchitecture, this pwsh is $pwshArchitecture. Run the script with $dllArchitecture PowerShell."
+        }
         # A separate pwsh process, so that the loaded native_oidc.dll does
         # not keep the package directory locked, and the check's output and
         # exit code arrive as they do from the built program.

@@ -118,7 +118,10 @@ the same code the built check runs) with `Add-Type`, loads the package's
 `native_oidc.dll`, and runs the check
 ([`run-in-process.ps1`](../native/consumer-smoke/windows/real-browser/run-in-process.ps1)).
 The provider, the result files, and the pass/fail decision are the same as in
-the default mode, and `environment.txt` records the mode. It still needs the
+the default mode, and `environment.txt` records the mode. Because the DLL is
+loaded into PowerShell itself, run it from PowerShell of the package's
+architecture (x64 PowerShell for the x64 package, also on Windows on Arm);
+the script stops with an architecture message otherwise. It still needs the
 policy to allow the package's `native_oidc.dll`: if `check-output.txt` shows
 that loading `native_oidc.dll` was blocked, this machine cannot run the
 check; record that and run it on another machine.
