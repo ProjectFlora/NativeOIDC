@@ -82,13 +82,16 @@ simulator_selection=$(
         python3 scripts/select_ios_simulator.py "${IOS_SIMULATOR_MAJOR_VERSION:-}"
 )
 IFS=$'\t' read -r simulator_id simulator_state simulator_runtime <<< "$simulator_selection"
-phase_end
 echo "iOS flow simulator: $simulator_id ($simulator_runtime; $simulator_state)"
 sw_vers
 xcodebuild -version
-if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    echo "iOS authorization: $simulator_runtime on $(uname -m), simulator $simulator_id" >> "$GITHUB_STEP_SUMMARY"
+# The summary line is diagnostic, like the timing rows: a failed write warns
+# and does not stop the flow.
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] &&
+    ! { echo "iOS authorization: $simulator_runtime on $(uname -m), simulator $simulator_id" >> "$GITHUB_STEP_SUMMARY"; } 2>/dev/null; then
+    echo "warning: could not write the iOS authorization summary to $GITHUB_STEP_SUMMARY" >&2
 fi
+phase_end
 if [[ "$simulator_state" != Booted ]]; then
     phase_begin "iOS flow: simctl boot"
     # Set before the boot, so cleanup also shuts down a device whose boot

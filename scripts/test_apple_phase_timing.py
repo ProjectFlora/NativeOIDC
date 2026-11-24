@@ -137,18 +137,43 @@ class UnwritableDestinationTestCase(BashHelperMixin, unittest.TestCase):
         self.assertIn("warning: could not write phase timing to", result.stderr)
 
 
-class IOSFlowCleanupOrderTestCase(unittest.TestCase):
-    def test_cleanup_is_installed_before_any_phase_sdk_lookup_or_boot(self):
-        with open(os.path.join(SCRIPTS, "check-ios-authorization-flow.sh"), encoding="utf-8") as handle:
-            lines = handle.read().splitlines()
+def script_lines(name):
+    with open(os.path.join(SCRIPTS, name), encoding="utf-8") as handle:
+        return handle.read().splitlines()
 
-        def first(text):
-            return next(index for index, line in enumerate(lines) if text in line)
 
-        trap = first("trap cleanup EXIT")
+def first_line(lines, text, start=0):
+    return next(index for index in range(start, len(lines)) if text in lines[index])
+
+
+class ScriptOrderTestCase(unittest.TestCase):
+    """Failure paths that the bash tests above cannot reach without Xcode."""
+
+    def test_ios_flow_cleanup_is_installed_before_any_phase_sdk_lookup_or_boot(self):
+        lines = script_lines("check-ios-authorization-flow.sh")
+        trap = first_line(lines, "trap cleanup EXIT")
         for text in ("phase_begin", "--show-sdk-path", "simctl boot", "ios-mock-oauth-provider.py"):
             with self.subTest(text=text):
-                self.assertLess(trap, first(text))
+                self.assertLess(trap, first_line(lines, text))
+
+    def test_ios_flow_selection_phase_covers_the_toolchain_diagnostics(self):
+        lines = script_lines("check-ios-authorization-flow.sh")
+        begin = first_line(lines, 'phase_begin "iOS flow: select simulator"')
+        end = first_line(lines, "phase_end", begin)
+        for text in ("sw_vers", "xcodebuild -version", "iOS authorization: "):
+            with self.subTest(text=text):
+                self.assertLess(begin, first_line(lines, text, begin))
+                self.assertLess(first_line(lines, text, begin), end)
+
+    def test_package_timing_file_setup_cannot_stop_packaging(self):
+        lines = script_lines("package-apple-xcframework.sh")
+        trap = first_line(lines, "trap cleanup EXIT")
+        setup = lines[:trap]
+        mktemp = first_line(setup, "mktemp")
+        self.assertTrue(setup[mktemp].lstrip().startswith("if "), setup[mktemp])
+        # No top-level removal of a fixed timing path before the trap (cleanup's
+        # own best-effort removal is indented inside the function).
+        self.assertFalse([line for line in setup if line.startswith('rm -f "$APPLE_PHASE_TIMING_FILE"')])
 
 
 @unittest.skipUnless(BASH, "bash is not installed")

@@ -61,9 +61,15 @@ fi
 scratch_xcframework="$output_root/NativeOIDC-Apple-scratch.xcframework"
 recheck="$output_root/NativeOIDC-Apple-$version-determinism.zip"
 
-mkdir -p "$repo_root/target/apple"
-export APPLE_PHASE_TIMING_FILE="$repo_root/target/apple/package-phase-timings.tsv"
-rm -f "$APPLE_PHASE_TIMING_FILE"
+# A fresh timing file for this run, shared with the scripts it calls. Timing
+# is diagnostic only: if the file cannot be created, the phases are still
+# logged as [timing] lines and packaging continues.
+if APPLE_PHASE_TIMING_FILE=$(mktemp "${TMPDIR:-/tmp}/package-phase-timings.XXXXXX" 2>/dev/null); then
+    export APPLE_PHASE_TIMING_FILE
+else
+    echo "warning: could not create a phase timing file; the phase table is not written" >&2
+    unset APPLE_PHASE_TIMING_FILE
+fi
 package_started=$SECONDS
 
 cleanup() {
@@ -76,6 +82,9 @@ cleanup() {
         phase_record "Total" failed $((SECONDS - package_started))
     fi
     phase_write_summary "Apple packaging phases"
+    if [[ -n "${APPLE_PHASE_TIMING_FILE:-}" ]]; then
+        rm -f "$APPLE_PHASE_TIMING_FILE" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT
 
@@ -98,7 +107,7 @@ for target in \
 done
 
 phase_begin "Stage: sources, notices, headers, macOS library"
-mkdir -p "$package_root/Swift" "$headers"
+mkdir -p "$repo_root/target/apple" "$package_root/Swift" "$headers"
 # The Swift package sources (the UniFFI-generated API plus the platform
 # adapters) ship in the archive so manual Xcode users get the same content as
 # the Swift Package Manager target. The generated file is copied from the
