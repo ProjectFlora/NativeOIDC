@@ -3,6 +3,7 @@ package net.projectflora.nativeoidc
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,7 +32,9 @@ open class AndroidAuthorizationFlowTestActivity : Activity() {
                         AndroidAuthorizationAdapter(this@AndroidAuthorizationFlowTestActivity)
                             .authorize(configuration, options, redirects, transport),
                     )
-                } catch (error: Exception) {
+                } catch (error: Throwable) {
+                    // Errors such as NoClassDefFoundError reach the test as a
+                    // failure instead of crashing the instrumentation process.
                     Result.failure(error)
                 }
             onResult(result)
@@ -44,10 +47,20 @@ open class AndroidAuthorizationFlowTestActivity : Activity() {
     }
 }
 
-/** Behaves as if no browser is installed: every Custom Tab launch fails. */
+/**
+ * Behaves as if no browser is installed: every Custom Tab launch fails. The
+ * URL of the last attempted launch is kept in [lastLaunchedUri].
+ */
 class AndroidNoBrowserFlowTestActivity : AndroidAuthorizationFlowTestActivity() {
+    @Volatile
+    var lastLaunchedUri: Uri? = null
+        private set
+
     override fun startActivity(
         intent: Intent,
         options: Bundle?,
-    ): Unit = throw ActivityNotFoundException("No browser is installed in this test")
+    ) {
+        lastLaunchedUri = intent.data
+        throw ActivityNotFoundException("No browser is installed in this test")
+    }
 }
