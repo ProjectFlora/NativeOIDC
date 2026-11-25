@@ -63,20 +63,24 @@ RULES = (
     (("tests/live-idp/**",), frozenset(), "manual live-IdP fixture, not run in CI"),
     (("tests/**", "examples/**"), RUST, "Rust tests or examples"),
     # License inputs.
-    (("deny.toml",), {"licenses"}, "cargo-deny policy"),
+    (("deny.toml",), {"licenses", "test"}, "cargo-deny policy"),
     (("about.toml", "about.hbs"), {"licenses"} | PACKAGES, "third-party notice template"),
     (("LICENSE",), PACKAGES, "LICENSE shipped in every package"),
     # Swift package and Apple adapters.
     (("Package.swift",), {"apple", "spm_manifest"}, "Swift package manifest"),
     (("Sources/NativeOIDC/native_oidc.swift",), {"apple", "spm_bindings"}, "generated Swift bindings"),
+    # The Tests job builds and checks the release documentation set, which
+    # ships the files the documentation links (scripts/build-release-docs.py),
+    # so the rules for those files also select it.
     (("Sources/**", "SwiftTests/**", "native/apple/**", "native/consumer-smoke/apple/**"),
-     {"apple"}, "Apple adapters, tests or consumer"),
-    (("docs/swift-xcframework.md",), {"apple"}, "README shipped in the Apple package"),
-    (("docs/windows-cpp-guide.md",), {"windows"}, "C++ guide compiled by the Windows consumer"),
+     {"apple", "test"}, "Apple adapters, tests or consumer"),
+    (("docs/swift-xcframework.md",), {"apple", "test"}, "README shipped in the Apple package"),
+    (("docs/windows-cpp-guide.md",), {"windows", "test"}, "C++ guide compiled by the Windows consumer"),
     # Android and Windows adapters. native/windows/README.md is shipped in
     # the Windows package, so it is not treated as documentation.
-    (("native/android/**", "native/consumer-smoke/android/**"), {"android"}, "Android adapter, tests or consumer"),
-    (("native/windows/**", "native/consumer-smoke/windows/**"), {"windows"}, "Windows adapter or consumer"),
+    (("native/android/**", "native/consumer-smoke/android/**"), {"android", "test"},
+     "Android adapter, tests or consumer"),
+    (("native/windows/**", "native/consumer-smoke/windows/**"), {"windows", "test"}, "Windows adapter or consumer"),
     # Scripts. The Tests job runs every scripts/test_*.py, so each script
     # also selects it.
     (("scripts/generate-bindings.sh",), {"test", "apple", "android", "spm_bindings"}, "binding generation script"),
@@ -106,9 +110,14 @@ RULES = (
       "scripts/check-macos-real-browser.sh", "scripts/check-windows-real-browser.ps1",
       "scripts/real_browser_mock_provider.py", "scripts/test_*.py"),
      {"test"}, "release-only or manual script, or script unit test"),
+    (("scripts/build-release-docs.py", "scripts/check-release-docs.py"), {"test"},
+     "release documentation set scripts (run by the Tests job)"),
+    # Documentation. The documentation index and the files it links make up
+    # the release documentation set, which the Tests job builds and checks.
+    (("docs/agent-workflows/**",), frozenset(), "agent workflow documentation (not in the release documentation set)"),
+    (("README.md", "ROADMAP.md", "FEATURE_MATRIX.md", "docs/**"), {"test"}, "release documentation set"),
     # Documentation that no build, package or check reads.
-    (("README.md", "CHANGELOG.md", "ROADMAP.md", "FEATURE_MATRIX.md", "docs/**", ".gitignore"),
-     frozenset(), "documentation"),
+    (("CHANGELOG.md", ".gitignore"), frozenset(), "documentation"),
 )
 
 ZERO_SHA = "0" * 40
