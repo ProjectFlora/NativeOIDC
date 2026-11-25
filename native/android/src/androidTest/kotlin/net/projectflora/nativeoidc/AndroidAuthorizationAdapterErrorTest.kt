@@ -1,11 +1,13 @@
 package net.projectflora.nativeoidc
 
 import android.content.ActivityNotFoundException
+import android.net.Uri
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,11 +72,57 @@ class AndroidAuthorizationAdapterErrorTest {
         )
     }
 
+    @Test
+    fun unverifiedAppLinkFallsBackToRegisteredCustomScheme() {
+        // The emulator never verifies login.example.test, and API 28 to 30
+        // have no DomainVerificationManager, so the custom scheme is selected.
+        val customSchemeUri = "com.example.app:/oauth/callback"
+        var launchedUri: Uri? = null
+        val error =
+            authorizeAndAwaitFailure(
+                customSchemeUri,
+                appLinkUri = APP_LINK_URI,
+                activityClass = AndroidNoBrowserFlowTestActivity::class.java,
+            ) { activity ->
+                launchedUri = (activity as AndroidNoBrowserFlowTestActivity).lastLaunchedUri
+            }
+
+        // BrowserUnavailable comes from the launch, after redirect selection.
+        assertTrue(
+            "Expected BrowserUnavailable, got $error",
+            error is AndroidAuthorizationAdapterException.BrowserUnavailable,
+        )
+        assertEquals(customSchemeUri, launchedUri?.getQueryParameter("redirect_uri"))
+        // The failed operation must not keep the callback route registered.
+        AndroidAuthorizationCallbackRegistry.unregister(
+            AndroidAuthorizationCallbackRegistry.register(customSchemeUri),
+        )
+    }
+
+    @Test
+    fun unverifiedAppLinkWithoutFallbackFailsWithInvalidRedirectConfiguration() {
+        val error =
+            authorizeAndAwaitFailure(
+                APP_LINK_URI,
+                appLinkUri = APP_LINK_URI,
+                customSchemeUri = null,
+            )
+
+        assertTrue(
+            "Expected InvalidRedirectConfiguration, got $error",
+            error is AndroidAuthorizationAdapterException.InvalidRedirectConfiguration,
+        )
+    }
+
     private fun authorizeAndAwaitFailure(
         redirectUri: String,
+        appLinkUri: String? = null,
+        customSchemeUri: String? = redirectUri,
         finishActivityFirst: Boolean = false,
         activityClass: Class<out AndroidAuthorizationFlowTestActivity> =
             AndroidAuthorizationFlowTestActivity::class.java,
+        // Runs after the failure; pass it only when the activity stays alive.
+        inspectActivity: ((AndroidAuthorizationFlowTestActivity) -> Unit)? = null,
     ): Throwable =
         runBlocking {
             val scenario = ActivityScenario.launch(activityClass)
@@ -98,14 +146,25 @@ class AndroidAuthorizationAdapterErrorTest {
                                 emptyList(),
                                 emptyList(),
                             ),
-                        redirects = AndroidRedirectConfiguration(null, redirectUri),
+                        redirects = AndroidRedirectConfiguration(appLinkUri, customSchemeUri),
                         transport = UrlConnectionNativeHttpTransport(),
                     ) { result.complete(it) }
                 }
-                withTimeout(5_000) { result.await() }.exceptionOrNull()
-                    ?: throw AssertionError("Authorization unexpectedly succeeded")
+                val error =
+                    withTimeout(5_000) { result.await() }.exceptionOrNull()
+                        ?: throw AssertionError("Authorization unexpectedly succeeded")
+                if (inspectActivity != null) {
+                    scenario.onActivity { inspectActivity(it) }
+                }
+                error
             } finally {
                 scenario.close()
             }
         }
+
+    private companion object {
+        // Registered for the callback activity in the androidTest manifest,
+        // without assetlinks.json, so Android never verifies it.
+        const val APP_LINK_URI = "https://login.example.test/oauth/callback"
+    }
 }
