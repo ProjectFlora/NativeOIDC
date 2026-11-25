@@ -89,15 +89,11 @@ The **Validate release version** step summary names the release the
 generated notes will start from and links the comparison; it must be the
 previous release (see [Release notes range](#release-notes-range)).
 
-The Apple jobs build and validate with the Xcode set by `XCODE_VERSION` in
-`release.yml` (a stable Xcode 26.x, since App Store Connect requires Xcode
-26 or later), and `release-consumer.yml` sets the same version. Check the
-**Build Apple release package** step summary for the recorded Rust and Xcode
+The Apple jobs use `.github/actions/setup-xcode` with pinned mode for release jobs, which uses Xcode 26.6 by default (App Store Connect requires Xcode ≥ 26). The CI latest lane uses newest-installed-stable via `mode: latest`. See [ci-toolchains.md](ci-toolchains.md) for version management.
+
+Check the **Build Apple release package** step summary for the recorded Rust and Xcode
 versions and the iOS simulator runtime the iOS flow ran on. To change the
-Xcode version, update the runner label and `XCODE_VERSION` in both
-workflows together, after checking the
-[runner-images README](https://github.com/actions/runner-images/tree/main/images/macos)
-for the image's installed Xcode versions and simulator runtimes.
+Xcode version, update the action's default or both workflows together as documented in [ci-toolchains.md](ci-toolchains.md).
 
 When a change touches the Maven Central publication, add
 `-f dry_run_maven=true` to the candidate run. The `dry_run_maven` job runs the
@@ -306,9 +302,7 @@ Maintenance:
   license files the script appends, and whether another part of the
   standard library gained a license other than `MIT OR Apache-2.0` (its
   `library/` sources in rust-src).
-- **A cargo-about or cargo-deny update**: change the version in
-  `scripts/generate-third-party-licenses.sh` (cargo-about) and in every
-  `taiki-e/install-action` step of `ci.yml` and `release.yml` together.
+- **A cargo-about or cargo-deny update**: change the version in `.github/actions/setup-cargo-tools/action.yml`, then run the Python test suite and update `ci.yml`/`release.yml`. See [ci-toolchains.md](ci-toolchains.md) for details.
 
 `release-consumer.yml` runs the same consumer checks, so it requires the
 notices too and can validate only v0.7.1 and later. v0.1.0 through v0.7.0
@@ -549,3 +543,4 @@ fails closed instead of uploading a second deployment. To resume:
   older `vkb/v1/...` endpoints answer `404` even for published keys, so do
   not use them to check a key. Upload a public key at
   <https://keys.openpgp.org/upload>.
+
