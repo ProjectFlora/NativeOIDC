@@ -64,19 +64,27 @@ An automation can set the order in which "Choosing a target" checks its lines, w
 - With `priority` as the first token of `Order:`, collect the candidates of every line this run handles, then pick the one with the highest Priority. Among equal Priorities, the line order given by the rest of the list decides, then the oldest
 - If the Priority field cannot be retrieved (see "Verification Rules" in [common-rules.md](common-rules.md)), treat every candidate as "not set", so that the line order alone decides, and say so where you state the order
 
-### Priority filter (scheduled mode)
+### Priority and Effort filters (scheduled mode)
 
-An automation can limit itself to some Priorities with `Priorities: {list}` in its prompt, using `Urgent`, `High`, `Medium`, `Low`, and `none` (Priority not set). This lets automations with different models share the work by Priority:
+An automation can limit itself to some values of the issue's `Priority` and `Effort` fields (in the GitHub Project that tracks the issue), so that automations with different models share the work:
+
+| Filter | Values (`none` = field not set) |
+|---|---|
+| `Priorities: {list}` | `Urgent`, `High`, `Medium`, `Low`, `none` |
+| `Efforts: {list}` | `Very High`, `High`, `Medium`, `Low`, `Very Low`, `none` |
 
 | Automation | Example prompt |
 |---|---|
 | Urgent and High work | `Scheduled mode. Priorities: Urgent, High. Order: priority, ready, pr, implement, plan. Follow docs/agent-workflows/issue-to-pr.md.` |
-| Everything else | `Scheduled mode. Priorities: Medium, Low, none. Follow docs/agent-workflows/issue-to-pr.md.` |
+| Small implementation work, on a smaller model | `Scheduled mode. Phases: implement. Priorities: Medium, Low, none. Efforts: Low, Very Low. Follow docs/agent-workflows/issue-to-pr.md.` |
+| Everything else: plan and PR work, and larger implementations | `Scheduled mode. Priorities: Medium, Low, none. Efforts: Very High, High, Medium, none. Follow docs/agent-workflows/issue-to-pr.md.` |
 
-- Candidates whose Priority is not in the list are skipped. A PR uses its linked issue's Priority
-- Together, the automations must cover every value, `none` included; a value no automation lists is never picked up
-- If the Priority field cannot be retrieved and `Priorities:` is set, do not guess: handle nothing in this run, and say so in the run's output. An important issue must not go to the wrong automation
-- Priority is checked when choosing a target. A run that already holds a claim finishes its phase even if the Priority changes; the next phase goes to the automation that matches the new Priority
+- `Priorities:` applies to every line of "Choosing a target". `Efforts:` applies only to the lines that implement: stalled work resumed in the implement phase, the implement phase, and end-to-end issues. Plan and PR work ignore it, because Effort describes the implementation
+- A candidate must match every filter that applies to its line; candidates outside any of them are skipped. A PR uses its linked issue's values
+- Together, the automations must cover every value, `none` included: every Priority for every phase, and every Effort for the implement phase. A value no automation covers is never picked up
+- If a field that a filter uses cannot be retrieved, do not guess: handle nothing in this run, and say so in the run's output. Work must not go to the wrong automation
+- The filters are checked when choosing a target. A run that already holds a claim finishes its phase even if a value changes; the next phase goes to the automation that matches the new values
+- Effort is set by me, usually when approving the plan, from the plan's "Effort estimate" (see [phase-plan.md](phase-plan.md)). Agents do not change the field
 
 ### Precheck (scheduled mode)
 
