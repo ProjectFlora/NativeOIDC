@@ -80,7 +80,7 @@ FILE_MODE = 0o644
 DIR_MODE = 0o755
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1")
+_CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1", re.S)
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # A reference-style link definition: `[label]: destination "title"`.
 # The destination may also start on the next line (GFM allows one line
@@ -100,12 +100,19 @@ def markdown_links(text):
     `[label]: target` lines that `[text][label]` uses), are reported.
 
     Fenced code blocks and inline code spans are skipped, so code samples
-    that look like links are not followed.
+    that look like links are not followed. Inline links are found per
+    paragraph (the lines between blank lines, fences and definitions), so
+    a link whose text or destination continues on the next line is found
+    too; the reported line is the one where its destination starts.
     """
+    paragraph = []
     fence = None
     # Set after a definition whose destination is on the next line.
     split_definition = False
     for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip() or _FENCE.match(line) or _DEFINITION.match(line):
+            yield from _inline_links(paragraph)
+            paragraph.clear()
         if split_definition:
             split_definition = False
             # A code fence ends the incomplete definition instead of being
@@ -134,16 +141,29 @@ def markdown_links(text):
             if target:
                 yield number, target
             continue
-        line = _CODE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
-        position = 0
-        while True:
-            start = line.find("](", position)
-            if start < 0:
-                break
-            target, end = _link_target(line, start + 2)
-            position = end
-            if target is not None:
-                yield number, target
+        if line.strip():
+            paragraph.append((number, line))
+    yield from _inline_links(paragraph)
+
+
+def _inline_links(paragraph):
+    """Yield (line_number, target) for the inline links in `paragraph`."""
+    if not paragraph:
+        return
+    first = paragraph[0][0]
+    text = "\n".join(line for _, line in paragraph)
+    # Blank out code spans (which may span lines), keeping line breaks so
+    # offsets still map to line numbers.
+    text = _CODE_SPAN.sub(lambda span: re.sub(r"[^\n]", " ", span.group(0)), text)
+    position = 0
+    while True:
+        start = text.find("](", position)
+        if start < 0:
+            break
+        target, end, target_start = _link_target(text, start + 2)
+        position = end
+        if target is not None:
+            yield first + text.count("\n", 0, target_start), target
 
 
 def _definition_target(destination):
@@ -154,14 +174,18 @@ def _definition_target(destination):
 
 
 def _link_target(line, index):
-    """Parse a link destination starting at `index`; return (target, end)."""
-    while index < len(line) and line[index] == " ":
+    """Parse a link destination starting at `index`.
+
+    Return (target, end, target_start). Whitespace, including a line
+    break, may come before the destination.
+    """
+    while index < len(line) and line[index] in " \t\n":
         index += 1
     if index < len(line) and line[index] == "<":
         close = line.find(">", index)
-        if close < 0:
-            return None, index
-        return line[index + 1:close], close + 1
+        if close < 0 or "\n" in line[index:close]:
+            return None, index, index
+        return line[index + 1:close], close + 1, index
     depth = 0
     start = index
     while index < len(line):
@@ -175,11 +199,11 @@ def _link_target(line, index):
             if depth == 0:
                 break
             depth -= 1
-        elif char in " \t":
+        elif char in " \t\n":
             break
         index += 1
     target = line[start:index]
-    return (target or None), index
+    return (target or None), index, start
 
 
 def resolve_link(source, target):

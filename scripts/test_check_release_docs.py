@@ -39,6 +39,7 @@ REPO_FILES = {
         "[ABI](windows-api.md) [Windows](../native/windows/README.md) [Example][example]\n\n"
         "[example]: ../examples/manual_authorization.rs\n"
         "\n[Windows header][header]\n\n[header]:\n    ../native/windows/include/native_oidc_windows.h\n"
+        "\n[C# project](\n  ../native/windows/dotnet/NativeOidcWindows.csproj)\n"
     ),
     "docs/user-guide.md": "# Guide\n",
     "docs/api-coverage.md": "# Coverage\n",
@@ -150,6 +151,17 @@ class CheckTests(unittest.TestCase):
             self.errors(archive),
             "repo/docs/README.md:12: link `../native/windows/include/native_oidc_windows.h` names "
             "repo/native/windows/include/native_oidc_windows.h, which is not in the archive",
+        )
+
+    def test_broken_inline_link_with_destination_on_the_next_line(self):
+        # The project file is linked only by an inline link whose
+        # destination starts on the line after `(`.
+        archive = self.build()
+        self.rewrite(archive, lambda files: files.pop("repo/native/windows/dotnet/NativeOidcWindows.csproj"))
+        self.assert_error(
+            self.errors(archive),
+            "repo/docs/README.md:15: link `../native/windows/dotnet/NativeOidcWindows.csproj` names "
+            "repo/native/windows/dotnet/NativeOidcWindows.csproj, which is not in the archive",
         )
 
     def test_link_leaving_the_archive(self):
