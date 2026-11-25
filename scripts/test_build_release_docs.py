@@ -119,6 +119,13 @@ class LinkClosureTests(Fixture):
             build_release_docs.link_closure(self.repo)
         self.assertIn(expected, str(raised.exception))
 
+    def test_reference_only_link_is_included(self):
+        write(self.repo, "docs/guide.md", "# Guide\n\n[Sample][sample]\n\n[sample]: ../examples/demo.rs\n")
+        self.assertIn("examples/demo.rs", build_release_docs.link_closure(self.repo))
+
+    def test_missing_reference_target_fails(self):
+        self.assert_build_error("\n[gone]: gone.md\n", "link `gone.md` names docs/gone.md, which does not exist")
+
     def test_missing_target_fails(self):
         self.assert_build_error("[gone](gone.md)\n", "docs/guide.md:4: link `gone.md` names docs/gone.md, which does not exist")
 
@@ -155,6 +162,13 @@ class MarkdownLinkTests(unittest.TestCase):
     def test_parenthesised_target_and_title(self):
         links = list(build_release_docs.markdown_links('[a](x(1).md "title") [b]( y.md )\n'))
         self.assertEqual(links, [(1, "x(1).md"), (1, "y.md")])
+
+    def test_reference_style_definitions(self):
+        text = '[Sample][sample] and [b][]\n\n[sample]: ../examples/demo.rs\n  [b]: <b c.md> "Title"\n'
+        self.assertEqual(list(build_release_docs.markdown_links(text)), [(3, "../examples/demo.rs"), (4, "b c.md")])
+
+    def test_reference_definition_in_fence_is_skipped(self):
+        self.assertEqual(list(build_release_docs.markdown_links("```\n[a]: a.md\n```\n")), [])
 
     def test_unclosed_fence_hides_the_rest(self):
         self.assertEqual(list(build_release_docs.markdown_links("```\n[a](a.md)\n")), [])

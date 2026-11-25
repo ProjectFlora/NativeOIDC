@@ -82,6 +82,8 @@ DIR_MODE = 0o755
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+# A reference-style link definition: `[label]: destination "title"`.
+_DEFINITION = re.compile(r"^ {0,3}\[(?:[^\]\\]|\\.)+\]:[ \t]*(<[^>]*>|\S+)")
 
 
 class BuildError(Exception):
@@ -89,7 +91,10 @@ class BuildError(Exception):
 
 
 def markdown_links(text):
-    """Yield (line_number, target) for each inline link or image in `text`.
+    """Yield (line_number, target) for each link or image in `text`.
+
+    Inline links and images, and reference-style link definitions (the
+    `[label]: target` lines that `[text][label]` uses), are reported.
 
     Fenced code blocks and inline code spans are skipped, so code samples
     that look like links are not followed.
@@ -104,6 +109,14 @@ def markdown_links(text):
             continue
         if match:
             fence = match.group(1)
+            continue
+        definition = _DEFINITION.match(line)
+        if definition:
+            target = definition.group(1)
+            if target.startswith("<"):
+                target = target[1:-1]
+            if target:
+                yield number, target
             continue
         line = _CODE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
         position = 0

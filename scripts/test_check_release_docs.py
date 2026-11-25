@@ -36,7 +36,8 @@ REPO_FILES = {
     "docs/README.md": (
         "# Docs\n\n[Project](../README.md#top) [Guide](user-guide.md) [Coverage](api-coverage.md)\n"
         "[Swift install](swift-xcframework.md) [Kotlin](kotlin-guide.md) [C++](windows-cpp-guide.md)\n"
-        "[ABI](windows-api.md) [Windows](../native/windows/README.md) [Example](../examples/manual_authorization.rs)\n"
+        "[ABI](windows-api.md) [Windows](../native/windows/README.md) [Example][example]\n\n"
+        "[example]: ../examples/manual_authorization.rs\n"
     ),
     "docs/user-guide.md": "# Guide\n",
     "docs/api-coverage.md": "# Coverage\n",
@@ -122,6 +123,16 @@ class CheckTests(unittest.TestCase):
         self.assert_error(
             self.errors(archive),
             "repo/docs/README.md:3: link `user-guide.md` names repo/docs/user-guide.md, which is not in the archive",
+        )
+
+    def test_broken_reference_style_link(self):
+        # The example is linked only through a reference definition.
+        archive = self.build()
+        self.rewrite(archive, lambda files: files.pop("repo/examples/manual_authorization.rs"))
+        self.assert_error(
+            self.errors(archive),
+            "repo/docs/README.md:7: link `../examples/manual_authorization.rs` names "
+            "repo/examples/manual_authorization.rs, which is not in the archive",
         )
 
     def test_link_leaving_the_archive(self):
