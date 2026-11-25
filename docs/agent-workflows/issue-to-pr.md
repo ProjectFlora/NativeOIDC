@@ -68,23 +68,28 @@ An automation can set the order in which "Choosing a target" checks its lines, w
 
 An automation can limit itself to some values of the issue's `Priority` and `Effort` fields (in the GitHub Project that tracks the issue), so that automations with different models share the work:
 
-| Filter | Values (`none` = field not set) |
-|---|---|
-| `Priorities: {list}` | `Urgent`, `High`, `Medium`, `Low`, `none` |
-| `Efforts: {list}` | `Very High`, `High`, `Medium`, `Low`, `Very Low`, `none` |
+| Filter | Values (`none` = field not set) | Applies to |
+|---|---|---|
+| `Priorities: {list}` | `Urgent`, `High`, `Medium`, `Low`, `none` | Every line of "Choosing a target" |
+| `Efforts: {list}` | `Very High`, `High`, `Medium`, `Low`, `Very Low`, `none` | Every line, unless `Implement efforts:` replaces it |
+| `Implement efforts: {list}` | Same as `Efforts:` | Replaces `Efforts:` on the implement-only lines: stalled work resumed in the implement phase, and the implement phase (`agent-implement`). Without it, those lines use `Efforts:` |
+
+End-to-end issues (`agent-ready`) are planned and implemented in one run, so their line uses `Efforts:`, not `Implement efforts:`.
+
+Example: Claude takes Urgent and High work and every issue with Very High effort; a larger model takes the rest, except the implementation of Low and Very Low effort, which goes to a lighter model:
 
 | Automation | Example prompt |
 |---|---|
-| Urgent and High work | `Scheduled mode. Priorities: Urgent, High. Order: priority, ready, pr, implement, plan. Follow docs/agent-workflows/issue-to-pr.md.` |
-| Small implementation work, on a smaller model | `Scheduled mode. Phases: implement. Priorities: Medium, Low, none. Efforts: Low, Very Low. Follow docs/agent-workflows/issue-to-pr.md.` |
-| Everything else: plan and PR work, and larger implementations | `Scheduled mode. Priorities: Medium, Low, none. Efforts: Very High, High, Medium, none. Follow docs/agent-workflows/issue-to-pr.md.` |
+| Claude, Urgent and High | `Scheduled mode. Priorities: Urgent, High. Order: priority, ready, pr, implement, plan. Follow docs/agent-workflows/issue-to-pr.md.` |
+| Claude, Very High effort | `Scheduled mode. Priorities: Medium, Low, none. Efforts: Very High. Follow docs/agent-workflows/issue-to-pr.md.` |
+| Larger model, everything else | `Scheduled mode. Priorities: Medium, Low, none. Efforts: High, Medium, Low, Very Low, none. Implement efforts: High, Medium, none. Follow docs/agent-workflows/issue-to-pr.md.` |
+| Lighter model, small implementations | `Scheduled mode. Phases: implement. Priorities: Medium, Low, none. Efforts: Low, Very Low. Follow docs/agent-workflows/issue-to-pr.md.` |
 
-- `Priorities:` applies to every line of "Choosing a target". `Efforts:` applies only to the lines that implement: stalled work resumed in the implement phase, the implement phase, and end-to-end issues. Plan and PR work ignore it, because Effort describes the implementation
 - A candidate must match every filter that applies to its line; candidates outside any of them are skipped. A PR uses its linked issue's values
-- Together, the automations must cover every value, `none` included: every Priority for every phase, and every Effort for the implement phase. A value no automation covers is never picked up
+- Together, the automations must cover every combination of Priority and Effort, `none` included, on every line. A combination no automation covers is never picked up. In particular, an automation limited to `Phases: implement` cannot take end-to-end issues, so another automation must cover them with the same values
 - If a field that a filter uses cannot be retrieved, do not guess: handle nothing in this run, and say so in the run's output. Work must not go to the wrong automation
 - The filters are checked when choosing a target. A run that already holds a claim finishes its phase even if a value changes; the next phase goes to the automation that matches the new values
-- Effort is set by me, usually when approving the plan, from the plan's "Effort estimate" (see [phase-plan.md](phase-plan.md)). Agents do not change the field
+- I may set or change Effort at any time, for example when creating the issue or when approving the plan; the plan's "Effort estimate" (see [phase-plan.md](phase-plan.md)) can help when it is not set yet. Agents do not change the field
 
 ### Precheck (scheduled mode)
 
