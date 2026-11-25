@@ -1073,25 +1073,28 @@ from the branch. The `Published release consumer validation` workflow
 checks out the release tag's own scripts, so for v0.8.0 it runs only the
 consumers that existed at that tag, not these guide examples.
 
-Evidence for this guide (commit `6feb065`):
+Evidence for this guide (commit `526bcb3`):
 
 - Executed in CI: CI built a package from the branch and compiled all 13
-  `csharp` blocks. It ran the 49 checks against that package, and all of
-  them passed, with the provider serving all six steps. It also built the
+  `csharp` blocks. It ran the 51 checks against that package, and all of
+  them passed, with the provider serving all seven steps. It also built the
   minimal application. This held both on Windows Server
-  ([`windows_core`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45530623503/job/138924767865))
+  ([`windows_core`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45537672696/job/138948247667))
   and on a Windows 11 client with x64 emulation
-  ([`windows_client`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45530623503/job/138926034431)).
+  ([`windows_client`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45537672696/job/138949404569)).
   The Windows header, ABI, wrapper, and request/response JSON are unchanged
   between v0.8.0 and that commit. The Rust sources behind the DLL differ
   only by the refactoring of shared validation in #157.
-- Executed locally against the published v0.8.0 package: the ZIP's SHA-256
-  matched `SHA256SUMS`. Both projects were built with .NET SDK 11.0.100
-  against the package's `NativeOidcWindows.cs`, with warnings as errors.
-  The 49 checks passed against the package's `native_oidc.dll` and the
-  provider's `dotnet-guide` mode. The examples were built for .NET 8, but
-  this run used the .NET 11 runtime, because that machine has no .NET 8
-  runtime (`DOTNET_ROLL_FORWARD=Major`).
+- Executed locally against the published v0.8.0 package, at commit
+  `6feb065`: the ZIP's SHA-256 matched `SHA256SUMS`. Both projects were
+  built with .NET SDK 11.0.100 against the package's `NativeOidcWindows.cs`,
+  with warnings as errors. The 49 checks of that commit passed against the
+  package's `native_oidc.dll` and the provider's `dotnet-guide` mode. The
+  examples were built for .NET 8, but this run used the .NET 11 runtime,
+  because that machine has no .NET 8 runtime (`DOTNET_ROLL_FORWARD=Major`).
+- **Not run locally:** the four queued-logout checks as reworked in
+  `526bcb3`. By then the local machine's Smart App Control blocked the
+  freshly built assemblies, so these checks ran only in CI.
 
 ### Coverage by operation
 
