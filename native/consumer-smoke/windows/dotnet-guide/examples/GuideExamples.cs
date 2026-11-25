@@ -274,13 +274,21 @@ async Task CheckLocalErrorsAsync()
     Check(cancelledLogout.EndSessionError is OperationCanceledException, "LogOutAsync reports the cancelled end-session");
     Check(store.Load() is null, "LogOutAsync deletes the stored state when its token was cancelled");
 
-    // A refresh started while the logout runs waits for the whole logout.
-    // Had it run between end-session and sign-out, it would have sent a
-    // refresh request, which the provider rejects as unexpected.
+    // A refresh queued behind a logout waits for the whole logout. Step 7:
+    // a refresh that never answers holds the state lock until its timeout,
+    // while the logout and then a second refresh queue behind it, in that
+    // order (SemaphoreSlim grants waiting callers in arrival order). Had the
+    // logout released the lock between end-session and sign-out, the second
+    // refresh would always run in between and send a request that the
+    // provider rejects as unexpected.
     store.Save(StoredStateJson("net-guide-refresh-4", 1));
-    var runningLogout = noLogoutEndpoints.LogOutAsync(TimeSpan.FromSeconds(10));
+    var holder = noLogoutEndpoints.RefreshAsync(TimeSpan.FromSeconds(3));
+    var queuedLogout = noLogoutEndpoints.LogOutAsync(TimeSpan.FromSeconds(10));
     var queuedRefresh = noLogoutEndpoints.RefreshAsync(TimeSpan.FromSeconds(10));
-    await runningLogout;
+    Check(await CaughtAsync(() => holder) is OperationCanceledException, "the refresh holding the lock times out");
+    var queuedLogoutResult = await queuedLogout;
+    Check(queuedLogoutResult.EndSessionError is InvalidOperationException,
+        "the queued LogOutAsync runs after the refresh holding the lock");
     var queuedError = await CaughtAsync(() => queuedRefresh);
     Check(queuedError is InvalidOperationException && queuedError.Message == "Not signed in.",
         "a refresh queued behind LogOutAsync runs after the state is deleted");

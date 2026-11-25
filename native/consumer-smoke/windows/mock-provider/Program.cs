@@ -88,6 +88,13 @@ var guideSteps = new[]
         ""),
         503, Stall: false),
 };
+if (p == "net-")
+{
+    // The .NET guide examples then hold the client's state lock with one
+    // more refresh that never answers, while a logout and another refresh
+    // queue behind it (GuideExamples.cs, CheckLocalErrorsAsync).
+    guideSteps = [.. guideSteps, StalledRefresh("net-guide-refresh-4", "net-guide-client")];
+}
 
 var expectations = new Dictionary<string, Expectation>(StringComparer.Ordinal)
 {

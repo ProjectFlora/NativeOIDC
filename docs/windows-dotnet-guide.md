@@ -1028,7 +1028,8 @@ opens a browser. Both projects build with warnings treated as errors. The
 examples run against a fresh local mock provider in its `dotnet-guide` mode
 ([`mock-provider`](../native/consumer-smoke/windows/mock-provider/Program.cs)),
 which checks every request it receives and their order, and fails when one
-is missing:
+is missing. Its last step is one more refresh that never answers, which
+holds the client's lock for the queued-logout check:
 
 - DPAPI save, load, and removal. The stored file contains neither token in
   plain text and cannot be decrypted without the application's entropy. A
@@ -1045,8 +1046,8 @@ is missing:
   deletes it when revocation fails with HTTP 503.
 - `LogOutAsync` still deletes the state when end-session fails (no
   end-session endpoint) or its token was cancelled, and reports both
-  failures. A refresh queued while the logout runs starts only after the
-  state is deleted, so it sends no request.
+  failures. A refresh queued behind the logout starts only after the state
+  is deleted, so it sends no request.
 - Errors that need no browser: a single explicit endpoint, a non-loopback
   redirect, a reserved additional parameter, end-session without its
   endpoint, refresh without a stored state, and a `null` request. Sign-in
