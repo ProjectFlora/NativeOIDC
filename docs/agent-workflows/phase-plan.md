@@ -42,10 +42,14 @@ This phase changes no code and opens no PR.
 ### Tests
 - {Tests to add or update, and the commands to run them}
 
+### Effort estimate
+{Very High, High, Medium, Low, or Very Low}: {one line on why, such as the number of files and steps, and the risk}
+
 ### Out of scope
 - {Related problems you noticed but will not fix}
 ```
 
+- Estimate the Effort from the plan itself: about `Very Low` for a change to one file with no new tests, up to `Very High` for changes across modules, public API, or security-sensitive logic. A smaller model may implement plans estimated `Low` or `Very Low`, so keep those plans short, with exact files and steps
 - A plan is ready only when it has no open questions. Do not leave "TBD" or "to be decided during implementation"
 - Each new plan comment replaces the previous one. The implement phase uses the latest plan (see "Reading plan comments" in [common-rules.md](common-rules.md))
 
