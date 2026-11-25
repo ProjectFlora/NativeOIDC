@@ -64,6 +64,24 @@ An automation can set the order in which "Choosing a target" checks its lines, w
 - With `priority` as the first token of `Order:`, collect the candidates of every line this run handles, then pick the one with the highest Priority. Among equal Priorities, the line order given by the rest of the list decides, then the oldest
 - If the Priority field cannot be retrieved (see "Verification Rules" in [common-rules.md](common-rules.md)), treat every candidate as "not set", so that the line order alone decides, and say so where you state the order
 
+### Priority filter (scheduled mode)
+
+An automation can limit itself to some Priorities with `Priorities: {list}` in its prompt, using `Urgent`, `High`, `Medium`, `Low`, and `none` (Priority not set). This lets automations with different models share the work by Priority:
+
+| Automation | Example prompt |
+|---|---|
+| Urgent and High work | `Scheduled mode. Priorities: Urgent, High. Order: priority, ready, pr, implement, plan. Follow docs/agent-workflows/issue-to-pr.md.` |
+| Everything else | `Scheduled mode. Priorities: Medium, Low, none. Follow docs/agent-workflows/issue-to-pr.md.` |
+
+- Candidates whose Priority is not in the list are skipped. A PR uses its linked issue's Priority
+- Together, the automations must cover every value, `none` included; a value no automation lists is never picked up
+- If the Priority field cannot be retrieved and `Priorities:` is set, do not guess: handle nothing in this run, and say so in the run's output. An important issue must not go to the wrong automation
+- Priority is checked when choosing a target. A run that already holds a claim finishes its phase even if the Priority changes; the next phase goes to the automation that matches the new Priority
+
+### Precheck (scheduled mode)
+
+Set the automation's precheck to `scripts/agent-precheck.sh --phases {phases}`, with the phases the automation handles (for example `--phases plan,implement,pr`). It skips the run when there is clearly no work: no issue to start, no agent PR with failing checks, conflicts, or new activity, and no stalled issue. It does not read Priority, so a run may still start and find nothing for its Priorities; that run ends without doing anything.
+
 ### Flows
 
 Each issue follows one of two flows. In scheduled mode, its label decides which.
