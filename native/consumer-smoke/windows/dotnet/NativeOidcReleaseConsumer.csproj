@@ -4,21 +4,9 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <NativeOidcPackage Condition="'$(NativeOidcPackage)' == ''">missing</NativeOidcPackage>
-    <!-- Windows-only consumer: extraction needs PowerShell, same status as C++ MSVC-only fixture -->
   </PropertyGroup>
-
-  <!-- Extract guide blocks before build (Windows-only) -->
-  <Target Name="ExtractGuideBlocks" BeforeTargets="BeforeBuild" Condition="'$(Configuration)' == 'Release'">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File '$(MSBuildThisFileDirectory)extract-guide-blocks.ps1'" 
-          WorkingDirectory="$(MSBuildThisFileDirectory)" />
-  </Target>
-
   <ItemGroup>
-    <!-- Wrapper and DLL from package (unchanged) -->
     <Compile Include="$(NativeOidcPackage)/dotnet/NativeOidcWindows.cs" Link="NativeOidcWindows.cs" />
     <None Include="$(NativeOidcPackage)/native_oidc.dll" Link="native_oidc.dll" CopyToOutputDirectory="PreserveNewest" />
-
-    <!-- Generated guide client from csharp blocks in docs/windows-dotnet-guide.md -->
-    <Compile Include="$(IntermediateOutputPath)guide\GuideClient.cs" Condition="Exists('$(IntermediateOutputPath)guide\GuideClient.cs')" />
   </ItemGroup>
 </Project>

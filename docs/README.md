@@ -12,10 +12,10 @@ by each language and the examples and checks available today.
 
 | Audience | Installation and current usage | Remaining guide work |
 | --- | --- | --- |
-| Swift: iOS/iPadOS and macOS | [XCFramework installation](swift-xcframework.md), [Apple adapters](../README.md#apple-adapters) | [#85](https://github.com/ProjectFlora/NativeOIDC/issues/85) |
+| Swift: iOS/iPadOS and macOS | [XCFramework installation](swift-xcframework.md), [Swift guide](swift-guide.md#objective-c-interoperability), [Apple adapters](../README.md#apple-adapters) | [#85](https://github.com/ProjectFlora/NativeOIDC/issues/85) |
 | Kotlin: Android | [Kotlin/Android user guide](kotlin-guide.md), [Android adapter](../README.md#android-adapter) | — |
-| C++: Windows | [Windows usage](../native/windows/README.md), [ABI reference](windows-api.md) | [#87](https://github.com/ProjectFlora/NativeOIDC/issues/87) |
-| .NET: Windows | [Windows usage](../native/windows/README.md#net-interop), [wrapper contract](windows-api.md#net-wrapper), [user guide](windows-dotnet-guide.md) | — |
+| C++: Windows | [Windows C++ user guide](windows-cpp-guide.md), [Windows usage](../native/windows/README.md), [ABI reference](windows-api.md) | — |
+| .NET: Windows | [Windows .NET user guide](windows-dotnet-guide.md), [Windows usage](../native/windows/README.md#net-interop), [wrapper contract](windows-api.md#net-wrapper) | — |
 | Rust | [Manual authorization example](../examples/manual_authorization.rs), API reference below | [Coverage matrix](api-coverage.md) |
 
 These are the current entry points, not a claim that all language guides are
@@ -24,7 +24,8 @@ completion; [#89](https://github.com/ProjectFlora/NativeOIDC/issues/89) tracks
 distribution of the complete, version-matched documentation set. Apple and
 Android public APIs target Swift and Kotlin only; Objective-C and Java hosts
 should use an app-side wrapper, as described in the
-[shared user guide](user-guide.md#supported-application-languages).
+[Swift guide](swift-guide.md#objective-c-interoperability) (Objective-C) or the
+shared user guide for Java/Kotlin ([user-guide.md](user-guide.md)).
 
 ## API reference
 

@@ -78,7 +78,14 @@ xcrun swiftc \
     -target "$macos_target" \
     -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
     -Xcc "-fmodule-map-file=$macos_slice/Headers/module.modulemap" \
-    "$bindings" "$fixture/ReleaseConsumerSmoke.swift" "$macos_library" \
+    "$bindings" \
+    "$package_root/Swift/URLSessionNativeHttpTransport.swift" \
+    "$package_root/Swift/IOSAuthorizationAdapter.swift" \
+    "$package_root/Swift/MacOSAuthorizationAdapter.swift" \
+    "$fixture/GuideExamplesCommon.swift" \
+    "$fixture/GuideExamplesMacOS.swift" \
+    "$fixture/ReleaseConsumerSmoke.swift" \
+    "$macos_library" \
     -o "$work_dir/apple-release-consumer"
 "$work_dir/apple-release-consumer"
 
@@ -87,5 +94,12 @@ xcrun swiftc \
     -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
     -Xcc "-fmodule-map-file=$ios_simulator_slice/Headers/module.modulemap" \
     -emit-library \
-    "$bindings" "$fixture/ReleaseConsumerLibrary.swift" "$ios_simulator_library" \
+    "$bindings" \
+    "$package_root/Swift/URLSessionNativeHttpTransport.swift" \
+    "$package_root/Swift/IOSAuthorizationAdapter.swift" \
+    "$package_root/Swift/MacOSAuthorizationAdapter.swift" \
+    "$fixture/GuideExamplesCommon.swift" \
+    "$fixture/GuideExamplesIOS.swift" \
+    "$fixture/ReleaseConsumerLibrary.swift" \
+    "$ios_simulator_library" \
     -o "$work_dir/libAppleReleaseConsumer.dylib"

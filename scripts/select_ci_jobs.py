@@ -72,12 +72,12 @@ RULES = (
     (("Sources/**", "SwiftTests/**", "native/apple/**", "native/consumer-smoke/apple/**"),
      {"apple"}, "Apple adapters, tests or consumer"),
     (("docs/swift-xcframework.md",), {"apple"}, "README shipped in the Apple package"),
+    (("docs/windows-cpp-guide.md",), {"windows"}, "C++ guide compiled by the Windows consumer"),
+    (("docs/windows-dotnet-guide.md",), {"windows"}, ".NET guide compiled by the Windows consumer"),
     # Android and Windows adapters. native/windows/README.md is shipped in
     # the Windows package, so it is not treated as documentation.
     (("native/android/**", "native/consumer-smoke/android/**"), {"android"}, "Android adapter, tests or consumer"),
     (("native/windows/**", "native/consumer-smoke/windows/**"), {"windows"}, "Windows adapter or consumer"),
-    # Windows .NET guide rule: docs/windows-dotnet-guide.md selects only windows
-    (("docs/windows-dotnet-guide.md",), {"windows"}, ".NET guide compiled by the Windows consumer"),
     # Scripts. The Tests job runs every scripts/test_*.py, so each script
     # also selects it.
     (("scripts/generate-bindings.sh",), {"test", "apple", "android", "spm_bindings"}, "binding generation script"),
@@ -86,7 +86,8 @@ RULES = (
     (("scripts/check-spm-manifest.sh", "scripts/update-package-swift.py"), {"test", "spm_manifest"},
      "Swift package manifest check"),
     (("scripts/test_normalize_zip.py",), {"test", "apple"}, "zip normalizer tests (real ditto runs on macOS)"),
-    (("scripts/check-apple-adapters.sh", "scripts/check-apple-release-consumer.sh",
+    (("scripts/apple-phase-timing.sh", "scripts/check-apple-adapters.sh",
+      "scripts/check-apple-release-consumer.sh", "scripts/check-apple-static-link-smoke.sh",
       "scripts/check-ios-authorization-flow.sh", "scripts/check-spm-package.sh",
       "scripts/install-ios-simulator-runtime.sh", "scripts/ios-mock-oauth-provider.py",
       "scripts/normalize_xcframework_plist.py", "scripts/normalize_zip.py",
@@ -100,7 +101,8 @@ RULES = (
     # Used only by the release workflows, which keep their full checks, or
     # by the manual real-browser verification; the Tests job runs their
     # unit tests.
-    (("scripts/check-android-maven-consumer.sh", "scripts/check-android-maven-publication-status.sh",
+    (("scripts/android_maven_central_release.py", "scripts/download-release-aar.sh",
+      "scripts/check-android-maven-consumer.sh", "scripts/check-android-maven-publication-status.sh",
       "scripts/verify-android-maven-consumer.sh", "scripts/check-gpg-keyserver.sh",
       "scripts/check-macos-real-browser.sh", "scripts/check-windows-real-browser.ps1",
       "scripts/real_browser_mock_provider.py", "scripts/test_*.py"),

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The minimal application of docs/windows-dotnet-guide.md: every csharp
+    block of the guide and its Program.cs block, compiled with the package's
+    wrapper (GuideSources.targets). It is built but not run, because it opens
+    the system browser.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <CompileGuideProgram>true</CompileGuideProgram>
+    <NativeOidcPackage Condition="'$(NativeOidcPackage)' == ''">missing</NativeOidcPackage>
+  </PropertyGroup>
+  <Import Project="..\GuideSources.targets" />
+</Project>

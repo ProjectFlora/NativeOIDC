@@ -3,7 +3,7 @@
 Handle CI results and review feedback on an agent PR until it is ready to merge, then report. Read [common-rules.md](common-rules.md) first.
 
 ## Before starting
-- Read the PR, its linked issue, and the latest plan comment on the issue (starting with `<!-- agent-workflow:plan -->`), if there is one
+- Read the PR, its linked issue, and the latest plan on the issue (see "Reading plan comments" in [common-rules.md](common-rules.md)), if there is one
 - Retrieve the PR state according to "Verification Rules" in [common-rules.md](common-rules.md)
 - When pausing for input in this phase (scheduled mode), use `phase=pr`, the PR number, and `resume-label=agent-in-progress`
 

@@ -339,10 +339,13 @@ PY
                 continue
             fi
             # Classify this run's publication outcome in one place: the
-            # publish_maven job is the only Release workflow job with
-            # "Maven" in its name, and a skipped publish_maven is only a
-            # real non-publication when the tag-pushing publish job failed
-            # (a candidate run skips both jobs on purpose).
+            # publish_maven job is matched by its exact name, which every
+            # release since v0.6.0 uses (a substring such as "Maven" would
+            # also match the candidate-only dry_run_maven job, "Dry-run the
+            # Maven Central publication", whose success publishes nothing;
+            # Issue #180), and a skipped publish_maven is only a real
+            # non-publication when the tag-pushing publish job failed (a
+            # candidate run skips both jobs on purpose).
             job_class=$(python3 - "$tmp" <<'PY' 2>/dev/null
 import json
 import sys
@@ -354,7 +357,7 @@ except Exception:
     sys.exit(3)  # unparseable body: the outcome is unknown, not failed
 
 jobs = data.get("jobs", [])
-maven = [j for j in jobs if "Maven" in (j.get("name") or "")]
+maven = [j for j in jobs if (j.get("name") or "") == "Publish Android library to Maven Central"]
 publish = [j for j in jobs if (j.get("name") or "") == "Publish GitHub Release"]
 
 def outcome(job):

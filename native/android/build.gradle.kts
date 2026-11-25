@@ -124,6 +124,54 @@ tasks.configureEach {
     }
 }
 
+// The Maven Central publication of a release adopts the AAR already attached
+// to the GitHub Release (-PadoptedAar=<path>) instead of building a new one,
+// so both channels ship the same bytes and a resumed publication needs no
+// rebuild (Issue #180). The caller excludes the AAR build with
+// -x bundleReleaseAar, and Gradle then also drops the tasks only that build
+// needs: the Rust NDK builds and the license notices. The adopted file is
+// copied to the path the AAR build would have written, so the publication,
+// the hashes in its module metadata, and its signature all describe the
+// adopted bytes.
+val adoptedAar = providers.gradleProperty("adoptedAar").orNull?.let { file(it) }
+if (adoptedAar != null) {
+    val adoptReleaseAar by tasks.registering {
+        inputs.file(adoptedAar)
+        doLast {
+            val bundle = tasks.getByName("bundleReleaseAar") as Zip
+            adoptedAar.copyTo(bundle.archiveFile.get().asFile, overwrite = true)
+        }
+    }
+    val publicationTask = Regex("^(generateMetadataFileFor.+Publication|sign.+Publication|publish.+PublicationTo.+)$")
+    tasks.configureEach {
+        if (publicationTask.matches(name)) {
+            dependsOn(adoptReleaseAar)
+        }
+    }
+    gradle.taskGraph.whenReady {
+        val built = listOf("bundleReleaseAar", "buildAndroidRustLibraries", "generateLicenseNotices")
+            .filter { name -> allTasks.any { it.project == project && it.name == name } }
+        check(built.isEmpty()) {
+            "-PadoptedAar must replace the AAR build, but the task graph still runs $built; " +
+                "exclude it with -x bundleReleaseAar"
+        }
+    }
+}
+
+// Release runs stage the signed Maven Central bundle in a file repository
+// (-PcentralBundleRepository=<dir>). Publishing to it writes the .md5 and
+// .sha1 checksums Central requires next to every file and signature.
+providers.gradleProperty("centralBundleRepository").orNull?.let { directory ->
+    extensions.configure<PublishingExtension>("publishing") {
+        repositories {
+            maven {
+                name = "centralBundle"
+                url = uri(file(directory))
+            }
+        }
+    }
+}
+
 dependencies {
     api("net.java.dev.jna:jna:5.12.0@aar")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

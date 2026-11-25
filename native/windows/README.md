@@ -76,6 +76,10 @@ To cancel while the call is running, invoke
 `native_oidc_windows_cancellation_cancel(cancellation)` from another thread. After
 joining, inspect `resultStatus` and `resultValue` on the caller thread.
 
+The [Windows C++ user guide](https://github.com/ProjectFlora/NativeOIDC/blob/main/docs/windows-cpp-guide.md)
+builds on this with CMake setup, JSON request construction, DPAPI-protected state storage,
+refresh, logout, timeouts, and error handling.
+
 ## .NET interop
 
 The same C ABI can be called from C# or VB.NET using P/Invoke. Declare UTF-8
@@ -93,13 +97,16 @@ internal static extern IntPtr Authorize(
 [`dotnet/NativeOidcWindows.cs`](dotnet/NativeOidcWindows.cs) provides an async C#
 wrapper that runs the blocking call on a worker and connects a
 `CancellationToken` to the native cancellation handle. The wrapper project
-targets .NET Standard 2.1. For complete C# usage and examples, see the
-[Windows .NET user guide](https://github.com/ProjectFlora/NativeOIDC/blob/main/docs/windows-dotnet-guide.md). Add the wrapper and `native_oidc.dll` to a
+targets .NET Standard 2.1. Add the wrapper and `native_oidc.dll` to a
 compatible Windows .NET application:
 
 ```csharp
 var stateJson = await NativeOidcWindows.AuthorizeAsync(requestJson, cancellationToken);
 ```
+
+The [Windows .NET user guide](https://github.com/ProjectFlora/NativeOIDC/blob/main/docs/windows-dotnet-guide.md)
+builds on this with project setup, JSON request construction, DPAPI-protected state storage,
+refresh, logout, cancellation, and error handling.
 
 VB.NET can call the same C ABI with P/Invoke.
 

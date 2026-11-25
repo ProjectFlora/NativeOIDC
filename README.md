@@ -43,9 +43,6 @@ the shared authentication-state lifecycle, and public API coverage by language.
 - Use the external browser for authorization; do not embed the flow in a
   WebView.
 - Keep OAuth/OIDC protocol handling in the shared Rust core.
-- **Native bindings:** The public API for Apple and Android targets Swift and Kotlin only. Windows hosts use the C ABI (C++ and .NET) with the
-  [Windows user guide](native/windows/README.md), [Windows .NET user guide](docs/windows-dotnet-guide.md), and
-  [API reference](docs/windows-api.md). See [`docs/agent-workflows/common-rules.md`](docs/agent-workflows/common-rules.md#platform-plan) for the binding approach.
 
 ## Support baseline
 
@@ -185,10 +182,11 @@ before the 1.0.0 tag; the pre-1.0 release policy in
   request. The Rust `ReqwestTransport` remains available to Rust callers that
   provide a Tokio runtime.
 - Windows desktop applications use the C ABI in `native/windows/include` for
-authorization, token refresh, OIDC end-session, and token revocation. The ABI
-is callable from C++ and from .NET through P/Invoke; see
-[`native/windows/README.md`](native/windows/README.md). For complete
-C# usage and examples, see the [Windows .NET user guide](docs/windows-dotnet-guide.md).
+  authorization, token refresh, OIDC end-session, and token revocation. The ABI
+  is callable from C++ and from .NET through P/Invoke; see
+  [`native/windows/README.md`](native/windows/README.md), the
+  [Windows C++ user guide](docs/windows-cpp-guide.md), and the
+  [Windows .NET user guide](docs/windows-dotnet-guide.md).
 - Generate the public Rust API reference locally with
   `cargo doc --locked --no-deps`; the HTML output is written to
   `target/doc/native_oidc/index.html`.
@@ -508,47 +506,47 @@ the adapter.
 - For example, add these filters to the callback activity in the host app's
   manifest, replacing the sample host and scheme with the registered values:
 
-```xml
-<activity
-    android:name="net.projectflora.nativeoidc.AndroidAuthorizationCallbackActivity"
-    android:exported="true"
-    android:noHistory="true">
-    <intent-filter android:autoVerify="true">
-        <action android:name="android.intent.action.VIEW" />
-        <category android:name="android.intent.category.DEFAULT" />
-        <category android:name="android.intent.category.BROWSABLE" />
-        <data
-            android:scheme="https"
-            android:host="login.example.com"
-            android:path="/oauth/callback" />
-    </intent-filter>
-    <intent-filter>
-        <action android:name="android.intent.action.VIEW" />
-        <category android:name="android.intent.category.DEFAULT" />
-        <category android:name="android.intent.category.BROWSABLE" />
-        <data
-            android:scheme="com.example.app"
-            android:path="/oauth/callback" />
-    </intent-filter>
-</activity>
-```
+  ```xml
+  <activity
+      android:name="net.projectflora.nativeoidc.AndroidAuthorizationCallbackActivity"
+      android:exported="true"
+      android:noHistory="true">
+      <intent-filter android:autoVerify="true">
+          <action android:name="android.intent.action.VIEW" />
+          <category android:name="android.intent.category.DEFAULT" />
+          <category android:name="android.intent.category.BROWSABLE" />
+          <data
+              android:scheme="https"
+              android:host="login.example.com"
+              android:path="/oauth/callback" />
+      </intent-filter>
+      <intent-filter>
+          <action android:name="android.intent.action.VIEW" />
+          <category android:name="android.intent.category.DEFAULT" />
+          <category android:name="android.intent.category.BROWSABLE" />
+          <data
+              android:scheme="com.example.app"
+              android:path="/oauth/callback" />
+      </intent-filter>
+  </activity>
+  ```
 
 - Pass both URIs in `AndroidRedirectConfiguration`; the adapter selects the
   verified HTTPS App Link when available and otherwise uses the custom scheme.
   Supply a native transport when authorizing:
 
-```kotlin
-val adapter = AndroidAuthorizationAdapter(activity)
-val state = adapter.authorize(
-    configuration,
-    options,
-    AndroidRedirectConfiguration(
-        appLinkUri = "https://login.example.com/oauth/callback",
-        customSchemeUri = "com.example.app:/oauth/callback",
-    ),
-    UrlConnectionNativeHttpTransport(),
-)
-```
+  ```kotlin
+  val adapter = AndroidAuthorizationAdapter(activity)
+  val state = adapter.authorize(
+      configuration,
+      options,
+      AndroidRedirectConfiguration(
+          appLinkUri = "https://login.example.com/oauth/callback",
+          customSchemeUri = "com.example.app:/oauth/callback",
+      ),
+      UrlConnectionNativeHttpTransport(),
+  )
+  ```
 
 - `UrlConnectionNativeHttpTransport` does not follow HTTP redirects and
   disconnects active requests when its cancellation handle is cancelled.
@@ -570,28 +568,28 @@ val state = adapter.authorize(
   its runtime dependencies (jna, kotlinx-coroutines-android, and
   androidx.browser):
 
-```kotlin
-dependencies {
-    implementation("net.project-flora.nativeoidc:native-oidc-android:<version>")
-}
-```
+  ```kotlin
+  dependencies {
+      implementation("net.project-flora.nativeoidc:native-oidc-android:<version>")
+  }
+  ```
 
-Earlier versions are available only as GitHub Release assets, as described
-in the next item.
+  Earlier versions are available only as GitHub Release assets, as described
+  in the next item.
 - Download `native-oidc-android-0.8.0.aar` from the
   [published release](#download-and-verify-v080), verify its checksum, and copy
   it into the Android app's `libs` directory.
   Because a raw AAR has no dependency metadata, also declare the runtime
   dependencies used by this module:
 
-```kotlin
-dependencies {
-    implementation(files("libs/native-oidc-android-0.8.0.aar"))
-    implementation("net.java.dev.jna:jna:5.12.0@aar")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("androidx.browser:browser:1.8.0")
-}
-```
+  ```kotlin
+  dependencies {
+      implementation(files("libs/native-oidc-android-0.8.0.aar"))
+      implementation("net.java.dev.jna:jna:5.12.0@aar")
+      implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+      implementation("androidx.browser:browser:1.8.0")
+  }
+  ```
 
 - The CI `android-aar` artifact uses the build output name
   `native-oidc-android-release.aar` and expires after 14 days. The versioned
@@ -611,21 +609,26 @@ dependencies {
 - The C# wrappers in `native/windows/dotnet` (`AuthorizeAsync`,
   `RefreshAsync`, `EndSessionAsync`, and `RevokeAsync`) run the blocking ABI on
   a worker and connect .NET cancellation to the native cancellation handle.
-  C++ and VB.NET hosts can call the C ABI directly.
+  C++ and VB.NET hosts can call the C ABI directly. The
+  [Windows C++ user guide](docs/windows-cpp-guide.md) walks a C++ host from
+  the release ZIP through sign-in, DPAPI-protected state, refresh, logout,
+  cancellation, and error handling. The
+  [Windows .NET user guide](docs/windows-dotnet-guide.md) does the same for a
+  C# host through these wrappers.
 - Call each operation from a worker thread. A C-compatible cancellation handle
   cancels the callback wait and in-flight HTTP operations. Successful
   authorization and refresh results contain serialized token state and must be
   stored securely.
 - Build the Windows shared library and run its adapter tests with:
 
-```powershell
-cargo build --locked --lib --target x86_64-pc-windows-msvc
-cargo test --locked --lib --target x86_64-pc-windows-msvc
-```
+  ```powershell
+  cargo build --locked --lib --target x86_64-pc-windows-msvc
+  cargo test --locked --lib --target x86_64-pc-windows-msvc
+  ```
 
 - The adapter targets `x86_64-pc-windows-msvc`. Review Microsoft's supported
-Windows client versions at each release and update the support matrix and
-validation targets. For complete C# usage and examples, see the [Windows .NET user guide](docs/windows-dotnet-guide.md).
+  Windows client versions at each release and update the support matrix and
+  validation targets.
 
 ## Platform plan
 

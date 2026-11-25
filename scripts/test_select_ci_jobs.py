@@ -42,10 +42,6 @@ class RepresentativeChangeTests(unittest.TestCase):
     def test_windows_adapter_runs_windows_only(self):
         self.assertEqual(selected("native/windows/dotnet/NativeOidcWindows.cs"), {"windows"})
 
-    def test_windows_dotnet_guide_runs_windows_only(self):
-        # The Windows .NET guide's examples run in the Windows consumer fixture.
-        self.assertEqual(selected("docs/windows-dotnet-guide.md"), {"windows"})
-
     def test_workflow_change_runs_everything(self):
         self.assertEqual(selected(".github/workflows/ci.yml"), ALL)
         self.assertEqual(selected(".github/workflows/release.yml"), ALL)
@@ -64,6 +60,10 @@ class SharedInputTests(unittest.TestCase):
         self.assertEqual(selected("docs/swift-xcframework.md"), {"apple"})
         self.assertEqual(selected("native/windows/README.md"), {"windows"})
 
+    def test_compiled_guide_is_not_documentation(self):
+        self.assertEqual(selected("docs/windows-cpp-guide.md"), {"windows"})
+        self.assertEqual(selected("docs/windows-dotnet-guide.md"), {"windows"})
+
     def test_notice_template_runs_licenses_and_packages(self):
         self.assertEqual(selected("about.hbs"), {"licenses", "apple", "android", "windows"})
 
@@ -76,6 +76,9 @@ class SharedInputTests(unittest.TestCase):
         self.assertEqual(selected("scripts/check-macos-real-browser.sh"), {"test"})
         self.assertEqual(selected("native/apple/MacOSRealBrowserCheck.swift"), {"apple"})
         self.assertEqual(selected("scripts/generate-bindings.sh"), {"test", "apple", "android", "spm_bindings"})
+        self.assertEqual(selected("scripts/apple-phase-timing.sh"), {"test", "apple"})
+        self.assertEqual(selected("scripts/check-apple-static-link-smoke.sh"), {"test", "apple"})
+        self.assertEqual(selected("scripts/test_apple_phase_timing.py"), {"test"})
 
     def test_unknown_paths_run_everything(self):
         self.assertEqual(selected("rust-toolchain.toml"), ALL)

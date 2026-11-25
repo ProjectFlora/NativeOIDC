@@ -79,25 +79,26 @@ package.
 | `Sources/NativeOIDC/native_oidc.swift` | `apple`, `spm_bindings` | Generated bindings, compared with a fresh generation. |
 | `Sources/**`, `SwiftTests/**`, `native/apple/**`, `native/consumer-smoke/apple/**` | `apple` | Apple adapters, XCTest (including the tests #167 moves there), smoke tests and the release consumer. |
 | `docs/swift-xcframework.md` | `apple` | Shipped as the Apple package's README. |
+| `docs/windows-cpp-guide.md` | `windows` | The Windows C++ consumer compiles and runs the guide's `cpp` blocks. |
+| `docs/windows-dotnet-guide.md` | `windows` | The Windows .NET guide fixture compiles and runs the guide's `csharp` blocks. |
 | `native/android/**`, `native/consumer-smoke/android/**` | `android` | Android adapter, unit and emulator tests (including the API 35 run from #166), and the release consumer. |
 | `native/windows/**`, `native/consumer-smoke/windows/**` | `windows` | Windows header, .NET wrapper, consumers. `native/windows/README.md` is shipped in the Windows package. |
-| `docs/windows-dotnet-guide.md` | `windows` | The Windows .NET guide's examples run in the Windows .NET consumer fixture; see [its verification section](../docs/windows-dotnet-guide.md#9-verification-coverage-and-known-limits). |
 | `scripts/generate-bindings.sh` | `test`, `apple`, `android`, `spm_bindings` | Binding generation. |
 | `scripts/generate-third-party-licenses.sh` | `test`, `licenses`, packages | License notices. |
 | `scripts/check-spm-bindings.sh` | `test`, `spm_bindings` | |
 | `scripts/check-spm-manifest.sh`, `scripts/update-package-swift.py` | `test`, `spm_manifest` | |
 | `scripts/test_normalize_zip.py` | `test`, `apple` | Its real-`ditto` tests run only on macOS. |
-| Apple CI scripts (`check-apple-*`, `check-ios-*`, `check-spm-package.sh`, `install-ios-simulator-runtime.sh`, `ios-mock-oauth-provider.py`, `normalize_*.py`, `package-apple-xcframework.sh`, `select_ios_simulator.py`) | `test`, `apple` | |
+| Apple CI scripts (`apple-phase-timing.sh`, `check-apple-*`, `check-ios-*`, `check-spm-package.sh`, `install-ios-simulator-runtime.sh`, `ios-mock-oauth-provider.py`, `normalize_*.py`, `package-apple-xcframework.sh`, `select_ios_simulator.py`) | `test`, `apple` | |
 | Android CI scripts (`check-android-targets.sh`, `check-android-release-consumer.sh`, `check-android-maven-publication.sh`) | `test`, `android` | |
 | Windows CI scripts (`package-windows.ps1`, `check-windows-release-consumer.ps1`) | `test`, `windows` | |
 | Release-only scripts (`check-android-maven-consumer.sh`, `check-android-maven-publication-status.sh`, `verify-android-maven-consumer.sh`, `check-gpg-keyserver.sh`), manual real-browser scripts (`check-macos-real-browser.sh`, `check-windows-real-browser.ps1`, `real_browser_mock_provider.py`) and other `scripts/test_*.py` | `test` | The release workflows or a maintainer run them; the Tests job runs their unit tests. The real-browser check sources (`native/apple/MacOSRealBrowserCheck.swift`, `native/consumer-smoke/windows/real-browser/**`) follow their platform's rule: the Apple job type-checks the Swift file, and the Windows project is kept under the Windows consumer rule. |
 | Any other file under `scripts/` | all | Unclassified. |
-| `README.md`, `CHANGELOG.md`, `ROADMAP.md`, `FEATURE_MATRIX.md`, `docs/**` (except `docs/swift-xcframework.md`), `.gitignore` | none | No build, package or check reads them. |
+| `README.md`, `CHANGELOG.md`, `ROADMAP.md`, `FEATURE_MATRIX.md`, `docs/**` (except `docs/swift-xcframework.md`, `docs/windows-cpp-guide.md` and `docs/windows-dotnet-guide.md`), `.gitignore` | none | No build, package or check reads them. |
 | Anything else | all | Unclassified. |
 
 Documentation is not excluded by file extension: a Markdown file that a
 package ships (`docs/swift-xcframework.md`, `native/windows/README.md`) or a
-file that a check reads is classified with the job that uses it. The unit
+file that a check reads (`docs/windows-cpp-guide.md`, `docs/windows-dotnet-guide.md`) is classified with the job that uses it. The unit
 test `test_every_tracked_file_is_classified` fails when a tracked file
 matches no rule, so a new file needs a rule (or knowingly runs everything).
 

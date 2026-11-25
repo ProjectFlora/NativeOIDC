@@ -6,6 +6,24 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+### Changed
+
+- The Windows real system-browser check now reads the default browser from
+  `UserChoiceLatest\ProgId` first, which newer Windows 11 builds use, and
+  falls back to `UserChoice`; `check-output.txt` names the key it read
+  ([#222](https://github.com/ProjectFlora/NativeOIDC/issues/222)).
+- `scripts/check-windows-real-browser.ps1 -InProcess` runs the real
+  system-browser check in a `pwsh` process with `Add-Type` instead of a
+  locally built program, for machines where an Application Control policy
+  blocks locally built files; `environment.txt` records the mode
+  ([#223](https://github.com/ProjectFlora/NativeOIDC/issues/223)).
+- The Android library on Maven Central is now the exact AAR attached to the
+  GitHub Release (the same SHA-256 as in `SHA256SUMS`), instead of a rebuild
+  from the tag. A failed Maven Central publication can be resumed with
+  **Re-run failed jobs** without a rebuild: the release workflow records
+  each Central Portal deployment and never uploads a version twice
+  ([#180](https://github.com/ProjectFlora/NativeOIDC/issues/180)).
+
 ## [0.8.0] - 2026-11-22
 
 ### Security

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Runs the examples of docs/windows-dotnet-guide.md against the local mock
+    provider in its dotnet-guide mode. GuideSources.targets compiles every
+    csharp block of the guide with GuideExamples.cs, which only calls the
+    guide's code and checks the results.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NativeOidcPackage Condition="'$(NativeOidcPackage)' == ''">missing</NativeOidcPackage>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="GuideExamples.cs" />
+  </ItemGroup>
+  <Import Project="..\GuideSources.targets" />
+</Project>
