@@ -38,6 +38,50 @@ The request names the phases with `Phases: {list}`. Without it, run all phases (
   - `Scheduled mode. Phases: implement. Follow docs/agent-workflows/issue-to-pr.md.`
   - `Scheduled mode. Phases: pr. Follow docs/agent-workflows/issue-to-pr.md.`
 
+### Target order (scheduled mode)
+
+An automation can set the order in which "Choosing a target" checks its lines, with `Order: {list}` in its prompt:
+
+- `Scheduled mode. Order: priority, ready, pr, implement, plan. Follow docs/agent-workflows/issue-to-pr.md.`
+
+| Token | Meaning |
+|---|---|
+| `pr` | Lines 0 and 1 of "Choosing a target" (reported PRs that regressed, PRs in progress) |
+| `stalled` | Line 2 (stalled work) |
+| `implement` | Line 3 (`agent-implement`) |
+| `ready` | Line 4 (`agent-ready`, end-to-end) |
+| `plan` | Line 5 (`agent-plan`) |
+| `priority` | Not a line. As the first token, it makes the issue's Priority the first sort key across all lines (see below) |
+
+- Without `Order:`, the order is `pr, stalled, implement, ready, plan`, the line order below
+- Line tokens left out of the list follow the listed ones, in that default order
+- `Phases:` still applies: lines for phases this run does not handle are skipped, whatever the order says
+- State the order you used in the first message of the run (manual mode) or in the claim comment (scheduled mode)
+
+**Priority** is the `Priority` field of the issue (in the GitHub Project that tracks it), ranked `Urgent` > `High` > `Medium` > `Low` > not set. A PR takes the Priority of its linked issue.
+
+- Within any line, pick the candidate with the highest Priority, and among equal Priorities the oldest. Where a line below says "the oldest", read it this way
+- With `priority` as the first token of `Order:`, collect the candidates of every line this run handles, then pick the one with the highest Priority. Among equal Priorities, the line order given by the rest of the list decides, then the oldest
+- If the Priority field cannot be retrieved (see "Verification Rules" in [common-rules.md](common-rules.md)), treat every candidate as "not set", so that the line order alone decides, and say so where you state the order
+
+### Priority filter (scheduled mode)
+
+An automation can limit itself to some Priorities with `Priorities: {list}` in its prompt, using `Urgent`, `High`, `Medium`, `Low`, and `none` (Priority not set). This lets automations with different models share the work by Priority:
+
+| Automation | Example prompt |
+|---|---|
+| Urgent and High work | `Scheduled mode. Priorities: Urgent, High. Order: priority, ready, pr, implement, plan. Follow docs/agent-workflows/issue-to-pr.md.` |
+| Everything else | `Scheduled mode. Priorities: Medium, Low, none. Follow docs/agent-workflows/issue-to-pr.md.` |
+
+- Candidates whose Priority is not in the list are skipped. A PR uses its linked issue's Priority
+- Together, the automations must cover every value, `none` included; a value no automation lists is never picked up
+- If the Priority field cannot be retrieved and `Priorities:` is set, do not guess: handle nothing in this run, and say so in the run's output. An important issue must not go to the wrong automation
+- Priority is checked when choosing a target. A run that already holds a claim finishes its phase even if the Priority changes; the next phase goes to the automation that matches the new Priority
+
+### Precheck (scheduled mode)
+
+Set the automation's precheck to `scripts/agent-precheck.sh --phases {phases}`, with the phases the automation handles (for example `--phases plan,implement,pr`). It skips the run when there is clearly no work: no issue to start, no agent PR with failing checks, conflicts, or new activity, and no stalled issue. It does not read Priority, so a run may still start and find nothing for its Priorities; that run ends without doing anything.
+
 ### Flows
 
 Each issue follows one of two flows. In scheduled mode, its label decides which.
@@ -80,7 +124,7 @@ In manual mode, the flow follows the phases I request: all phases is end-to-end,
 | Asking for more work after the report | Me | Comment on the PR or the issue, then `agent-done` → `agent-in-progress` (the PR phase picks it up) |
 
 ### Choosing a target (handle only one per run)
-Check the following in order, skipping lines for phases this run does not handle, and handle the first match.
+Check the following lines in the target order (see "Target order" above; by default, the order of the numbers), skipping lines for phases this run does not handle, and handle the first match.
 
 0. **Reported PR that regressed** (needs `pr`): see "Rechecking reported PRs" below
 1. **PR phase** (needs `pr`): an open PR labeled `agent-pr` whose linked issue is labeled `agent-in-progress`, and that meets any of the following
@@ -120,7 +164,7 @@ Check the following in order, skipping lines for phases this run does not handle
 If nothing matches, end without doing anything.
 
 ### Rechecking reported PRs
-A final report can stop being true before I merge: a review arrives late, CI starts failing after `main` moves, or a conflict appears. A run with `pr` checks open PRs labeled `agent-pr` whose linked issue is labeled `agent-done`, oldest first.
+A final report can stop being true before I merge: a review arrives late, CI starts failing after `main` moves, or a conflict appears. A run with `pr` checks open PRs labeled `agent-pr` whose linked issue is labeled `agent-done`, by Priority and then oldest first (see "Target order").
 
 - Retrieve the PR state according to "Verification Rules" in [common-rules.md](common-rules.md), and compare it with the final-report criteria (step 7 in [phase-pr.md](phase-pr.md))
 - The PR has **regressed** if any of the following is true:

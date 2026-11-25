@@ -93,6 +93,7 @@ package.
 | Windows CI scripts (`package-windows.ps1`, `check-windows-release-consumer.ps1`) | `test`, `windows` | |
 | Release-only scripts (`check-android-maven-consumer.sh`, `check-android-maven-publication-status.sh`, `verify-android-maven-consumer.sh`, `check-gpg-keyserver.sh`), manual real-browser scripts (`check-macos-real-browser.sh`, `check-windows-real-browser.ps1`, `real_browser_mock_provider.py`) and other `scripts/test_*.py` | `test` | The release workflows or a maintainer run them; the Tests job runs their unit tests. The real-browser check sources (`native/apple/MacOSRealBrowserCheck.swift`, `native/consumer-smoke/windows/real-browser/**`) follow their platform's rule: the Apple job type-checks the Swift file, and the Windows project is kept under the Windows consumer rule. |
 | `scripts/build-release-docs.py`, `scripts/check-release-docs.py` | `test` | The Tests job builds and checks the release documentation set with them; the release workflows run them too. |
+| `scripts/agent-precheck.sh` | none | Precheck for the agent workflow automations; only Orca runs it, and no build, package or check reads it. |
 | Any other file under `scripts/` | all | Unclassified. |
 | `docs/agent-workflows/**` | none | Agent workflow notes; the documentation index does not link them, so they are not in the release documentation set. |
 | `README.md`, `ROADMAP.md`, `FEATURE_MATRIX.md`, `docs/**` (except the rules above) | `test` | The release documentation set: the Tests job builds it and checks every link. |
