@@ -1004,6 +1004,25 @@ from the branch. The `Published release consumer validation` workflow
 checks out the release tag's own scripts, so for v0.8.0 it runs only the
 consumers that existed at that tag, not these guide examples.
 
+Evidence for this guide (commit `e1078cd`):
+
+- Executed in CI: CI built a package from the branch and compiled all 12
+  `csharp` blocks. It ran the 42 checks against that package, and all of
+  them passed, with the provider serving all six steps. It also built the
+  minimal application. This held both on Windows Server
+  ([`windows_core`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45520238954/job/138890011332))
+  and on a Windows 11 client with x64 emulation
+  ([`windows_client`](https://github.com/ProjectFlora/NativeOIDC/actions/runs/45520238954/job/138891814550)).
+  The Windows module, header, ABI, and wrapper are unchanged between v0.8.0
+  and that commit.
+- Executed locally against the published v0.8.0 package: the ZIP's SHA-256
+  matched `SHA256SUMS`. Both projects were built with .NET SDK 11.0.100
+  against the package's `NativeOidcWindows.cs`, with warnings as errors.
+  The 42 checks passed against the package's `native_oidc.dll` and the
+  provider's `dotnet-guide` mode. The examples were built for .NET 8, but
+  this run used the .NET 11 runtime, because that machine has no .NET 8
+  runtime (`DOTNET_ROLL_FORWARD=Major`).
+
 ### Coverage by operation
 
 | Operation | Section | Availability | Checked by |
@@ -1027,7 +1046,7 @@ consumers that existed at that tag, not these guide examples.
   fixture; CI has no interactive browser. Real-provider interoperability is
   outside these checks; see
   [interoperability status](live-idp-interoperability.md).
-- The examples are built and run on .NET 8 only. The fixture does not
+- CI builds and runs the examples on .NET 8 only. The fixture does not
   build the wrapper for other .NET Standard 2.1 hosts.
 - The DPAPI example protects against other users and offline copies only.
 - Only x64 is distributed.
