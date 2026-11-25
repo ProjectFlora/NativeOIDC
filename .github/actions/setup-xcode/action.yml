@@ -1,0 +1,45 @@
+# setup-xcode: Xcode selection and environment setup (composite action)
+
+name: 'Setup Xcode'
+description: |
+  Sets up the Xcode environment. Supports two modes:
+  - `pinned` (default): Uses maxim-lobanov/setup-xcode with specified version (e.g., 26.6)
+  - `latest`: Uses apple_adapters' inline Python to select newest installed stable Xcode
+  Inputs:
+    - `mode`: Selection mode: "pinned" (default) or "latest"
+    - `version`: Xcode version for pinned mode (default: "26.6")
+
+runs:
+  using: 'composite'
+  steps:
+    # Record Xcode environment info
+    - name: Record Xcode versions
+      shell: bash
+      run: |
+        echo "=== setup-xcode ===" >> "${GITHUB_STEP_SUMMARY}"
+        echo "mode: ${{ inputs.mode }}" >> "${GITHUB_STEP_SUMMARY}"
+        echo "version: ${{ inputs.version }}" >> "${GITHUB_STEP_SUMMARY}"
+
+    # Xcode selection based on mode
+    - name: Setup Xcode (pinned mode)
+      uses: maxim-lobanov/setup-xcode@v1
+      if: ${{ inputs.mode == 'pinned' }}
+      with:
+        xcode-version: ${{ inputs.version }}
+
+    # Xcode selection for latest mode using apple_adapters logic
+    - name: Setup Xcode (latest installed mode)
+      id: setup-xcode-latest
+      shell: bash
+      if: ${{ inputs.mode == 'latest' }}
+      run: |
+        # Import the apple_adapters script logic from NativeOIDC to select latest stable Xcode
+        XCODE_DIR=$(./apple_adapters/xcodes.py --select-latest)
+        echo "Selected Xcode directory: $XCODE_DIR" >> "$GITHUB_STEP_SUMMARY"
+
+    # Export DEVELOPER_DIR if in latest mode
+    - name: Export DEVELOPER_DIR (latest mode only)
+      shell: bash
+      if: ${{ inputs.mode == 'latest' }}
+      run: |
+        echo "DEVELOPER_DIR=${XCODE_DIR}" >> "$GITHUB_ENV"

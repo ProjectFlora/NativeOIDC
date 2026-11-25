@@ -1,0 +1,58 @@
+# setup-android: Android SDK/NDK/Java/Gradle setup (composite action)
+
+name: 'Setup Android'
+description: |
+  Sets up the Android build environment with Java, SDK, NDK (optional), and Gradle.
+  Inputs:
+    - `ndk`: Android NDK version (empty = no NDK)
+    - `java-version`: Java version for Temurin (default: "17")
+    - `packages`: Comma-separated list of packages to install (default: "platform-tools")
+    - `compile-sdk`: Compile SDK version (default: "android-35")
+    - `build-tools`: Build tools version (default: "35.0.0")
+    - `api-level`: API level for minSdk (default: "28")
+
+runs:
+  using: 'composite'
+  steps:
+    # Record Android environment info
+    - name: Record Android versions
+      shell: bash
+      run: |
+        echo "=== setup-android ===" >> "${GITHUB_STEP_SUMMARY}"
+        echo "java-version: ${{ inputs.java-version }}" >> "${GITHUB_STEP_SUMMARY}"
+        echo "packages: ${{ inputs.packages }}" >> "${GITHUB_STEP_SUMMARY}"
+        echo "compile-sdk: ${{ inputs.compile-sdk }}" >> "${GITHUB_STEP_SUMMARY}"
+        echo "build-tools: ${{ inputs.build-tools }}" >> "${GITHUB_STEP_SUMMARY}"
+        echo "api-level: ${{ inputs.api-level }}" >> "${GITHUB_STEP_SUMMARY}"
+        echo "ndk: ${{ inputs.ndk || 'not installed' }}" >> "${GITHUB_STEP_SUMMARY}"
+
+    # Setup Java (Temurin)
+    - name: Setup Java
+      uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    # Setup Android SDK, tools, NDK if requested
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v4
+      with:
+        packages: ${{ inputs.packages }}
+        compile_sdk: ${{ inputs.compile-sdk }}
+        build_tools: ${{ inputs.build-tools }}
+        ndk: ${{ inputs.ndk || '' }}
+
+    # Install Gradle if needed
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v6
+
+    # Export Android environment variables if NDK is installed
+    - name: Export NDK environment (if enabled)
+      shell: bash
+      if: ${{ inputs.ndk != '' }}
+      run: |
+        export ANDROID_NDK_HOME="$(echo $ANDROID_HOME/ndk/$ANDROID_NDK_VERSION)"
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+        echo "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+        echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
+        echo "ANDROID_COMPILE_SDK=$ANDROID_COMPILE_SDK" >> "$GITHUB_ENV"

@@ -1,0 +1,74 @@
+# setup-cargo-tools: Install cargo tools with pinned versions (composite action)
+
+name: 'Setup Cargo Tools'
+description: |
+  Installs pinned versions of cargo tools.
+  Input `tools` accepts comma-separated tool names, optionally with explicit versions.
+  Known tools and their default versions:
+    - cargo-deny@0.20.2 (deny.toml result must not drift)
+    - cargo-about@0.9.3 (required by scripts/generate-third-party-licenses.sh)
+    - cargo-llvm-cov@0.9.2
+
+runs:
+  using: 'composite'
+  steps:
+    # Record cargo tools info
+    - name: Record Cargo Tools versions
+      shell: bash
+      run: |
+        echo "=== setup-cargo-tools ===" >> "${GITHUB_STEP_SUMMARY}"
+        echo "tools: ${{ inputs.tools }}" >> "${GITHUB_STEP_SUMMARY}"
+
+    # Build the tool list from input (bare names use version map, explicit name@version overrides)
+    - name: Resolve cargo tools versions
+      shell: bash
+      run: |
+        # Version map for bare names (explicit name@version overrides the map)
+        VERSION_MAP=(
+          "cargo-deny=0.20.2"
+          "cargo-about=0.9.3"
+          "cargo-llvm-cov=0.9.2"
+        )
+
+        # Parse input: comma-separated list, split into array
+        IFS=',' read -ra INPUT_TOOLS <<< "${{ inputs.tools }}"
+
+        RESOLVED=""
+        for tool in "${INPUT_TOOLS[@]}"; do
+          # Check if explicit version is provided (contains '=')
+          if [[ "$tool" == *"@"* ]]; then
+            name="${tool%%@*}"
+            ver="${tool#*@}"
+            # Verify the name is in our known tools or accept it explicitly
+            echo "Installing $name@$ver (explicit override)" >> "${GITHUB_STEP_SUMMARY}"
+            RESOLVED="$RESOLVED $name@${ver}"
+          else
+            # Bare name: look up in version map
+            found=""
+            for map_entry in "${VERSION_MAP[@]}"; do
+              if [[ "$map_entry" == "$tool"* ]]; then
+                ver="${map_entry#*=}"
+                found="$tool=$ver"
+                break
+              fi
+            done
+
+            if [[ -n "$found" ]]; then
+              echo "Installing $found from version map" >> "${GITHUB_STEP_SUMMARY}"
+              RESOLVED="$RESOLVED ${found#$tool=}$@"
+            else
+              # Unknown tool without explicit version - fail clearly
+              echo "ERROR: Unknown cargo tool '$tool' and no version was provided. Add it to the version map deliberately." >&2
+              exit 1
+            fi
+          fi
+        done
+
+        echo "Resolved tools: $RESOLVED" >> "${GITHUB_STEP_SUMMARY}"
+        echo "TOOLS=$RESOLVED" >> "$GITHUB_ENV"
+
+    # Install resolved cargo tools using taiki-e/install-action
+    - name: Install Cargo Tools
+      uses: taiki-e/install-action@v2
+      with:
+        tools: ${{ env.TOOLS }}

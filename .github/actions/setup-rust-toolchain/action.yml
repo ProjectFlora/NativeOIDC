@@ -1,0 +1,35 @@
+# setup-rust-toolchain: Install Rust toolchain and cache (composite action)
+# CI jobs follow stable; release package jobs pin 1.100.0; MSRV job pins 1.99.1
+
+name: 'Setup Rust toolchain'
+description: |
+  Installs the specified Rust toolchain with optional caching.
+  Inputs:
+    - `toolchain`: The Rust toolchain to use (default: "stable")
+    - `components`: Space-separated list of rustup components (default: "")
+    - `cache-key`: Custom cache key for Swatinem/rust-cache (default: "", uses default)
+runs:
+  using: 'composite'
+  steps:
+    # Record the toolchain version for verification
+    - name: Record toolchain versions
+      shell: bash
+      run: |
+        echo "=== setup-rust-toolchain ===" >> "${GITHUB_STEP_SUMMARY}"
+        echo "toolchain: ${{ inputs.toolchain }}" >> "${GITHUB_STEP_SUMMARY}"
+        echo "components: ${{ inputs.components }}" >> "${GITHUB_STEP_SUMMARY}"
+
+    # Install Rust toolchain
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+
+    # Setup rust cache if cache-key is provided (or use default for CI)
+    - name: Setup rust cache
+      uses: Swatinem/rust-cache@v2
+      if: ${{ inputs.cache-key != '' || inputs.components == 'llvm-tools-preview' }}
+      with:
+        key: ${{ inputs.cache-key || github.event_name != 'push' && github.event_name != 'pull_request' && '' }}
+        shared-key: ${{ inputs.cache-key || (inputs.components == 'llvm-tools-preview' && 'llvm') || '' }}
