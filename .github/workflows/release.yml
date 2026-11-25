@@ -1,676 +1,683 @@
-name: Release
+name: Release
+
+# Releases are dispatched from main. A run without `publish` validates and
+# packages a release candidate. With `publish`, the workflow also writes the
+# Apple archive's URL and SHA-256 checksum into Package.swift, commits that as
+# a release commit on top of the dispatched main commit, tags it, and
+# publishes the GitHub Release. The checksum is only known after the archive
+# is built, so the tag is created here rather than pushed beforehand. Once the
+# GitHub Release exists, the Android library is published to Maven Central.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (MAJOR.MINOR.PATCH)
+        required: true
+        default: 0.8.0
+        type: string
+      publish:
+        description: Create the release commit, tag and GitHub Release, and publish to Maven Central
+        required: true
+        default: false
+        type: boolean
+      dry_run_maven:
+        description: Without publish, dry-run the Maven Central publication read-only against the real Central Portal
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize runs of the same version so that only one publishes.
+  # cancel-in-progress: false protects the first run to start executing, but
+  # a second dispatch while the first is still pending will cancel it: at most
+  # one run can be pending or running per version. Avoid dispatching multiple
+  # runs of the same version concurrently; if a publish is queued behind a
+  # candidate, another dispatch will cancel the pending one.
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  # Every Apple job (the release build and its consumer and manifest checks)
+  # selects this one Xcode on the macos-26 image. App Store Connect requires
+  # apps built with Xcode 26 or later, so the archive is built and validated
+  # with a stable Xcode 26.x — the one the macos-26 image ships as its
+  # default, so no extra download (Issue #135). Update the runner label and
+  # this version together, from the runner-images README, not the label.
+  XCODE_VERSION: '26.6'
+
+jobs:
+  validate_version:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      previous_tag: ${{ steps.previous_release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      # A release ships only dependencies under licenses deny.toml allows.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny check licenses
+      - id: version
+        name: Match SemVer release version to Cargo package version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          version="$RELEASE_VERSION"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release versions must use MAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          # Candidate runs (no publish) may be dispatched from main or a
+          # fully trusted branch so release changes can be validated before
+          # they merge (the key server check holds the signing key, so an
+          # untrusted branch must not be dispatched); publishing requires
+          # the dispatched commit to be on main.
+          if [[ "$PUBLISH" == "true" ]]; then
+            git fetch origin main
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "Releases must be built from a commit on main" >&2
+              exit 1
+            fi
+            if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+              echo "Publishing releases must be dispatched from main" >&2
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+              echo "Tag v$version already exists" >&2
+              exit 1
+            fi
+          fi
+          package_version=$(cargo metadata --locked --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.name == "native-oidc") | .version')
+          if [[ "$version" != "$package_version" ]]; then
+            echo "Release version $version does not match Cargo package version $package_version" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      # Release commits branch off main, so earlier release tags are not in
+      # the new tag's history and GitHub would start the generated notes at
+      # the last tag on main (v0.4.0, Issue #151). Start them at the highest
+      # published release below this version instead, and record it so a
+      # candidate run shows the range the notes will cover.
+      - id: previous_release
+        name: Find the previous release for the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          tags=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1000 \
+            --json tagName --jq '.[].tagName')
+          previous_tag=$(printf '%s\n' "$tags" "v$RELEASE_VERSION" |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+            sort -uV |
+            awk -v current="v$RELEASE_VERSION" '$0 == current { print prev; exit } { prev = $0 }')
+          if [[ -z "$previous_tag" ]]; then
+            echo "No published release precedes v$RELEASE_VERSION to start the release notes from" >&2
+            exit 1
+          fi
+          echo "tag=$previous_tag" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Release notes range"
+            echo
+            echo "Release notes start at \`$previous_tag\`:" \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$previous_tag...$GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  keyserver:
+    name: Check signing key at key server
+    # Every run (candidate and publish) verifies, before any package is
+    # built, that the public part of every primary key in GPG_PRIVATE_KEY
+    # resolves at keys.openpgp.org by fingerprint. Maven Central's sync
+    # validation fetches the public key from the key server; its absence
+    # rejected v0.6.0's upload (#131).
+    # This job holds the signing key (it prints fingerprints only, never key
+    # material) and runs the dispatched branch's code, so dispatch candidate
+    # runs from main or a fully trusted branch only.
+    needs: validate_version
+    runs-on: ubuntu-latest
+    env:
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      KEYSERVER_ATTEMPTS: "3"
+      KEYSERVER_RETRY_DELAY: "30"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check signing key resolves at keys.openpgp.org
+        run: scripts/check-gpg-keyserver.sh
+
+  apple:
+    name: Build Apple release package
+    needs: [validate_version, keyserver]
+    runs-on: macos-26
+    env:
+      IOS_SIMULATOR_MAJOR_VERSION: '18'
+    steps:
+      - uses: actions/checkout@v7
+      # The archive's bytes are shaped by the toolchain (the rustc version is
+      # part of rustc's -C metadata hash; the Xcode version shapes the
+      # xcframework), and the manifest's checksum is computed from them. Pin
+      # both to exact versions (Xcode via XCODE_VERSION above) and record the
+      # exact versions in the step summary so a release archive can be tied
+      # to the toolchain that built it. Pinning does not make a rebuild
+      # byte-identical; the published checksum is always computed from this
+      # run's archive (see docs/releasing.md).
+      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
+      - uses: taiki-e/install-action@v2
+        with:
 
-# Releases are dispatched from main. A run without `publish` validates and
-# packages a release candidate. With `publish`, the workflow also writes the
-# Apple archive's URL and SHA-256 checksum into Package.swift, commits that as
-# a release commit on top of the dispatched main commit, tags it, and
-# publishes the GitHub Release. The checksum is only known after the archive
-# is built, so the tag is created here rather than pushed beforehand. Once the
-# GitHub Release exists, the Android library is published to Maven Central.
-on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Release version (MAJOR.MINOR.PATCH)
-        required: true
-        default: 0.8.0
-        type: string
-      publish:
-        description: Create the release commit, tag and GitHub Release, and publish to Maven Central
-        required: true
-        default: false
-        type: boolean
-      dry_run_maven:
-        description: Without publish, dry-run the Maven Central publication read-only against the real Central Portal
-        required: false
-        default: false
-        type: boolean
+      - name: Setup Cargo Tools
+        uses: ./.github/actions/setup-cargo-tools
+        with:
+          tools: cargo-deny@0.20.2,cargo-about@0.9.3
+          tool: cargo-about@0.9.3
+      - name: Record toolchain versions
+        run: |
+          {
+            echo "### Toolchain"
+            rustc -vV
+            echo
+            xcodebuild -version
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The iOS flow runs on the iOS 18 deployment minimum, but the macos-26
+      # image ships only iOS 26.x simulator runtimes, so install the last
+      # iOS 18 runtime. The flow's runtime is recorded in the step summary.
+      - name: Install iOS 18 simulator runtime
+        run: scripts/install-ios-simulator-runtime.sh 18.6
+      - run: scripts/check-apple-adapters.sh
+      - name: Remove cached XCFramework package output
+        run: rm -rf target/apple/release-package
+      - run: scripts/package-apple-xcframework.sh "${{ needs.validate_version.outputs.version }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-apple
+          path: target/apple/release-package/NativeOIDC-Apple-${{ needs.validate_version.outputs.version }}.zip
+          if-no-files-found: error
+
+  android:
+    name: Build Android release package
+    needs: [validate_version, keyserver]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+      # The same Rust as the Apple job, so every package links the same
+      # standard library and ships the same notices for it.
+      - uses: dtolnay/rust-toolchain@1.100.0
+      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.3
+      - name: Configure Android NDK
+        env:
+          ANDROID_API_LEVEL: '28'
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
+      # Cache compiled Cargo dependencies for the host and both Android ABIs
+      # that check-android-targets.sh builds under Gradle. The workspace's own
+      # crates are rebuilt each run: caching them too (cache-workspace-crates)
+      # did not shorten warm runs and grew the cache by about 40% (#190).
+      # The key adds the NDK version and native API level, which rust-cache
+      # does not hash on its own, so changing either starts a fresh cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./native/android/gradlew -p native/android testDebugUnitTest
+      - name: Enable Android emulator hardware acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - name: Run Android callback tests on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 28
+          arch: x86_64
+          target: google_apis_playstore
+          disable-linux-hw-accel: false
+          disable-animations: true
+          script: ./native/android/gradlew -p native/android connectedDebugAndroidTest
+      - run: ./native/android/gradlew -p native/android assembleRelease
+      - name: Verify and stage Android AAR
+        env:
+          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+        run: |
+          aar=native/android/build/outputs/aar/native-oidc-android-release.aar
+          unzip -Z1 "$aar" | grep -Fx jni/arm64-v8a/libnative_oidc.so
+          unzip -Z1 "$aar" | grep -Fx jni/x86_64/libnative_oidc.so
+          mkdir -p dist
+          cp "$aar" "dist/native-oidc-android-$RELEASE_VERSION.aar"
+      - name: Verify Maven Central publication contents
+        env:
+          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+        run: scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          path: dist/native-oidc-android-${{ needs.validate_version.outputs.version }}.aar
+          if-no-files-found: error
+
+  api_docs:
+    name: Build API reference
+    needs: [validate_version, keyserver]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --workspace --all-targets --all-features
+      - run: cargo doc --locked --no-deps
+      - name: Package Rust API reference
+        env:
+          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+        run: |
+          mkdir -p dist
+          cd target/doc
+          zip -rq "$GITHUB_WORKSPACE/dist/NativeOIDC-API-Docs-$RELEASE_VERSION.zip" .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-api-docs
+          path: dist/NativeOIDC-API-Docs-${{ needs.validate_version.outputs.version }}.zip
+          if-no-files-found: error
+
+  windows:
+    name: Build Windows desktop package
+    needs: [validate_version, keyserver]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The same Rust as the Apple job, so every package links the same
+      # standard library and ships the same notices for it.
+      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --lib --target x86_64-pc-windows-msvc
+      - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
+      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.3
+      - run: scripts/generate-third-party-licenses.sh
+        shell: bash
+      - name: Build and package Windows library
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+        run: scripts/package-windows.ps1 -Package "dist/native-oidc-windows-$env:RELEASE_VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: dist/native-oidc-windows-${{ needs.validate_version.outputs.version }}.zip
+          if-no-files-found: error
+
+  apple_consumer:
+    name: Validate Apple release consumer
+    needs: [validate_version, apple]
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - name: Record toolchain versions
+        run: |
+          {
+            echo "### Toolchain"
+            xcodebuild -version
+            echo
+            swift --version
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-apple
+          path: dist
+      - run: scripts/check-apple-release-consumer.sh dist/NativeOIDC-Apple-${{ needs.validate_version.outputs.version }}.zip
+
+  android_consumer:
+    name: Validate Android release consumer
+    needs: [validate_version, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Enable Android emulator hardware acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-android
+          path: dist
+      - name: Run Android release consumer on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 28
+          arch: x86_64
+          target: google_apis_playstore
+          disable-linux-hw-accel: false
+          disable-animations: true
+          script: scripts/check-android-release-consumer.sh dist/native-oidc-android-${{ needs.validate_version.outputs.version }}.aar
+
+  windows_consumer:
+    name: Validate Windows release consumers
+    needs: [validate_version, windows]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-windows
+          path: dist
+      - shell: pwsh
+        run: scripts/check-windows-release-consumer.ps1 -Package dist/native-oidc-windows-${{ needs.validate_version.outputs.version }}.zip
+
+  spm_manifest:
+    name: Prepare and validate release Package.swift
+    needs: [validate_version, apple]
+    runs-on: macos-26
+    env:
+      RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - name: Record toolchain versions
+        run: |
+          {
+            echo "### Toolchain"
+            xcodebuild -version
+            echo
+            swift --version
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-apple
+          path: dist
+      - name: Point Package.swift at the release archive
+        run: |
+          archive="dist/NativeOIDC-Apple-$RELEASE_VERSION.zip"
+          checksum=$(swift package compute-checksum "$archive")
+          python3 scripts/update-package-swift.py \
+            --repository "$GITHUB_REPOSITORY" "$RELEASE_VERSION" "$checksum"
+          # The release commit may change nothing but Package.swift.
+          git diff --exit-code --stat -- . ':(exclude)Package.swift'
+          grep -F "url: \"https://github.com/$GITHUB_REPOSITORY/releases/download/v$RELEASE_VERSION/NativeOIDC-Apple-$RELEASE_VERSION.zip\"," Package.swift
+          grep -F "checksum: \"$checksum\"" Package.swift
+          git diff -- Package.swift
+      # Build and test the manifest against the archive. The check copies the
+      # package to a temporary directory, where the binary target's
+      # url/checksum is swapped for the local path; the repository tree is
+      # left untouched.
+      - run: scripts/check-spm-package.sh "dist/NativeOIDC-Apple-$RELEASE_VERSION.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-package-swift
+          path: Package.swift
+          if-no-files-found: error
+
+  publish:
+    if: ${{ inputs.publish }}
+    name: Publish GitHub Release
+    needs: [validate_version, keyserver, apple, android, api_docs, windows, apple_consumer, android_consumer, windows_consumer, spm_manifest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-apple
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-android
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-api-docs
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-windows
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-package-swift
+          path: release-manifest
+      - name: Create release commit and tag
+        env:
+          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp release-manifest/Package.swift Package.swift
+          git commit -m "release: v$RELEASE_VERSION" -- Package.swift
+          if [[ "$(git diff --name-only HEAD~1 HEAD)" != Package.swift ]]; then
+            echo "The release commit must change only Package.swift" >&2
+            exit 1
+          fi
+          git tag -a "v$RELEASE_VERSION" -m "NativeOIDC v$RELEASE_VERSION"
+          # Push only the tag; main's Package.swift is never updated by a release.
+          git push origin "refs/tags/v$RELEASE_VERSION"
+      - name: Generate checksums and publish assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+          PREVIOUS_TAG: ${{ needs.validate_version.outputs.previous_tag }}
+        run: |
+          cd dist
+          shasum -a 256 \
+            "NativeOIDC-Apple-$RELEASE_VERSION.zip" \
+            "native-oidc-android-$RELEASE_VERSION.aar" \
+            "native-oidc-windows-$RELEASE_VERSION.zip" \
+            "NativeOIDC-API-Docs-$RELEASE_VERSION.zip" \
+            > SHA256SUMS
+          gh release create "v$RELEASE_VERSION" \
+            "NativeOIDC-Apple-$RELEASE_VERSION.zip" \
+            "native-oidc-android-$RELEASE_VERSION.aar" \
+            "native-oidc-windows-$RELEASE_VERSION.zip" \
+            "NativeOIDC-API-Docs-$RELEASE_VERSION.zip" \
+            SHA256SUMS \
+            --verify-tag \
+            --title "NativeOIDC v$RELEASE_VERSION" \
+            --generate-notes \
+            --notes-start-tag "$PREVIOUS_TAG"
+
+  publish_maven:
+    if: ${{ inputs.publish }}
+    name: Publish Android library to Maven Central
+    # Maven Central versions are immutable, so publish only after every
+    # package is validated and the tag and GitHub Release exist. The job
+    # signs and uploads the AAR attached to the GitHub Release, so both
+    # channels ship the same bytes, and it records the Central Portal
+    # deployment in append-only Release assets maven-central-deployment-<n>.json. A
+    # re-run of this job (Re-run failed jobs) therefore resumes: it verifies
+    # a complete publication, waits for a deployment in flight, or uploads
+    # only when no live deployment exists (Issue #180, docs/releasing.md).
+    needs: [validate_version, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      # Reads the Release assets and writes the deployment record.
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The release commit differs from the dispatched commit only in
+          # Package.swift; generate the POM and the sources and javadoc jars
+          # from the tag so they match it.
+          ref: v${{ needs.validate_version.outputs.version }}
+      - name: Download and check the GitHub Release AAR
+        id: aar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/download-release-aar.sh "$RELEASE_VERSION" "$RUNNER_TEMP/release-aar"
+      - name: Classify the Maven Central state
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MAVEN_USER: ${{ secrets.MAVEN_USER }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+        run: |
+          python3 scripts/android_maven_central_release.py decide "$RELEASE_VERSION" \
+            --expected-sha256 "$EXPECTED_SHA256"
+      - uses: actions/setup-java@v6
+        if: steps.decide.outputs.decision == 'upload'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        if: steps.decide.outputs.decision == 'upload'
+        with:
+          packages: platform-tools
+      # No NDK or cargo-about: the adopted AAR replaces the AAR build, the
+      # only user of the Rust NDK builds and the license notices. The host
+      # Rust, the same toolchain as the android job, generates the UniFFI
+      # bindings for the sources and javadoc jars.
+      - if: steps.decide.outputs.decision == 'upload'
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: dtolnay/rust-toolchain@1.100.0
+        if: steps.decide.outputs.decision == 'upload'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.decide.outputs.decision == 'upload'
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.decide.outputs.decision == 'upload'
+      - name: Build and check the signed Central bundle
+        if: steps.decide.outputs.decision == 'upload'
+        env:
+          ADOPTED_AAR: ${{ steps.aar.outputs.path }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+          BUNDLE_OUT: ${{ runner.temp }}/central-bundle.zip
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+        run: scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
+      - name: Upload to Maven Central
+        if: steps.decide.outputs.decision == 'upload'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MAVEN_USER: ${{ secrets.MAVEN_USER }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+        run: |
+          python3 scripts/android_maven_central_release.py upload "$RELEASE_VERSION" \
+            --expected-sha256 "$EXPECTED_SHA256" --bundle "$RUNNER_TEMP/central-bundle.zip"
+
+  dry_run_maven:
+    if: ${{ !inputs.publish && inputs.dry_run_maven }}
+    name: Dry-run the Maven Central publication
+    # The publish_maven steps on a candidate run, against the real Maven
+    # Central and Central Portal but read-only: it classifies the version,
+    # checks that the Portal accepts the credentials, and builds and checks
+    # the signed bundle, but never uploads, publishes, drops, or writes the
+    # deployment record. Like the key server check, it holds the signing key
+    # and the Portal token, so dispatch it only from a fully trusted branch.
+    needs: [validate_version, android]
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-android
+          path: ${{ runner.temp }}/candidate-aar
+      # A Release of this version, if one exists, is what publish_maven
+      # would adopt; otherwise the candidate AAR from the android job.
+      - name: Select the AAR to adopt
+        id: aar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if view=$(gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json tagName 2>&1); then
+            scripts/download-release-aar.sh "$RELEASE_VERSION" "$RUNNER_TEMP/release-aar"
+            echo "record_args=" >> "$GITHUB_OUTPUT"
+            echo "Adopting the AAR of the GitHub Release v$RELEASE_VERSION." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$view" == *"release not found"* ]]; then
+            path="$RUNNER_TEMP/candidate-aar/native-oidc-android-$RELEASE_VERSION.aar"
+            echo "sha256=$(sha256sum "$path" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+            echo "path=$path" >> "$GITHUB_OUTPUT"
+            echo "record_args=--no-record" >> "$GITHUB_OUTPUT"
+            echo "No GitHub Release v$RELEASE_VERSION: adopting the candidate AAR." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Could not look up the GitHub Release v$RELEASE_VERSION: $view" >&2
+            exit 1
+          fi
+      - name: Classify the Maven Central state (read-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MAVEN_USER: ${{ secrets.MAVEN_USER }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+          RECORD_ARGS: ${{ steps.aar.outputs.record_args }}
+        run: |
+          # RECORD_ARGS is empty or the single flag --no-record.
+          # shellcheck disable=SC2086
+          python3 scripts/android_maven_central_release.py decide "$RELEASE_VERSION" \
+            --read-only --expected-sha256 "$EXPECTED_SHA256" $RECORD_ARGS
+      - name: Check the Central Portal credentials (read-only)
+        env:
+          MAVEN_USER: ${{ secrets.MAVEN_USER }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+        run: python3 scripts/android_maven_central_release.py probe "$RELEASE_VERSION" --read-only
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build and check the signed Central bundle
+        env:
+          ADOPTED_AAR: ${{ steps.aar.outputs.path }}
+          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
+          BUNDLE_OUT: ${{ runner.temp }}/central-bundle.zip
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
+          {
+            echo "### Central bundle (not uploaded)"
+            echo
+            echo "Adopted AAR SHA-256: \`$EXPECTED_SHA256\`"
+            echo
+            echo '```'
+            unzip -Z1 "$BUNDLE_OUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
 
-permissions:
-  contents: read
-
-concurrency:
-  # Serialize runs of the same version so that only one publishes.
-  # cancel-in-progress: false protects the first run to start executing, but
-  # a second dispatch while the first is still pending will cancel it: at most
-  # one run can be pending or running per version. Avoid dispatching multiple
-  # runs of the same version concurrently; if a publish is queued behind a
-  # candidate, another dispatch will cancel the pending one.
-  group: release-${{ inputs.version }}
-  cancel-in-progress: false
-
-env:
-  # Every Apple job (the release build and its consumer and manifest checks)
-  # selects this one Xcode on the macos-26 image. App Store Connect requires
-  # apps built with Xcode 26 or later, so the archive is built and validated
-  # with a stable Xcode 26.x — the one the macos-26 image ships as its
-  # default, so no extra download (Issue #135). Update the runner label and
-  # this version together, from the runner-images README, not the label.
-  XCODE_VERSION: '26.6'
-
-jobs:
-  validate_version:
-    name: Validate release version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.value }}
-      previous_tag: ${{ steps.previous_release.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      # A release ships only dependencies under licenses deny.toml allows.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny@0.20.2
-      - run: cargo deny check licenses
-      - id: version
-        name: Match SemVer release version to Cargo package version
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          PUBLISH: ${{ inputs.publish }}
-        run: |
-          version="$RELEASE_VERSION"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release versions must use MAJOR.MINOR.PATCH" >&2
-            exit 1
-          fi
-          # Candidate runs (no publish) may be dispatched from main or a
-          # fully trusted branch so release changes can be validated before
-          # they merge (the key server check holds the signing key, so an
-          # untrusted branch must not be dispatched); publishing requires
-          # the dispatched commit to be on main.
-          if [[ "$PUBLISH" == "true" ]]; then
-            git fetch origin main
-            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-              echo "Releases must be built from a commit on main" >&2
-              exit 1
-            fi
-            if [[ "$GITHUB_REF" != refs/heads/main ]]; then
-              echo "Publishing releases must be dispatched from main" >&2
-              exit 1
-            fi
-            if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
-              echo "Tag v$version already exists" >&2
-              exit 1
-            fi
-          fi
-          package_version=$(cargo metadata --locked --no-deps --format-version 1 |
-            jq -r '.packages[] | select(.name == "native-oidc") | .version')
-          if [[ "$version" != "$package_version" ]]; then
-            echo "Release version $version does not match Cargo package version $package_version" >&2
-            exit 1
-          fi
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-      # Release commits branch off main, so earlier release tags are not in
-      # the new tag's history and GitHub would start the generated notes at
-      # the last tag on main (v0.4.0, Issue #151). Start them at the highest
-      # published release below this version instead, and record it so a
-      # candidate run shows the range the notes will cover.
-      - id: previous_release
-        name: Find the previous release for the release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          tags=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1000 \
-            --json tagName --jq '.[].tagName')
-          previous_tag=$(printf '%s\n' "$tags" "v$RELEASE_VERSION" |
-            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
-            sort -uV |
-            awk -v current="v$RELEASE_VERSION" '$0 == current { print prev; exit } { prev = $0 }')
-          if [[ -z "$previous_tag" ]]; then
-            echo "No published release precedes v$RELEASE_VERSION to start the release notes from" >&2
-            exit 1
-          fi
-          echo "tag=$previous_tag" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Release notes range"
-            echo
-            echo "Release notes start at \`$previous_tag\`:" \
-              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$previous_tag...$GITHUB_SHA"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  keyserver:
-    name: Check signing key at key server
-    # Every run (candidate and publish) verifies, before any package is
-    # built, that the public part of every primary key in GPG_PRIVATE_KEY
-    # resolves at keys.openpgp.org by fingerprint. Maven Central's sync
-    # validation fetches the public key from the key server; its absence
-    # rejected v0.6.0's upload (#131).
-    # This job holds the signing key (it prints fingerprints only, never key
-    # material) and runs the dispatched branch's code, so dispatch candidate
-    # runs from main or a fully trusted branch only.
-    needs: validate_version
-    runs-on: ubuntu-latest
-    env:
-      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-      KEYSERVER_ATTEMPTS: "3"
-      KEYSERVER_RETRY_DELAY: "30"
-    steps:
-      - uses: actions/checkout@v7
-      - name: Check signing key resolves at keys.openpgp.org
-        run: scripts/check-gpg-keyserver.sh
-
-  apple:
-    name: Build Apple release package
-    needs: [validate_version, keyserver]
-    runs-on: macos-26
-    env:
-      IOS_SIMULATOR_MAJOR_VERSION: '18'
-    steps:
-      - uses: actions/checkout@v7
-      # The archive's bytes are shaped by the toolchain (the rustc version is
-      # part of rustc's -C metadata hash; the Xcode version shapes the
-      # xcframework), and the manifest's checksum is computed from them. Pin
-      # both to exact versions (Xcode via XCODE_VERSION above) and record the
-      # exact versions in the step summary so a release archive can be tied
-      # to the toolchain that built it. Pinning does not make a rebuild
-      # byte-identical; the published checksum is always computed from this
-      # run's archive (see docs/releasing.md).
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
-      - uses: Swatinem/rust-cache@v2
-      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.3
-      - name: Record toolchain versions
-        run: |
-          {
-            echo "### Toolchain"
-            rustc -vV
-            echo
-            xcodebuild -version
-          } >> "$GITHUB_STEP_SUMMARY"
-      # The iOS flow runs on the iOS 18 deployment minimum, but the macos-26
-      # image ships only iOS 26.x simulator runtimes, so install the last
-      # iOS 18 runtime. The flow's runtime is recorded in the step summary.
-      - name: Install iOS 18 simulator runtime
-        run: scripts/install-ios-simulator-runtime.sh 18.6
-      - run: scripts/check-apple-adapters.sh
-      - name: Remove cached XCFramework package output
-        run: rm -rf target/apple/release-package
-      - run: scripts/package-apple-xcframework.sh "${{ needs.validate_version.outputs.version }}"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-apple
-          path: target/apple/release-package/NativeOIDC-Apple-${{ needs.validate_version.outputs.version }}.zip
-          if-no-files-found: error
-
-  android:
-    name: Build Android release package
-    needs: [validate_version, keyserver]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
-      # The same Rust as the Apple job, so every package links the same
-      # standard library and ships the same notices for it.
-      - uses: dtolnay/rust-toolchain@1.100.0
-      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.3
-      - name: Configure Android NDK
-        env:
-          ANDROID_API_LEVEL: '28'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Cache compiled Cargo dependencies for the host and both Android ABIs
-      # that check-android-targets.sh builds under Gradle. The workspace's own
-      # crates are rebuilt each run: caching them too (cache-workspace-crates)
-      # did not shorten warm runs and grew the cache by about 40% (#190).
-      # The key adds the NDK version and native API level, which rust-cache
-      # does not hash on its own, so changing either starts a fresh cache.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
-      - uses: gradle/actions/setup-gradle@v6
-      - run: ./native/android/gradlew -p native/android testDebugUnitTest
-      - name: Enable Android emulator hardware acceleration
-        run: sudo chmod a+rw /dev/kvm
-      - name: Run Android callback tests on an emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 28
-          arch: x86_64
-          target: google_apis_playstore
-          disable-linux-hw-accel: false
-          disable-animations: true
-          script: ./native/android/gradlew -p native/android connectedDebugAndroidTest
-      - run: ./native/android/gradlew -p native/android assembleRelease
-      - name: Verify and stage Android AAR
-        env:
-          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-        run: |
-          aar=native/android/build/outputs/aar/native-oidc-android-release.aar
-          unzip -Z1 "$aar" | grep -Fx jni/arm64-v8a/libnative_oidc.so
-          unzip -Z1 "$aar" | grep -Fx jni/x86_64/libnative_oidc.so
-          mkdir -p dist
-          cp "$aar" "dist/native-oidc-android-$RELEASE_VERSION.aar"
-      - name: Verify Maven Central publication contents
-        env:
-          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-        run: scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-android
-          path: dist/native-oidc-android-${{ needs.validate_version.outputs.version }}.aar
-          if-no-files-found: error
-
-  api_docs:
-    name: Build API reference
-    needs: [validate_version, keyserver]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked --workspace --all-targets --all-features
-      - run: cargo doc --locked --no-deps
-      - name: Package Rust API reference
-        env:
-          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-        run: |
-          mkdir -p dist
-          cd target/doc
-          zip -rq "$GITHUB_WORKSPACE/dist/NativeOIDC-API-Docs-$RELEASE_VERSION.zip" .
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-api-docs
-          path: dist/NativeOIDC-API-Docs-${{ needs.validate_version.outputs.version }}.zip
-          if-no-files-found: error
-
-  windows:
-    name: Build Windows desktop package
-    needs: [validate_version, keyserver]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      # The same Rust as the Apple job, so every package links the same
-      # standard library and ships the same notices for it.
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --locked --lib --target x86_64-pc-windows-msvc
-      - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
-      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.3
-      - run: scripts/generate-third-party-licenses.sh
-        shell: bash
-      - name: Build and package Windows library
-        shell: pwsh
-        env:
-          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-        run: scripts/package-windows.ps1 -Package "dist/native-oidc-windows-$env:RELEASE_VERSION"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-windows
-          path: dist/native-oidc-windows-${{ needs.validate_version.outputs.version }}.zip
-          if-no-files-found: error
-
-  apple_consumer:
-    name: Validate Apple release consumer
-    needs: [validate_version, apple]
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v7
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
-      - name: Record toolchain versions
-        run: |
-          {
-            echo "### Toolchain"
-            xcodebuild -version
-            echo
-            swift --version
-          } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-apple
-          path: dist
-      - run: scripts/check-apple-release-consumer.sh dist/NativeOIDC-Apple-${{ needs.validate_version.outputs.version }}.zip
-
-  android_consumer:
-    name: Validate Android release consumer
-    needs: [validate_version, android]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v6
-      - name: Enable Android emulator hardware acceleration
-        run: sudo chmod a+rw /dev/kvm
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-android
-          path: dist
-      - name: Run Android release consumer on an emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 28
-          arch: x86_64
-          target: google_apis_playstore
-          disable-linux-hw-accel: false
-          disable-animations: true
-          script: scripts/check-android-release-consumer.sh dist/native-oidc-android-${{ needs.validate_version.outputs.version }}.aar
-
-  windows_consumer:
-    name: Validate Windows release consumers
-    needs: [validate_version, windows]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-windows
-          path: dist
-      - shell: pwsh
-        run: scripts/check-windows-release-consumer.ps1 -Package dist/native-oidc-windows-${{ needs.validate_version.outputs.version }}.zip
-
-  spm_manifest:
-    name: Prepare and validate release Package.swift
-    needs: [validate_version, apple]
-    runs-on: macos-26
-    env:
-      RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
-      - name: Record toolchain versions
-        run: |
-          {
-            echo "### Toolchain"
-            xcodebuild -version
-            echo
-            swift --version
-          } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-apple
-          path: dist
-      - name: Point Package.swift at the release archive
-        run: |
-          archive="dist/NativeOIDC-Apple-$RELEASE_VERSION.zip"
-          checksum=$(swift package compute-checksum "$archive")
-          python3 scripts/update-package-swift.py \
-            --repository "$GITHUB_REPOSITORY" "$RELEASE_VERSION" "$checksum"
-          # The release commit may change nothing but Package.swift.
-          git diff --exit-code --stat -- . ':(exclude)Package.swift'
-          grep -F "url: \"https://github.com/$GITHUB_REPOSITORY/releases/download/v$RELEASE_VERSION/NativeOIDC-Apple-$RELEASE_VERSION.zip\"," Package.swift
-          grep -F "checksum: \"$checksum\"" Package.swift
-          git diff -- Package.swift
-      # Build and test the manifest against the archive. The check copies the
-      # package to a temporary directory, where the binary target's
-      # url/checksum is swapped for the local path; the repository tree is
-      # left untouched.
-      - run: scripts/check-spm-package.sh "dist/NativeOIDC-Apple-$RELEASE_VERSION.zip"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-package-swift
-          path: Package.swift
-          if-no-files-found: error
-
-  publish:
-    if: ${{ inputs.publish }}
-    name: Publish GitHub Release
-    needs: [validate_version, keyserver, apple, android, api_docs, windows, apple_consumer, android_consumer, windows_consumer, spm_manifest]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-apple
-          path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-android
-          path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-api-docs
-          path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-windows
-          path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-package-swift
-          path: release-manifest
-      - name: Create release commit and tag
-        env:
-          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          cp release-manifest/Package.swift Package.swift
-          git commit -m "release: v$RELEASE_VERSION" -- Package.swift
-          if [[ "$(git diff --name-only HEAD~1 HEAD)" != Package.swift ]]; then
-            echo "The release commit must change only Package.swift" >&2
-            exit 1
-          fi
-          git tag -a "v$RELEASE_VERSION" -m "NativeOIDC v$RELEASE_VERSION"
-          # Push only the tag; main's Package.swift is never updated by a release.
-          git push origin "refs/tags/v$RELEASE_VERSION"
-      - name: Generate checksums and publish assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-          PREVIOUS_TAG: ${{ needs.validate_version.outputs.previous_tag }}
-        run: |
-          cd dist
-          shasum -a 256 \
-            "NativeOIDC-Apple-$RELEASE_VERSION.zip" \
-            "native-oidc-android-$RELEASE_VERSION.aar" \
-            "native-oidc-windows-$RELEASE_VERSION.zip" \
-            "NativeOIDC-API-Docs-$RELEASE_VERSION.zip" \
-            > SHA256SUMS
-          gh release create "v$RELEASE_VERSION" \
-            "NativeOIDC-Apple-$RELEASE_VERSION.zip" \
-            "native-oidc-android-$RELEASE_VERSION.aar" \
-            "native-oidc-windows-$RELEASE_VERSION.zip" \
-            "NativeOIDC-API-Docs-$RELEASE_VERSION.zip" \
-            SHA256SUMS \
-            --verify-tag \
-            --title "NativeOIDC v$RELEASE_VERSION" \
-            --generate-notes \
-            --notes-start-tag "$PREVIOUS_TAG"
-
-  publish_maven:
-    if: ${{ inputs.publish }}
-    name: Publish Android library to Maven Central
-    # Maven Central versions are immutable, so publish only after every
-    # package is validated and the tag and GitHub Release exist. The job
-    # signs and uploads the AAR attached to the GitHub Release, so both
-    # channels ship the same bytes, and it records the Central Portal
-    # deployment in append-only Release assets maven-central-deployment-<n>.json. A
-    # re-run of this job (Re-run failed jobs) therefore resumes: it verifies
-    # a complete publication, waits for a deployment in flight, or uploads
-    # only when no live deployment exists (Issue #180, docs/releasing.md).
-    needs: [validate_version, publish]
-    runs-on: ubuntu-latest
-    permissions:
-      # Reads the Release assets and writes the deployment record.
-      contents: write
-    env:
-      RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # The release commit differs from the dispatched commit only in
-          # Package.swift; generate the POM and the sources and javadoc jars
-          # from the tag so they match it.
-          ref: v${{ needs.validate_version.outputs.version }}
-      - name: Download and check the GitHub Release AAR
-        id: aar
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: scripts/download-release-aar.sh "$RELEASE_VERSION" "$RUNNER_TEMP/release-aar"
-      - name: Classify the Maven Central state
-        id: decide
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          MAVEN_USER: ${{ secrets.MAVEN_USER }}
-          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
-          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
-        run: |
-          python3 scripts/android_maven_central_release.py decide "$RELEASE_VERSION" \
-            --expected-sha256 "$EXPECTED_SHA256"
-      - uses: actions/setup-java@v6
-        if: steps.decide.outputs.decision == 'upload'
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        if: steps.decide.outputs.decision == 'upload'
-        with:
-          packages: platform-tools
-      # No NDK or cargo-about: the adopted AAR replaces the AAR build, the
-      # only user of the Rust NDK builds and the license notices. The host
-      # Rust, the same toolchain as the android job, generates the UniFFI
-      # bindings for the sources and javadoc jars.
-      - if: steps.decide.outputs.decision == 'upload'
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: dtolnay/rust-toolchain@1.100.0
-        if: steps.decide.outputs.decision == 'upload'
-      - uses: Swatinem/rust-cache@v2
-        if: steps.decide.outputs.decision == 'upload'
-      - uses: gradle/actions/setup-gradle@v6
-        if: steps.decide.outputs.decision == 'upload'
-      - name: Build and check the signed Central bundle
-        if: steps.decide.outputs.decision == 'upload'
-        env:
-          ADOPTED_AAR: ${{ steps.aar.outputs.path }}
-          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
-          BUNDLE_OUT: ${{ runner.temp }}/central-bundle.zip
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
-        run: scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
-      - name: Upload to Maven Central
-        if: steps.decide.outputs.decision == 'upload'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          MAVEN_USER: ${{ secrets.MAVEN_USER }}
-          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
-          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
-        run: |
-          python3 scripts/android_maven_central_release.py upload "$RELEASE_VERSION" \
-            --expected-sha256 "$EXPECTED_SHA256" --bundle "$RUNNER_TEMP/central-bundle.zip"
-
-  dry_run_maven:
-    if: ${{ !inputs.publish && inputs.dry_run_maven }}
-    name: Dry-run the Maven Central publication
-    # The publish_maven steps on a candidate run, against the real Maven
-    # Central and Central Portal but read-only: it classifies the version,
-    # checks that the Portal accepts the credentials, and builds and checks
-    # the signed bundle, but never uploads, publishes, drops, or writes the
-    # deployment record. Like the key server check, it holds the signing key
-    # and the Portal token, so dispatch it only from a fully trusted branch.
-    needs: [validate_version, android]
-    runs-on: ubuntu-latest
-    env:
-      RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-android
-          path: ${{ runner.temp }}/candidate-aar
-      # A Release of this version, if one exists, is what publish_maven
-      # would adopt; otherwise the candidate AAR from the android job.
-      - name: Select the AAR to adopt
-        id: aar
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if view=$(gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json tagName 2>&1); then
-            scripts/download-release-aar.sh "$RELEASE_VERSION" "$RUNNER_TEMP/release-aar"
-            echo "record_args=" >> "$GITHUB_OUTPUT"
-            echo "Adopting the AAR of the GitHub Release v$RELEASE_VERSION." >> "$GITHUB_STEP_SUMMARY"
-          elif [[ "$view" == *"release not found"* ]]; then
-            path="$RUNNER_TEMP/candidate-aar/native-oidc-android-$RELEASE_VERSION.aar"
-            echo "sha256=$(sha256sum "$path" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-            echo "path=$path" >> "$GITHUB_OUTPUT"
-            echo "record_args=--no-record" >> "$GITHUB_OUTPUT"
-            echo "No GitHub Release v$RELEASE_VERSION: adopting the candidate AAR." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Could not look up the GitHub Release v$RELEASE_VERSION: $view" >&2
-            exit 1
-          fi
-      - name: Classify the Maven Central state (read-only)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          MAVEN_USER: ${{ secrets.MAVEN_USER }}
-          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
-          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
-          RECORD_ARGS: ${{ steps.aar.outputs.record_args }}
-        run: |
-          # RECORD_ARGS is empty or the single flag --no-record.
-          # shellcheck disable=SC2086
-          python3 scripts/android_maven_central_release.py decide "$RELEASE_VERSION" \
-            --read-only --expected-sha256 "$EXPECTED_SHA256" $RECORD_ARGS
-      - name: Check the Central Portal credentials (read-only)
-        env:
-          MAVEN_USER: ${{ secrets.MAVEN_USER }}
-          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
-        run: python3 scripts/android_maven_central_release.py probe "$RELEASE_VERSION" --read-only
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: Swatinem/rust-cache@v2
-      - uses: gradle/actions/setup-gradle@v6
-      - name: Build and check the signed Central bundle
-        env:
-          ADOPTED_AAR: ${{ steps.aar.outputs.path }}
-          EXPECTED_SHA256: ${{ steps.aar.outputs.sha256 }}
-          BUNDLE_OUT: ${{ runner.temp }}/central-bundle.zip
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          scripts/check-android-maven-publication.sh "$RELEASE_VERSION"
-          {
-            echo "### Central bundle (not uploaded)"
-            echo
-            echo "Adopted AAR SHA-256: \`$EXPECTED_SHA256\`"
-            echo
-            echo '```'
-            unzip -Z1 "$BUNDLE_OUT"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
