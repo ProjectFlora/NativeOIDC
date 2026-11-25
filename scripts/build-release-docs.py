@@ -83,7 +83,10 @@ _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # A reference-style link definition: `[label]: destination "title"`.
-_DEFINITION = re.compile(r"^ {0,3}\[(?:[^\]\\]|\\.)+\]:[ \t]*(<[^>]*>|\S+)")
+# The destination may also start on the next line (GFM allows one line
+# break after the colon), so it is optional here.
+_DEFINITION = re.compile(r"^ {0,3}\[(?:[^\]\\]|\\.)+\]:[ \t]*(<[^>]*>|\S+)?")
+_DESTINATION = re.compile(r"^[ \t]*(<[^>]*>|\S+)")
 
 
 class BuildError(Exception):
@@ -100,7 +103,17 @@ def markdown_links(text):
     that look like links are not followed.
     """
     fence = None
+    # Set after a definition whose destination is on the next line.
+    split_definition = False
     for number, line in enumerate(text.splitlines(), start=1):
+        if split_definition:
+            split_definition = False
+            destination = _DESTINATION.match(line)
+            if destination:
+                target = _definition_target(destination.group(1))
+                if target:
+                    yield number, target
+                continue
         match = _FENCE.match(line)
         if fence is not None:
             if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
@@ -112,9 +125,10 @@ def markdown_links(text):
             continue
         definition = _DEFINITION.match(line)
         if definition:
-            target = definition.group(1)
-            if target.startswith("<"):
-                target = target[1:-1]
+            if definition.group(1) is None:
+                split_definition = True
+                continue
+            target = _definition_target(definition.group(1))
             if target:
                 yield number, target
             continue
@@ -128,6 +142,13 @@ def markdown_links(text):
             position = end
             if target is not None:
                 yield number, target
+
+
+def _definition_target(destination):
+    """Return a definition's destination without its angle brackets."""
+    if destination.startswith("<") and destination.endswith(">"):
+        return destination[1:-1]
+    return destination
 
 
 def _link_target(line, index):

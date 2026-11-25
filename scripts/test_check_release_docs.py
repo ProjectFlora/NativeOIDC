@@ -38,6 +38,7 @@ REPO_FILES = {
         "[Swift install](swift-xcframework.md) [Kotlin](kotlin-guide.md) [C++](windows-cpp-guide.md)\n"
         "[ABI](windows-api.md) [Windows](../native/windows/README.md) [Example][example]\n\n"
         "[example]: ../examples/manual_authorization.rs\n"
+        "\n[Windows header][header]\n\n[header]:\n    ../native/windows/include/native_oidc_windows.h\n"
     ),
     "docs/user-guide.md": "# Guide\n",
     "docs/api-coverage.md": "# Coverage\n",
@@ -133,6 +134,22 @@ class CheckTests(unittest.TestCase):
             self.errors(archive),
             "repo/docs/README.md:7: link `../examples/manual_authorization.rs` names "
             "repo/examples/manual_authorization.rs, which is not in the archive",
+        )
+
+    def test_broken_reference_link_split_after_colon(self):
+        # The index links the header through a definition whose destination
+        # is on the line after the colon; docs/windows-api.md links it too,
+        # so drop that inline link to leave only the split definition.
+        archive = self.build()
+
+        def change(files):
+            files["repo/docs/windows-api.md"] = b"# ABI\n"
+            files.pop("repo/native/windows/include/native_oidc_windows.h")
+        self.rewrite(archive, change)
+        self.assert_error(
+            self.errors(archive),
+            "repo/docs/README.md:12: link `../native/windows/include/native_oidc_windows.h` names "
+            "repo/native/windows/include/native_oidc_windows.h, which is not in the archive",
         )
 
     def test_link_leaving_the_archive(self):
