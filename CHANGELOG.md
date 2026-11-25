@@ -6,6 +6,16 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+### Fixed
+
+- On Android API 28–30, `AndroidAuthorizationAdapter.authorize` no longer
+  fails with `NoClassDefFoundError` when `appLinkUri` is set. Android reports
+  App Link verification only from API 31 (`DomainVerificationManager`), so
+  the adapter now treats the App Link as unverified on API 28–30 and uses the
+  registered custom-scheme fallback, or fails with
+  `InvalidRedirectConfiguration` when none is configured
+  ([#224](https://github.com/ProjectFlora/NativeOIDC/issues/224)).
+
 ### Changed
 
 - The Windows real system-browser check now reads the default browser from
