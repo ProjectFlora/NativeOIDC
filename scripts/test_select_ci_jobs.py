@@ -15,6 +15,7 @@ def selected(*paths):
 class RepresentativeChangeTests(unittest.TestCase):
     def test_unshipped_documentation_runs_nothing(self):
         self.assertEqual(selected("CHANGELOG.md", "docs/agent-workflows/issue-to-pr.md", ".gitignore"), set())
+        self.assertEqual(selected("scripts/agent-precheck.sh"), set())
 
     def test_release_documentation_runs_tests(self):
         # The Tests job builds and checks the release documentation set.

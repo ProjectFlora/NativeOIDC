@@ -116,6 +116,7 @@ RULES = (
     # Documentation. The documentation index and the files it links make up
     # the release documentation set, which the Tests job builds and checks.
     (("docs/agent-workflows/**",), frozenset(), "agent workflow documentation (not in the release documentation set)"),
+    (("scripts/agent-precheck.sh",), frozenset(), "agent workflow precheck (run only by Orca automations)"),
     (("README.md", "ROADMAP.md", "FEATURE_MATRIX.md", "docs/**"), {"test"}, "release documentation set"),
     # Documentation that no build, package or check reads.
     (("CHANGELOG.md", ".gitignore"), frozenset(), "documentation"),
