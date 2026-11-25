@@ -41,6 +41,7 @@ REPO_FILES = {
         "\n[Windows header][header]\n\n[header]:\n    ../native/windows/include/native_oidc_windows.h\n"
         "\n[C# project](\n  ../native/windows/dotnet/NativeOidcWindows.csproj)\n"
         "\n- Literal marker: `\n- [List only](list-only.md)\n- Literal marker: `\n"
+        "\n> Literal marker: `\n> [Quoted code](missing.md)\n> Literal marker: `\n"
     ),
     "docs/list-only.md": "# Linked only from a list item\n",
     "docs/user-guide.md": "# Guide\n",

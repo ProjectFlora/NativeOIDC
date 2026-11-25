@@ -136,6 +136,11 @@ class LinkClosureTests(Fixture):
               "# Guide\n\n- Literal marker: `\n- [Example](../examples/demo.rs)\n- Literal marker: `\n")
         self.assertIn("examples/demo.rs", build_release_docs.link_closure(self.repo))
 
+    def test_quoted_code_span_example_builds(self):
+        write(self.repo, "docs/guide.md",
+              GUIDE + "\n> Literal marker: `\n> [Example](missing.md)\n> Literal marker: `\n")
+        self.assertIn("docs/guide.md", build_release_docs.link_closure(self.repo))
+
     def test_fenced_example_after_incomplete_definition_builds(self):
         write(self.repo, "docs/guide.md", GUIDE + "\n[example]:\n```markdown\n[demo](missing.md)\n```\n")
         self.assertIn("docs/guide.md", build_release_docs.link_closure(self.repo))
@@ -196,9 +201,25 @@ class MarkdownLinkTests(unittest.TestCase):
         )
 
     def test_code_span_does_not_cross_block_starts(self):
-        for marker in ("- ", "* ", "1. ", "> ", "## ", "| "):
+        for marker in ("- ", "* ", "1. ", "## ", "| ", "> - "):
             text = f"{marker}Literal marker: `\n{marker}[Example](example.md)\n{marker}Literal marker: `\n"
             self.assertEqual(list(build_release_docs.markdown_links(text)), [(2, "example.md")], marker)
+
+    def test_quoted_paragraph_keeps_its_code_span(self):
+        # One quoted paragraph: the backticks form one code span.
+        text = "> Literal marker: `\n> [Example](missing.md)\n> Literal marker: `\n"
+        self.assertEqual(list(build_release_docs.markdown_links(text)), [])
+
+    def test_quoted_links_fences_and_definitions(self):
+        text = (
+            "> [Wrapped](\n>   a.md)\n>\n> ```\n> [code](not.md)\n> ```\n> [ref]:\n>   b.md\n"
+            "Outside [c](c.md)\n```\n> [shell](prompt.md)\n```\n"
+        )
+        self.assertEqual(list(build_release_docs.markdown_links(text)), [(2, "a.md"), (8, "b.md"), (9, "c.md")])
+
+    def test_leaving_a_quote_ends_its_code_span(self):
+        text = "> quoted `\nnot quoted [d](d.md) `\n"
+        self.assertEqual(list(build_release_docs.markdown_links(text)), [(2, "d.md")])
 
     def test_wrapped_list_item_link(self):
         text = "- [Demo](\n  ../examples/demo.rs)\n- next\n"

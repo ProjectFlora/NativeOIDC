@@ -87,10 +87,13 @@ _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # break after the colon), so it is optional here.
 _DEFINITION = re.compile(r"^ {0,3}\[(?:[^\]\\]|\\.)+\]:[ \t]*(<[^>]*>|\S+)?")
 _DESTINATION = re.compile(r"^[ \t]*(<[^>]*>|\S+)")
-# A line that starts a new Markdown block (list item, heading, block quote,
-# table row, thematic break) even without a blank line before it. Code
-# spans and links never continue across such a line.
-_BLOCK_START = re.compile(r"^[ \t]*(?:[-+*][ \t]|[-+*]$|\d{1,9}[.)](?:[ \t]|$)|#{1,6}(?:[ \t]|$)|>|\||(?:[-*_][ \t]*){3,}$)")
+# A line that starts a new Markdown block (list item, heading, table row,
+# thematic break) even without a blank line before it. Code spans and
+# links never continue across such a line. Block quotes are handled by
+# _QUOTE: their markers are removed first, and a change of quote depth
+# also starts a new block.
+_BLOCK_START = re.compile(r"^[ \t]*(?:[-+*][ \t]|[-+*]$|\d{1,9}[.)](?:[ \t]|$)|#{1,6}(?:[ \t]|$)|\||(?:[-*_][ \t]*){3,}$)")
+_QUOTE = re.compile(r"^ {0,3}> ?")
 
 
 class BuildError(Exception):
@@ -105,16 +108,40 @@ def markdown_links(text):
 
     Fenced code blocks and inline code spans are skipped, so code samples
     that look like links are not followed. Inline links are found per
-    block (the lines between blank lines, fences, definitions and lines
-    that start a list item, heading, block quote or table row), so a link
-    whose text or destination continues on the next line is found too; the
-    reported line is the one where its destination starts.
+    block (the lines between blank lines, fences, definitions, lines that
+    start a list item, heading or table row, and changes of block quote
+    depth), so a link whose text or destination continues on the next line
+    is found too; the reported line is the one where its destination
+    starts. Block quote markers are removed before a line is read, so a
+    quoted paragraph, fence or definition is read like an unquoted one.
+
+    This is the subset of GFM the documentation uses, not a full parser:
+    other constructs (for example HTML blocks, indented code blocks, lazy
+    block quote continuation lines, or links inside link text) are not
+    interpreted.
     """
     paragraph = []
     fence = None
+    depth = 0
     # Set after a definition whose destination is on the next line.
     split_definition = False
     for number, line in enumerate(text.splitlines(), start=1):
+        line_depth = 0
+        # Inside a fence, a `>` beyond the fence's own quote depth is code.
+        while fence is None or line_depth < depth:
+            quote = _QUOTE.match(line)
+            if not quote:
+                break
+            line = line[quote.end():]
+            line_depth += 1
+        if line_depth != depth:
+            # Leaving or entering a quote ends a fence or definition opened
+            # at the other depth.
+            depth = line_depth
+            fence = None
+            split_definition = False
+            yield from _inline_links(paragraph)
+            paragraph.clear()
         if not line.strip() or _FENCE.match(line) or _DEFINITION.match(line) or _BLOCK_START.match(line):
             yield from _inline_links(paragraph)
             paragraph.clear()
