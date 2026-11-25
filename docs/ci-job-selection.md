@@ -80,6 +80,7 @@ package.
 | `Sources/**`, `SwiftTests/**`, `native/apple/**`, `native/consumer-smoke/apple/**` | `apple`, `test` | Apple adapters, XCTest (including the tests #167 moves there), smoke tests and the release consumer. The guides link some of these files, so the release documentation set ships them. |
 | `docs/swift-xcframework.md` | `apple`, `test` | Shipped as the Apple package's README, and in the release documentation set. |
 | `docs/windows-cpp-guide.md` | `windows`, `test` | The Windows C++ consumer compiles and runs the guide's `cpp` blocks; the release documentation set ships it. |
+| `docs/windows-dotnet-guide.md` | `windows`, `test` | The Windows .NET guide fixture compiles and runs the guide's `csharp` blocks; the release documentation set ships it. |
 | `native/android/**`, `native/consumer-smoke/android/**` | `android`, `test` | Android adapter, unit and emulator tests (including the API 35 run from #166), and the release consumer. The guides link some of these files. |
 | `native/windows/**`, `native/consumer-smoke/windows/**` | `windows`, `test` | Windows header, .NET wrapper, consumers. `native/windows/README.md` is shipped in the Windows package; the header, the wrapper and the guide examples are in the release documentation set. |
 | `scripts/generate-bindings.sh` | `test`, `apple`, `android`, `spm_bindings` | Binding generation. |
@@ -100,7 +101,7 @@ package.
 
 Documentation is not excluded by file extension: a Markdown file that a
 package ships (`docs/swift-xcframework.md`, `native/windows/README.md`) or a
-file that a check reads (`docs/windows-cpp-guide.md`) is classified with the job that uses it. The unit
+file that a check reads (`docs/windows-cpp-guide.md`, `docs/windows-dotnet-guide.md`) is classified with the job that uses it. The unit
 test `test_every_tracked_file_is_classified` fails when a tracked file
 matches no rule, so a new file needs a rule (or knowingly runs everything).
 

@@ -184,8 +184,9 @@ before the 1.0.0 tag; the pre-1.0 release policy in
 - Windows desktop applications use the C ABI in `native/windows/include` for
   authorization, token refresh, OIDC end-session, and token revocation. The ABI
   is callable from C++ and from .NET through P/Invoke; see
-  [`native/windows/README.md`](native/windows/README.md) and the
-  [Windows C++ user guide](docs/windows-cpp-guide.md).
+  [`native/windows/README.md`](native/windows/README.md), the
+  [Windows C++ user guide](docs/windows-cpp-guide.md), and the
+  [Windows .NET user guide](docs/windows-dotnet-guide.md).
 - Generate the public Rust API reference locally with
   `cargo doc --locked --no-deps`; the HTML output is written to
   `target/doc/native_oidc/index.html`.
@@ -288,10 +289,9 @@ of the temporary CI validation artifacts:
 
 Releases after v0.8.0 replace `NativeOIDC-API-Docs-<version>.zip` with
 `NativeOIDC-Docs-<version>.zip`, the complete documentation set of that
-release: the shared user guide, the public API coverage matrix, the
-language guides (the Windows .NET guide once
-[#88](https://github.com/ProjectFlora/NativeOIDC/issues/88) completes it),
-the Rust API reference, the Windows ABI and
+release: the shared user guide, the public API coverage matrix, the Swift,
+Kotlin, Windows C++ and Windows .NET guides, the Rust API reference, the
+Windows ABI and
 .NET reference with the C header and the C# wrapper, and the examples, all
 from the release's commit. Unzip it and open
 `NativeOIDC-Docs-<version>/README.md`, which names the version and the full
@@ -622,7 +622,9 @@ the adapter.
   C++ and VB.NET hosts can call the C ABI directly. The
   [Windows C++ user guide](docs/windows-cpp-guide.md) walks a C++ host from
   the release ZIP through sign-in, DPAPI-protected state, refresh, logout,
-  cancellation, and error handling.
+  cancellation, and error handling. The
+  [Windows .NET user guide](docs/windows-dotnet-guide.md) does the same for a
+  C# host through these wrappers.
 - Call each operation from a worker thread. A C-compatible cancellation handle
   cancels the callback wait and in-flight HTTP operations. Successful
   authorization and refresh results contain serialized token state and must be

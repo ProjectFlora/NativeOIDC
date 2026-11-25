@@ -17,19 +17,26 @@ using System.Threading.Tasks;
 //
 // With the single argument `guide`, it instead serves the fixed sequence of
 // GuideSteps below, in order, for the C++ guide examples
-// (native/consumer-smoke/windows/cpp/guide_examples.cpp). The default mode,
-// used by the C++ and .NET release consumers, is unchanged.
+// (native/consumer-smoke/windows/cpp/guide_examples.cpp). With `dotnet-guide`,
+// it serves the same sequence with `net-`-prefixed client ID and tokens for
+// the .NET guide examples
+// (native/consumer-smoke/windows/dotnet-guide/examples/GuideExamples.cs). The
+// default mode, used by the C++ and .NET release consumers, is unchanged.
 
-var guideMode = args.Length == 1 && args[0] == "guide";
+var guideMode = args.Length == 1 && args[0] is "guide" or "dotnet-guide";
 if (args.Length != 0 && !guideMode)
 {
-    Console.Error.WriteLine("usage: NativeOidcMockProvider [guide]");
+    Console.Error.WriteLine("usage: NativeOidcMockProvider [guide | dotnet-guide]");
     return 2;
 }
+// Keeps the two guides' values apart, so that each fixture only passes
+// against its own mode.
+var p = guideMode && args[0] == "dotnet-guide" ? "net-" : "";
 
-// The C++ guide examples' requests, in the order guide_examples.cpp sends
-// them. A stalled step reads the request, sends no response, and waits for
-// the client to close the connection (the guide cancels the refresh).
+// The guide examples' requests, in the order guide_examples.cpp and
+// GuideExamples.cs send them. A stalled step reads the request, sends no
+// response, and waits for the client to close the connection (the guide
+// cancels the refresh).
 var guideSteps = new[]
 {
     // Refresh with rotation.
@@ -37,34 +44,34 @@ var guideSteps = new[]
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["grant_type"] = "refresh_token",
-            ["refresh_token"] = "guide-refresh-1",
-            ["client_id"] = "guide-client",
+            ["refresh_token"] = $"{p}guide-refresh-1",
+            ["client_id"] = $"{p}guide-client",
         },
         "application/json",
-        """{"access_token":"guide-access-2","token_type":"Bearer","expires_in":3600,"refresh_token":"guide-refresh-2"}"""),
+        $$"""{"access_token":"{{p}}guide-access-2","token_type":"Bearer","expires_in":3600,"refresh_token":"{{p}}guide-refresh-2"}"""),
         200, Stall: false),
     // Refresh rejected by the provider.
     new GuideStep("/token", new Expectation(
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["grant_type"] = "refresh_token",
-            ["refresh_token"] = "guide-refresh-2",
-            ["client_id"] = "guide-client",
+            ["refresh_token"] = $"{p}guide-refresh-2",
+            ["client_id"] = $"{p}guide-client",
         },
         "application/json",
         """{"error":"invalid_grant","error_description":"refresh token expired"}"""),
         400, Stall: false),
     // Two refreshes that never answer: the client's timeout cancels the
     // first, and another client thread cancels the second.
-    StalledRefresh("guide-refresh-2"),
-    StalledRefresh("guide-refresh-2"),
+    StalledRefresh($"{p}guide-refresh-2", $"{p}guide-client"),
+    StalledRefresh($"{p}guide-refresh-2", $"{p}guide-client"),
     // Sign-out with successful revocation.
     new GuideStep("/revoke", new Expectation(
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["token"] = "guide-refresh-2",
+            ["token"] = $"{p}guide-refresh-2",
             ["token_type_hint"] = "refresh_token",
-            ["client_id"] = "guide-client",
+            ["client_id"] = $"{p}guide-client",
         },
         "text/plain",
         ""),
@@ -73,14 +80,21 @@ var guideSteps = new[]
     new GuideStep("/revoke", new Expectation(
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["token"] = "guide-refresh-3",
+            ["token"] = $"{p}guide-refresh-3",
             ["token_type_hint"] = "refresh_token",
-            ["client_id"] = "guide-client",
+            ["client_id"] = $"{p}guide-client",
         },
         "text/plain",
         ""),
         503, Stall: false),
 };
+if (p == "net-")
+{
+    // The .NET guide examples then hold the client's state lock with one
+    // more refresh that never answers, while a logout and another refresh
+    // queue behind it (GuideExamples.cs, CheckLocalErrorsAsync).
+    guideSteps = [.. guideSteps, StalledRefresh("net-guide-refresh-4", "net-guide-client")];
+}
 
 var expectations = new Dictionary<string, Expectation>(StringComparer.Ordinal)
 {
@@ -219,13 +233,13 @@ static async Task<int> ServeGuideStepsAsync(
     return 0;
 }
 
-static GuideStep StalledRefresh(string refreshToken) =>
+static GuideStep StalledRefresh(string refreshToken, string clientId) =>
     new("/token", new Expectation(
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["grant_type"] = "refresh_token",
             ["refresh_token"] = refreshToken,
-            ["client_id"] = "guide-client",
+            ["client_id"] = clientId,
         },
         "application/json",
         ""),

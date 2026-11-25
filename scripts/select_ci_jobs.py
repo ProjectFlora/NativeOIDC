@@ -76,6 +76,7 @@ RULES = (
      {"apple", "test"}, "Apple adapters, tests or consumer"),
     (("docs/swift-xcframework.md",), {"apple", "test"}, "README shipped in the Apple package"),
     (("docs/windows-cpp-guide.md",), {"windows", "test"}, "C++ guide compiled by the Windows consumer"),
+    (("docs/windows-dotnet-guide.md",), {"windows", "test"}, ".NET guide compiled by the Windows consumer"),
     # Android and Windows adapters. native/windows/README.md is shipped in
     # the Windows package, so it is not treated as documentation.
     (("native/android/**", "native/consumer-smoke/android/**"), {"android", "test"},

@@ -82,7 +82,7 @@ refresh, logout, timeouts, and error handling.
 
 Releases after v0.8.0 also publish `NativeOIDC-Docs-<version>.zip`, the
 documentation of every platform from the same commit as this package: the
-Windows C++ guide, the Windows ABI and .NET reference, the Rust API
+Windows C++ and .NET guides, the Windows ABI and .NET reference, the Rust API
 reference, and the examples. Download it with `SHA256SUMS` from the same
 GitHub Release, verify it, and open `NativeOIDC-Docs-<version>/README.md`.
 
@@ -109,6 +109,10 @@ compatible Windows .NET application:
 ```csharp
 var stateJson = await NativeOidcWindows.AuthorizeAsync(requestJson, cancellationToken);
 ```
+
+The [Windows .NET user guide](https://github.com/ProjectFlora/NativeOIDC/blob/main/docs/windows-dotnet-guide.md)
+builds on this with project setup, JSON request construction, DPAPI-protected state storage,
+refresh, logout, cancellation, and error handling.
 
 VB.NET can call the same C ABI with P/Invoke.
 

@@ -69,6 +69,7 @@ class SharedInputTests(unittest.TestCase):
 
     def test_compiled_guide_is_not_documentation(self):
         self.assertEqual(selected("docs/windows-cpp-guide.md"), {"windows", "test"})
+        self.assertEqual(selected("docs/windows-dotnet-guide.md"), {"windows", "test"})
 
     def test_notice_template_runs_licenses_and_packages(self):
         self.assertEqual(selected("about.hbs"), {"licenses", "apple", "android", "windows"})

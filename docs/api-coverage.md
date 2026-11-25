@@ -172,11 +172,11 @@ Run the affected commands and record the commit/run URL when updating a guide.
 
 | Operation group | Explanation / existing example | Verification source | Remaining documentation |
 | --- | --- | --- | --- |
-| Configuration, authorize, callback, exchange, nonce | [Shared guide](user-guide.md), [Rust example](../examples/manual_authorization.rs), [native notes](../README.md#native-bindings) | [Protocol integration](../tests/protocol_integration.rs), core/FFI unit tests, native flow scripts below | Kotlin: [guide](kotlin-guide.md#3-authorization-tokens-and-expiry); C++: [guide](windows-cpp-guide.md#3-authorization-tokens-and-expiry); complete Swift/.NET examples: #85, #88 |
-| Tokens, expiry, save/restore, refresh | [State lifecycle](user-guide.md#save-restore-and-refresh), [Windows JSON example](../native/windows/README.md#token-refresh) | Core/FFI state and refresh unit tests; Windows consumer fixtures (C++ and .NET refresh success against a local mock provider) | Kotlin: [guide](kotlin-guide.md#4-secure-persistence-and-restoration); C++: [guide](windows-cpp-guide.md#4-secure-persistence-and-restoration); platform secure-storage and refresh examples: #85, #88 |
-| End-session, revoke, local deletion | [Logout policy](user-guide.md#logout-revocation-and-local-deletion), [Windows examples](../native/windows/README.md#end-session) | Core/FFI and Windows unit tests; Windows consumer fixtures (C++ and .NET revoke success against a local mock provider; end-session error paths only) | Kotlin: [guide](kotlin-guide.md#6-end-session-revocation-and-local-sign-out); C++: [guide](windows-cpp-guide.md#6-end-session-revocation-and-local-sign-out); Swift browser/callback examples; complete language examples: #85, #88 |
-| Registration and additional parameters | [API reference entry points](README.md#api-reference), core/FFI source | Protocol integration and core/FFI unit tests | Kotlin: [guide](kotlin-guide.md#7-dynamic-registration-and-additional-parameters); C++: [guide and Windows limit](windows-cpp-guide.md#7-dynamic-registration-and-additional-parameters); Swift examples: #85; .NET: #88 |
-| Cancellation, errors, transport | [Shared error guide](user-guide.md#cancellation-timeouts-and-errors), [Windows contract](windows-api.md) | Core/FFI unit tests, native lifecycle/transport tests | Kotlin: [guide](kotlin-guide.md#8-cancellation-errors-and-lifecycle); C++: [guide](windows-cpp-guide.md#8-cancellation-errors-and-lifecycle); direct-operation cancellation and language error examples: #85, #88 |
+| Configuration, authorize, callback, exchange, nonce | [Shared guide](user-guide.md), [Rust example](../examples/manual_authorization.rs), [native notes](../README.md#native-bindings) | [Protocol integration](../tests/protocol_integration.rs), core/FFI unit tests, native flow scripts below | Kotlin: [guide](kotlin-guide.md#3-authorization-tokens-and-expiry); C++: [guide](windows-cpp-guide.md#3-authorization-tokens-and-expiry); .NET: [guide](windows-dotnet-guide.md#3-authorization-tokens-and-expiry); complete Swift examples: #85 |
+| Tokens, expiry, save/restore, refresh | [State lifecycle](user-guide.md#save-restore-and-refresh), [Windows JSON example](../native/windows/README.md#token-refresh) | Core/FFI state and refresh unit tests; Windows consumer fixtures (C++ and .NET refresh success against a local mock provider) | Kotlin: [guide](kotlin-guide.md#4-secure-persistence-and-restoration); C++: [guide](windows-cpp-guide.md#4-secure-persistence-and-restoration); .NET: [guide](windows-dotnet-guide.md#4-secure-persistence-and-restoration); platform secure-storage and refresh examples: #85 |
+| End-session, revoke, local deletion | [Logout policy](user-guide.md#logout-revocation-and-local-deletion), [Windows examples](../native/windows/README.md#end-session) | Core/FFI and Windows unit tests; Windows consumer fixtures (C++ and .NET revoke success against a local mock provider; end-session error paths only) | Kotlin: [guide](kotlin-guide.md#6-end-session-revocation-and-local-sign-out); C++: [guide](windows-cpp-guide.md#6-end-session-revocation-and-local-sign-out); .NET: [guide](windows-dotnet-guide.md#6-end-session-revocation-and-local-sign-out); Swift browser/callback examples; complete language examples: #85 |
+| Registration and additional parameters | [API reference entry points](README.md#api-reference), core/FFI source | Protocol integration and core/FFI unit tests | Kotlin: [guide](kotlin-guide.md#7-dynamic-registration-and-additional-parameters); C++: [guide and Windows limit](windows-cpp-guide.md#7-dynamic-registration-and-additional-parameters); .NET: [guide and Windows limit](windows-dotnet-guide.md#7-dynamic-registration-and-additional-parameters); Swift examples: #85 |
+| Cancellation, errors, transport | [Shared error guide](user-guide.md#cancellation-timeouts-and-errors), [Windows contract](windows-api.md) | Core/FFI unit tests, native lifecycle/transport tests | Kotlin: [guide](kotlin-guide.md#8-cancellation-errors-and-lifecycle); C++: [guide](windows-cpp-guide.md#8-cancellation-errors-and-lifecycle); .NET: [guide](windows-dotnet-guide.md#8-cancellation-errors-and-lifecycle); direct-operation cancellation and language error examples: #85 |
 | Installation and public binding calls | [Language entry points](README.md) | [Consumer fixtures](../native/consumer-smoke), release consumer scripts | Full guide and API coverage is broader than consumer smoke; packaging: #89 |
 
 Repository checks:
@@ -201,13 +201,16 @@ Platform checks require their host SDKs and tools:
   a fresh local mock provider (`native/consumer-smoke/windows/mock-provider`),
   which checks the requests it receives. The same script builds the
   [C++ guide](windows-cpp-guide.md)'s `cpp` blocks and runs them against the
-  provider's `guide` mode. Windows unit tests additionally exercise mock
-  callback and protocol behavior.
+  provider's `guide` mode, and the [.NET guide](windows-dotnet-guide.md)'s
+  `csharp` blocks against its `dotnet-guide` mode. Windows unit tests
+  additionally exercise mock callback and protocol behavior.
 
 The Kotlin guide's examples run in the Android consumer fixture's
 `GuideExamplesTest`; see [its verification section](kotlin-guide.md#9-verification-coverage-and-known-limits).
 The Windows C++ guide's examples run in the Windows C++ consumer fixture; see
 [its verification section](windows-cpp-guide.md#9-verification-coverage-and-known-limits).
+The Windows .NET guide's examples run in the Windows .NET guide fixture; see
+[its verification section](windows-dotnet-guide.md#9-verification-coverage-and-known-limits).
 
 Consumer fixtures check only their implemented scenarios. They do not prove
 every operation in this table, mobile real-device execution, or live IdP

@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.content.pm.verify.domain.DomainVerificationManager
 import android.content.pm.verify.domain.DomainVerificationUserState
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.browser.customtabs.CustomTabsIntent
 import kotlinx.coroutines.CancellationException
@@ -30,7 +31,10 @@ import java.util.concurrent.atomic.AtomicReference
  * Configures redirect URIs used by [AndroidAuthorizationAdapter].
  *
  * When both URIs are supplied, a verified App Link is preferred and the
- * custom-scheme URI is the fallback.
+ * custom-scheme URI is the fallback. The adapter reads App Link verification
+ * with `DomainVerificationManager`, which Android provides from API 31. On
+ * API 28 to 30 it treats the App Link as unverified and uses the
+ * custom-scheme URI.
  *
  * @property appLinkUri HTTPS App Link callback URI, or `null` when unavailable.
  * @property customSchemeUri Registered custom-scheme callback URI, or `null` when unavailable.
@@ -166,16 +170,10 @@ class AndroidAuthorizationAdapter(
         )
 
     private fun isVerifiedAppLink(uri: Uri): Boolean {
-        val manager =
-            activity.getSystemService(DomainVerificationManager::class.java)
-                ?: return false
-        val state = manager.getDomainVerificationUserState(activity.packageName) ?: return false
-        if (!state.isLinkHandlingAllowed) return false
-        val hostState =
-            uri.host
-                ?.let(AndroidRedirectSelector::normalizedHost)
-                ?.let(state.hostToStateMap::get)
-        return hostState == DomainVerificationUserState.DOMAIN_STATE_VERIFIED
+        // Android has no public API for App Link verification state before
+        // API 31, so the App Link counts as unverified there.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        return DomainVerificationApi31.isVerified(activity, uri)
     }
 
     private fun resolvesToCallbackActivity(uri: Uri): Boolean {
@@ -190,6 +188,29 @@ class AndroidAuthorizationAdapter(
                 PackageManager.MATCH_DEFAULT_ONLY,
             )
         return resolved?.activityInfo?.name == AndroidAuthorizationCallbackActivity::class.java.name
+    }
+}
+
+/**
+ * Holds every reference to the API 31 domain verification classes, so the
+ * adapter class never resolves them on API 28 to 30. Call it only on API 31
+ * or later.
+ */
+private object DomainVerificationApi31 {
+    fun isVerified(
+        activity: Activity,
+        uri: Uri,
+    ): Boolean {
+        val manager =
+            activity.getSystemService(DomainVerificationManager::class.java)
+                ?: return false
+        val state = manager.getDomainVerificationUserState(activity.packageName) ?: return false
+        if (!state.isLinkHandlingAllowed) return false
+        val hostState =
+            uri.host
+                ?.let(AndroidRedirectSelector::normalizedHost)
+                ?.let(state.hostToStateMap::get)
+        return hostState == DomainVerificationUserState.DOMAIN_STATE_VERIFIED
     }
 }
 
