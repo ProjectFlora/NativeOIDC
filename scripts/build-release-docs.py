@@ -108,7 +108,9 @@ def markdown_links(text):
     for number, line in enumerate(text.splitlines(), start=1):
         if split_definition:
             split_definition = False
-            destination = _DESTINATION.match(line)
+            # A code fence ends the incomplete definition instead of being
+            # read as its destination.
+            destination = None if _FENCE.match(line) else _DESTINATION.match(line)
             if destination:
                 target = _definition_target(destination.group(1))
                 if target:
