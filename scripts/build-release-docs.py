@@ -87,6 +87,10 @@ _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # break after the colon), so it is optional here.
 _DEFINITION = re.compile(r"^ {0,3}\[(?:[^\]\\]|\\.)+\]:[ \t]*(<[^>]*>|\S+)?")
 _DESTINATION = re.compile(r"^[ \t]*(<[^>]*>|\S+)")
+# A line that starts a new Markdown block (list item, heading, block quote,
+# table row, thematic break) even without a blank line before it. Code
+# spans and links never continue across such a line.
+_BLOCK_START = re.compile(r"^[ \t]*(?:[-+*][ \t]|[-+*]$|\d{1,9}[.)](?:[ \t]|$)|#{1,6}(?:[ \t]|$)|>|\||(?:[-*_][ \t]*){3,}$)")
 
 
 class BuildError(Exception):
@@ -101,16 +105,17 @@ def markdown_links(text):
 
     Fenced code blocks and inline code spans are skipped, so code samples
     that look like links are not followed. Inline links are found per
-    paragraph (the lines between blank lines, fences and definitions), so
-    a link whose text or destination continues on the next line is found
-    too; the reported line is the one where its destination starts.
+    block (the lines between blank lines, fences, definitions and lines
+    that start a list item, heading, block quote or table row), so a link
+    whose text or destination continues on the next line is found too; the
+    reported line is the one where its destination starts.
     """
     paragraph = []
     fence = None
     # Set after a definition whose destination is on the next line.
     split_definition = False
     for number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip() or _FENCE.match(line) or _DEFINITION.match(line):
+        if not line.strip() or _FENCE.match(line) or _DEFINITION.match(line) or _BLOCK_START.match(line):
             yield from _inline_links(paragraph)
             paragraph.clear()
         if split_definition:

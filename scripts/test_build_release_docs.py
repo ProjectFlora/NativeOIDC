@@ -131,6 +131,11 @@ class LinkClosureTests(Fixture):
         write(self.repo, "docs/guide.md", "# Guide\n\n[Demo](\n  ../examples/demo.rs)\n")
         self.assertIn("examples/demo.rs", build_release_docs.link_closure(self.repo))
 
+    def test_link_between_list_items_with_backticks_is_included(self):
+        write(self.repo, "docs/guide.md",
+              "# Guide\n\n- Literal marker: `\n- [Example](../examples/demo.rs)\n- Literal marker: `\n")
+        self.assertIn("examples/demo.rs", build_release_docs.link_closure(self.repo))
+
     def test_fenced_example_after_incomplete_definition_builds(self):
         write(self.repo, "docs/guide.md", GUIDE + "\n[example]:\n```markdown\n[demo](missing.md)\n```\n")
         self.assertIn("docs/guide.md", build_release_docs.link_closure(self.repo))
@@ -189,6 +194,15 @@ class MarkdownLinkTests(unittest.TestCase):
             list(build_release_docs.markdown_links(text)),
             [(2, "../examples/demo.rs"), (4, "b.md"), (6, "c d.md")],
         )
+
+    def test_code_span_does_not_cross_block_starts(self):
+        for marker in ("- ", "* ", "1. ", "> ", "## ", "| "):
+            text = f"{marker}Literal marker: `\n{marker}[Example](example.md)\n{marker}Literal marker: `\n"
+            self.assertEqual(list(build_release_docs.markdown_links(text)), [(2, "example.md")], marker)
+
+    def test_wrapped_list_item_link(self):
+        text = "- [Demo](\n  ../examples/demo.rs)\n- next\n"
+        self.assertEqual(list(build_release_docs.markdown_links(text)), [(2, "../examples/demo.rs")])
 
     def test_inline_link_does_not_cross_paragraphs(self):
         self.assertEqual(list(build_release_docs.markdown_links("[a](\n\nb.md)\n")), [])

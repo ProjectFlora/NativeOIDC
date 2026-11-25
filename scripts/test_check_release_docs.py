@@ -40,7 +40,9 @@ REPO_FILES = {
         "[example]: ../examples/manual_authorization.rs\n"
         "\n[Windows header][header]\n\n[header]:\n    ../native/windows/include/native_oidc_windows.h\n"
         "\n[C# project](\n  ../native/windows/dotnet/NativeOidcWindows.csproj)\n"
+        "\n- Literal marker: `\n- [List only](list-only.md)\n- Literal marker: `\n"
     ),
+    "docs/list-only.md": "# Linked only from a list item\n",
     "docs/user-guide.md": "# Guide\n",
     "docs/api-coverage.md": "# Coverage\n",
     "docs/swift-xcframework.md": "# Swift install\n",
@@ -162,6 +164,18 @@ class CheckTests(unittest.TestCase):
             self.errors(archive),
             "repo/docs/README.md:15: link `../native/windows/dotnet/NativeOidcWindows.csproj` names "
             "repo/native/windows/dotnet/NativeOidcWindows.csproj, which is not in the archive",
+        )
+
+    def test_broken_link_between_list_items_with_backticks(self):
+        # The list items around the link each hold one backtick; they are
+        # separate blocks, so no code span hides the link.
+        archive = self.build()
+        with zipfile.ZipFile(archive) as handle:
+            self.assertIn(f"{TOP}/repo/docs/list-only.md", handle.namelist())
+        self.rewrite(archive, lambda files: files.pop("repo/docs/list-only.md"))
+        self.assert_error(
+            self.errors(archive),
+            "repo/docs/README.md:18: link `list-only.md` names repo/docs/list-only.md, which is not in the archive",
         )
 
     def test_link_leaving_the_archive(self):
