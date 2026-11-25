@@ -107,6 +107,7 @@ Try another method if one fails, before concluding that a result is unavailable.
 | Review comments | `gh api repos/{owner}/{repo}/pulls/{PR}/comments` |
 | PR comments | `gh api repos/{owner}/{repo}/issues/{PR}/comments` |
 | Thread states | `gh api graphql` (`reviewThreads` on the pull request) |
+| Issue fields (`Priority`, `Effort`) | `gh api -H 'X-GitHub-Api-Version: 2026-03-10' repos/{owner}/{repo}/issues/{number}/issue-field-values`: read `issue_field_name` and `single_select_option.name` (a field that is not set is absent). Needs only read access to issues; no `read:project` scope |
 
 ### Before starting work
 - Run `gh auth status` and retrieve the issue (and the PR, if resuming one). If either fails, stop and report before making any changes

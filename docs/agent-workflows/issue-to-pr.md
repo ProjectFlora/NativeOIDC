@@ -58,7 +58,7 @@ An automation can set the order in which "Choosing a target" checks its lines, w
 - `Phases:` still applies: lines for phases this run does not handle are skipped, whatever the order says
 - State the order you used in the first message of the run (manual mode) or in the claim comment (scheduled mode)
 
-**Priority** is the `Priority` field of the issue (in the GitHub Project that tracks it), ranked `Urgent` > `High` > `Medium` > `Low` > not set. A PR takes the Priority of its linked issue.
+**Priority** is the `Priority` issue field (a GitHub issue field on the issue itself, not a GitHub Projects field; see "How to retrieve results" in [common-rules.md](common-rules.md)), ranked `Urgent` > `High` > `Medium` > `Low` > not set. A PR takes the Priority of its linked issue.
 
 - Within any line, pick the candidate with the highest Priority, and among equal Priorities the oldest. Where a line below says "the oldest", read it this way
 - With `priority` as the first token of `Order:`, collect the candidates of every line this run handles, then pick the one with the highest Priority. Among equal Priorities, the line order given by the rest of the list decides, then the oldest
@@ -66,7 +66,7 @@ An automation can set the order in which "Choosing a target" checks its lines, w
 
 ### Priority and Effort filters (scheduled mode)
 
-An automation can limit itself to some values of the issue's `Priority` and `Effort` fields (in the GitHub Project that tracks the issue), so that automations with different models share the work:
+An automation can limit itself to some values of the issue's `Priority` and `Effort` issue fields (on the issue itself, not in GitHub Projects), so that automations with different models share the work:
 
 | Filter | Values (`none` = field not set) | Applies to |
 |---|---|---|
