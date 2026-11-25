@@ -270,27 +270,34 @@ jobs:
           path: dist/native-oidc-android-${{ needs.validate_version.outputs.version }}.aar
           if-no-files-found: error
 
-  api_docs:
-    name: Build API reference
+  # The documentation set (#89): the guides, the API references and the
+  # examples from this commit, with the Rust API reference built here.
+  # Releases up to v0.8.0 published NativeOIDC-API-Docs (rustdoc only)
+  # instead; those assets are not rewritten.
+  release_docs:
+    name: Build release documentation set
     needs: [validate_version, keyserver]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned like the package jobs, so a rebuild of the same commit
+      # uses the same rustdoc.
+      - uses: dtolnay/rust-toolchain@1.100.0
       - uses: Swatinem/rust-cache@v2
+      # Builds and runs the examples the documentation ships.
       - run: cargo test --locked --workspace --all-targets --all-features
       - run: cargo doc --locked --no-deps
-      - name: Package Rust API reference
+      - name: Build and validate the documentation set
         env:
           RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
         run: |
-          mkdir -p dist
-          cd target/doc
-          zip -rq "$GITHUB_WORKSPACE/dist/NativeOIDC-API-Docs-$RELEASE_VERSION.zip" .
+          python3 scripts/build-release-docs.py "$RELEASE_VERSION" "$GITHUB_SHA" --rustc-version "$(rustc -V)"
+          python3 scripts/check-release-docs.py "dist/NativeOIDC-Docs-$RELEASE_VERSION.zip" \
+            --version "$RELEASE_VERSION" --commit-sha "$GITHUB_SHA" --repo-root .
       - uses: actions/upload-artifact@v7
         with:
-          name: release-api-docs
-          path: dist/NativeOIDC-API-Docs-${{ needs.validate_version.outputs.version }}.zip
+          name: release-docs
+          path: dist/NativeOIDC-Docs-${{ needs.validate_version.outputs.version }}.zip
           if-no-files-found: error
 
   windows:
@@ -437,7 +444,7 @@ jobs:
   publish:
     if: ${{ inputs.publish }}
     name: Publish GitHub Release
-    needs: [validate_version, keyserver, apple, android, api_docs, windows, apple_consumer, android_consumer, windows_consumer, spm_manifest]
+    needs: [validate_version, keyserver, apple, android, release_docs, windows, apple_consumer, android_consumer, windows_consumer, spm_manifest]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -455,7 +462,7 @@ jobs:
           path: dist
       - uses: actions/download-artifact@v8
         with:
-          name: release-api-docs
+          name: release-docs
           path: dist
       - uses: actions/download-artifact@v8
         with:
@@ -491,13 +498,13 @@ jobs:
             "NativeOIDC-Apple-$RELEASE_VERSION.zip" \
             "native-oidc-android-$RELEASE_VERSION.aar" \
             "native-oidc-windows-$RELEASE_VERSION.zip" \
-            "NativeOIDC-API-Docs-$RELEASE_VERSION.zip" \
+            "NativeOIDC-Docs-$RELEASE_VERSION.zip" \
             > SHA256SUMS
           gh release create "v$RELEASE_VERSION" \
             "NativeOIDC-Apple-$RELEASE_VERSION.zip" \
             "native-oidc-android-$RELEASE_VERSION.aar" \
             "native-oidc-windows-$RELEASE_VERSION.zip" \
-            "NativeOIDC-API-Docs-$RELEASE_VERSION.zip" \
+            "NativeOIDC-Docs-$RELEASE_VERSION.zip" \
             SHA256SUMS \
             --verify-tag \
             --title "NativeOIDC v$RELEASE_VERSION" \
