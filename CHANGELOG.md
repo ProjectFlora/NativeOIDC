@@ -47,6 +47,10 @@ interoperability testing and support policies are still evolving. Each release r
   **Re-run failed jobs** without a rebuild: the release workflow records
   each Central Portal deployment and never uploads a version twice
   ([#180](https://github.com/ProjectFlora/NativeOIDC/issues/180)).
+- The SPM bindings match check now runs inside the `Tests` job on the same
+  generation (reusing `generate-bindings.sh`'s fingerprint cache), so the
+  duplicate Linux binding generation is gone; `check-spm-bindings.sh` is
+  unchanged and keeps working when run standalone locally.
 
 ## [0.8.0] - 2026-11-22
 
