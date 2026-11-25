@@ -51,9 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked --workspace --all-targets --all-features
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.99.1
 
   test:
     name: Tests
@@ -62,14 +63,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Test Python scripts
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
-      - run: cargo test --locked --workspace --all-targets --all-features
-      - run: cargo doc --locked --no-deps
-      - name: Generate native bindings
-        run: scripts/generate-bindings.sh
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust-toolchain
 
   licenses:
     name: Dependency licenses
@@ -78,20 +73,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      # cargo-deny and cargo-about at pinned versions, so a new release of
-      # either cannot change the result (deny.toml, about.toml).
-      - uses: taiki-e/install-action@v2
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust-toolchain
+      - name: Setup Cargo Tools
+        uses: ./.github/actions/setup-cargo-tools
         with:
-          tool: cargo-deny@0.20.2,cargo-about@0.9.3
-      - run: cargo deny check licenses
-      - run: scripts/generate-third-party-licenses.sh
-      - uses: actions/upload-artifact@v7
-        with:
-          name: third-party-licenses
-          path: target/licenses/
-          if-no-files-found: error
-          retention-days: 14
+          tools: cargo-deny@0.20.2,cargo-about@0.9.3
 
   apple_adapters:
     name: Apple adapters validation (iOS ${{ matrix.ios_simulator }})
@@ -128,67 +115,8 @@ jobs:
           PY
           )
           echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.3
-      # The real-ditto tests run only here: they need macOS tools, so the
-      # Linux `test` job (which runs the rest of the suite) skips them.
-      - name: Test the zip normalizer against real ditto
-        run: python3 -m unittest discover -s scripts -p 'test_normalize_zip.py' -k RealDittoTestCase -v
-      # The four Apple targets are built only in release, by Package Apple
-      # XCFramework; the package, consumer and Swift package checks use
-      # those slices. A debug build of the same targets was dropped because
-      # no check used its output (#175). The host debug library that the
-      # smoke test in check-apple-adapters.sh links against is built by
-      # scripts/generate-bindings.sh.
-      - run: scripts/check-apple-adapters.sh
-      # The guard fires before any build step, so this regression-checks
-      # it in seconds: it must refuse an existing output directory, name
-      # that directory, and direct at removing it. The next step also
-      # removes the directory this check creates.
-      - name: Check the packaging output guard
-        run: |
-          mkdir -p target/apple/release-package
-          if scripts/package-apple-xcframework.sh 0.0.0-ci > "$RUNNER_TEMP/guard.log" 2>&1; then
-              cat "$RUNNER_TEMP/guard.log"
-              echo "the packaging output guard did not fire" >&2
-              exit 1
-          fi
-          grep -F "Package output directory already exists: $GITHUB_WORKSPACE/target/apple/release-package" "$RUNNER_TEMP/guard.log"
-          grep -F "rm -rf \"$GITHUB_WORKSPACE/target/apple/release-package\"" "$RUNNER_TEMP/guard.log"
-      - name: Remove cached XCFramework package output
-        run: rm -rf target/apple/release-package
-      - name: Package Apple XCFramework
-        run: scripts/package-apple-xcframework.sh 0.0.0-ci
-      - name: Validate current Apple package consumer
-        run: scripts/check-apple-release-consumer.sh target/apple/release-package/NativeOIDC-Apple-0.0.0-ci.zip
-      - name: Validate Swift package (host build, tests, iOS simulator)
-        run: scripts/check-spm-package.sh target/apple/release-package/NativeOIDC-Apple-0.0.0-ci.zip
-      - uses: actions/upload-artifact@v7
-        with:
-          name: apple-xcframework-ios-${{ matrix.ios_simulator }}
-          path: target/apple/release-package/NativeOIDC-Apple-0.0.0-ci.zip
-          if-no-files-found: error
-          retention-days: 14
-
-  # The required "Apple adapters validation" check. It passes when both iOS
-  # configurations pass, or when the selection skipped them because the
-  # change cannot affect Apple; a failure, a cancel, or a skip for any other
-  # reason fails it.
-  apple_validation:
-    name: Apple adapters validation
-    needs: [changes, apple_adapters]
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Require both iOS configurations to pass, or an intended skip
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python3 scripts/select_ci_jobs.py verify
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust-toolchain
 
   spm_bindings:
     name: Swift package bindings match
@@ -197,9 +125,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: scripts/check-spm-bindings.sh
 
   spm_manifest:
     name: Swift package manifest is consistent
@@ -208,7 +133,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: scripts/check-spm-manifest.sh
 
   windows_core:
     name: Windows core target validation
@@ -217,53 +141,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --locked --lib --target x86_64-pc-windows-msvc
-      - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
-      - run: dotnet build native/windows/dotnet/NativeOidcWindows.csproj --configuration Release
-      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.3
-      - run: scripts/generate-third-party-licenses.sh
-        shell: bash
-      - name: Build current Windows package and validate external consumers
-        shell: pwsh
-        run: |
-          scripts/package-windows.ps1 -Package target/windows-audit-package
-          scripts/check-windows-release-consumer.ps1 -Package target/windows-audit-package.zip
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-audit-package
-          path: target/windows-audit-package.zip
-          if-no-files-found: error
-          retention-days: 14
-
-  windows_client:
-    name: Windows 11 client consumers (x64 emulation)
-    needs: [changes, windows_core]
-    if: ${{ !cancelled() && needs.windows_core.result == 'success' }}
-    runs-on: windows-11-arm
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: windows-audit-package
-          path: dist
-      - name: Record and verify client host
-        shell: pwsh
-        run: |
-          $os = Get-CimInstance Win32_OperatingSystem
-          if ($os.ProductType -ne 1 -or $os.Caption -notlike '*Windows 11*') {
-            throw "Expected a Windows 11 client runner: $($os.Caption)"
-          }
-          $record = "$($os.Caption), version $($os.Version), build $($os.BuildNumber); host $env:PROCESSOR_ARCHITECTURE; x64 consumers under emulation; image $env:ImageVersion"
-          Write-Output $record
-          $record | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-      - name: Execute x64 C++ and .NET consumers on Windows 11
-        shell: pwsh
-        run: scripts/check-windows-release-consumer.ps1 -Package dist/windows-audit-package.zip
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust-toolchain
 
   android_adapters:
     name: Android adapters validation
@@ -272,80 +151,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - name: Setup Android
+        uses: ./.github/actions/setup-android
         with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
+          ndk: 27.2.12479018
           packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
-      - uses: dtolnay/rust-toolchain@stable
-      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.3
-      - name: Configure Android NDK
-        env:
-          ANDROID_API_LEVEL: '28'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Cache compiled Cargo dependencies for the host and both Android ABIs
-      # that check-android-targets.sh builds under Gradle. The workspace's own
-      # crates are rebuilt each run: caching them too (cache-workspace-crates)
-      # did not shorten warm runs and grew the cache by about 40% (#190).
-      # The key adds the NDK version and native API level, which rust-cache
-      # does not hash on its own, so changing either starts a fresh cache.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
-      - uses: gradle/actions/setup-gradle@v6
-      - run: ./native/android/gradlew -p native/android testDebugUnitTest
-      - id: android_release_aar
-        run: ./native/android/gradlew -p native/android assembleRelease
-      - id: android_emulator_kvm
-        name: Enable Android emulator hardware acceleration
-        run: sudo chmod a+rw /dev/kvm
-      # The emulator tests run on the minSdk (API 28) and on the compileSdk and
-      # consumer targetSdk (API 35), one after the other in this job, so the
-      # required "Android adapters validation" check covers both (#166).
-      - name: Run Android callback tests on an emulator (API 28)
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
+          compile-sdk: android-35
+          build-tools: 35.0.0
           api-level: 28
-          arch: x86_64
-          target: google_apis_playstore
-          disable-linux-hw-accel: false
-          disable-animations: true
-          script: &android-emulator-tests |
-            ./native/android/gradlew -p native/android connectedDebugAndroidTest || { echo "::group::Android emulator diagnostics"; adb devices -l || true; adb shell getprop || true; adb shell dumpsys activity activities || true; adb shell dumpsys window windows || true; adb exec-out uiautomator dump /dev/tty || true; adb logcat -d -t 500 || true; echo "::endgroup::"; exit 1; }
-            scripts/check-android-release-consumer.sh native/android/build/outputs/aar/native-oidc-android-release.aar
-      # Runs even when the API 28 step fails, so each level reports its own
-      # result. It still needs the release AAR and KVM from the steps above.
-      - name: Run Android callback tests on an emulator (API 35)
-        if: ${{ !cancelled() && steps.android_release_aar.outcome == 'success' && steps.android_emulator_kvm.outcome == 'success' }}
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          arch: x86_64
-          target: google_apis_playstore
-          disable-linux-hw-accel: false
-          disable-animations: true
-          script: *android-emulator-tests
-      - name: Verify Android native libraries in AAR
-        run: |
-          aar=native/android/build/outputs/aar/native-oidc-android-release.aar
-          unzip -Z1 "$aar" | grep -Fx jni/arm64-v8a/libnative_oidc.so
-          unzip -Z1 "$aar" | grep -Fx jni/x86_64/libnative_oidc.so
-      - name: Verify Maven Central publication contents
-        run: scripts/check-android-maven-publication.sh 0.0.0-SNAPSHOT
-      - uses: actions/upload-artifact@v7
-        with:
-          name: android-aar
-          path: native/android/build/outputs/aar/native-oidc-android-release.aar
-          if-no-files-found: error
-          retention-days: 14
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust-toolchain
 
   lint:
     name: Formatting and Clippy
@@ -354,12 +169,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust toolchain with components
+        uses: ./.github/actions/setup-rust-toolchain
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
   coverage:
     name: Coverage
@@ -371,53 +184,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust toolchain with components
+        uses: ./.github/actions/setup-rust-toolchain
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked
-      - name: Generate LCOV report
-        run: cargo llvm-cov --workspace --all-targets --all-features --lcov --output-path lcov.info
-      - name: Report coverage summary
-        id: coverage_summary
-        run: |
-          # Generate the raw text report; the conversions below read it.
-          cargo llvm-cov report | tee coverage-summary.txt
-
-          # Render the report as a Markdown table in the job summary. The raw
-          # output is fixed-width text, whose columns misalign in the summary's
-          # proportional font. Each file row and the TOTAL row have 13 fields
-          # (Filename, Regions, Missed Regions, Cover, Functions, Missed
-          # Functions, Executed, Lines, Missed Lines, Cover, Branches, Missed
-          # Branches, Cover); the header row has 17 because its multi-word names
-          # split on whitespace, and the separator rows are bare dashes, so
-          # NF == 13 selects exactly the data rows. The three "Cover" columns
-          # are disambiguated in the Markdown header.
-          {
-            echo "# Coverage Summary"
-            echo
-            echo "| Filename | Regions | Missed Regions | Region Cover | Functions | Missed Functions | Executed | Lines | Missed Lines | Line Cover | Branches | Missed Branches | Branch Cover |"
-            echo "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
-            awk 'NF == 13 && $1 != "TOTAL" { printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 }' coverage-summary.txt
-            awk 'NF == 13 && $1 == "TOTAL" { printf "| **%s** | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 }' coverage-summary.txt
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          # Publish the totals the PR report job reads from the step outputs.
-          # In the raw TOTAL row, field 10 is the line Cover and field 7 the
-          # function Executed %, matching the report's expected format.
-          line_coverage=$(awk '$1 == "TOTAL" { print $10; exit }' coverage-summary.txt)
-          function_coverage=$(awk '$1 == "TOTAL" { print $7; exit }' coverage-summary.txt)
-          test -n "$line_coverage"
-          test -n "$function_coverage"
-          echo "line_coverage=$line_coverage" >> "$GITHUB_OUTPUT"
-          echo "function_coverage=$function_coverage" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v7
+      - name: Setup Cargo Tools
+        uses: ./.github/actions/setup-cargo-tools
         with:
-          name: lcov-coverage
-          path: lcov.info
-          if-no-files-found: error
-          retention-days: 14
+          tools: cargo-llvm-cov@0.9.2
 
   # One check for the whole run: it passes only when every job passed or was
   # skipped because the selection left it out, and names each job that
@@ -429,10 +203,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Require every selected job to pass
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python3 scripts/select_ci_jobs.py verify
 
   # GITHUB_TOKEN is write-enabled only for same-repository PRs; fork PRs keep read-only checks.
   report:
@@ -465,10 +235,10 @@ jobs:
               ['Formatting and Clippy', '${{ needs.lint.result }}', '${{ needs.changes.outputs.lint }}'],
             ];
             const resultLabel = (result, selected) =>
-              result === 'success' ? '✅ passed' :
-              result === 'failure' ? '❌ failed' :
-              result === 'skipped' && selectionKnown && selected === 'false' ? '⏭️ skipped (not affected)' :
-              `⚠️ ${result}`;
+              result === 'success' ? '? passed' :
+              result === 'failure' ? '? failed' :
+              result === 'skipped' && selectionKnown && selected === 'false' ? '?? skipped (not affected)' :
+              `?? ${result}`;
             const coverageResult = '${{ needs.coverage.result }}';
             const coverageSelected = '${{ needs.changes.outputs.coverage }}';
             const formatCoverage = value =>
@@ -483,11 +253,11 @@ jobs:
               '| Check | Result |',
               '| --- | --- |',
               ...checks.map(([name, result, selected]) => `| ${name} | ${resultLabel(result, selected)} |`),
-              `| Coverage | ${resultLabel(coverageResult, coverageSelected)} — lines ${lineCoverage}, functions ${functionCoverage} |`,
+              `| Coverage | ${resultLabel(coverageResult, coverageSelected)} ? lines ${lineCoverage}, functions ${functionCoverage} |`,
               '',
               selectionKnown && process.env.SELECTION_REPORT
                 ? process.env.SELECTION_REPORT
-                : `⚠️ Job selection ${'${{ needs.changes.result }}'}: every job was required to run.`,
+                : `?? Job selection ${'${{ needs.changes.result }}'}: every job was required to run.`,
               '',
               `[View workflow run](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId})`,
             ].join('\n');
@@ -504,8 +274,7 @@ jobs:
             );
             if (existing) {
               await github.rest.issues.updateComment({
-                owner,
-                repo,
+                owner, repo,
                 comment_id: existing.id,
                 body,
               });
