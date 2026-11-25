@@ -70,8 +70,8 @@ and UniFFI facade. These records and enums form their input/output contracts:
 - Native adapters: Swift authorization initializers, `authorize` and `cancel`,
   iOS presentation context and ephemeral-session option, macOS browser-opening
   closure, Android redirect configuration, adapter exceptions and callback activity. See
-  [Apple source](../native/apple/IOSAuthorizationAdapter.swift),
-  [macOS source](../native/apple/MacOSAuthorizationAdapter.swift),
+  [Apple source](../Sources/NativeOIDC/IOSAuthorizationAdapter.swift),
+  [macOS source](../Sources/NativeOIDC/MacOSAuthorizationAdapter.swift),
   [Android source](../native/android/src/main/kotlin/net/projectflora/nativeoidc/AndroidAuthorizationAdapter.kt)
   and [internal redirect selection implementation](../native/android/src/main/kotlin/net/projectflora/nativeoidc/AndroidRedirectSelector.kt)
   (the selector is not public API).
@@ -114,7 +114,7 @@ Success paths: D1, R1, R2, G1, E1, and S1 assert the returned values (discovery 
 ### Variants these fixtures cannot produce
 
 - **`.Transport`** — the UniFFI callback boundary is lossy by design: a Swift transport error that is not a `FfiError` becomes `FfiError::Transport` in the generated vtable (`CALL_UNEXPECTED_ERROR`), but the `NativeTransport` wrapper in [src/ffi.rs](../src/ffi.rs) rewraps every non-`.Cancelled` transport error into `.TransportFailure` carrying the display text. D7 pins that observable form (`"HTTP transport failed"`), so the bare variant can never be distinguished on the Swift side; the wrapper mapping itself is covered by the Rust unit tests in [src/ffi.rs](../src/ffi.rs).
-- **`.Clock`** — produced only when `SystemTime::now()` predates the Unix epoch, during state construction in [src/authorization.rs](../src/authorization.rs) and ID Token validation in [src/id_token.rs](../src/id_token.rs). No scripted fixture can make the host clock misbehave, and the C4–C5 refreshes are cancelled before they reach state construction. Rust unit tests cover the mapping.
+- **`.Clock`** — produced only when `SystemTime::now()` predates the Unix epoch, during state construction in [src/authorization/state.rs](../src/authorization/state.rs) and ID Token validation in [src/id_token.rs](../src/id_token.rs). No scripted fixture can make the host clock misbehave, and the C4–C5 refreshes are cancelled before they reach state construction. Rust unit tests cover the mapping.
 - **`.Randomness`** — produced only when the platform secure random generator fails (the `random_token` used for the E1 end-session state and the authorization path in [src/pkce.rs](../src/pkce.rs)). The fixtures cannot make the OS CSPRNG fail, so the variant is unreachable through the generated bindings without fault injection. Rust unit tests cover the mapping.
 - **`.Internal`** — produced only if `FfiAuthenticationState.toJson` fails to serialize the state (serde, in [src/ffi.rs](../src/ffi.rs)). The state shape contains only strings, integers, and options, which serde always serializes, so the S1 round trip cannot fail this way and no fixture can force it.
 
@@ -160,7 +160,7 @@ Success paths: D1, R1, R2, G1, E1, and S1 assert the returned values (discovery 
 ### Variants these fixtures cannot produce
 
 - **`FfiException.Transport`** — the UniFFI callback boundary is lossy by design: a Kotlin transport error that is not a `FfiException` becomes `FfiError::Transport` in the generated vtable (`CALL_UNEXPECTED_ERROR`), but the `NativeTransport` wrapper in [src/ffi.rs](../src/ffi.rs) rewraps every non-`Cancelled` transport error into `TransportFailure` carrying the display text. D7 pins that observable form (`"HTTP transport failed"`), so the bare variant can never be distinguished on the Kotlin side; the wrapper mapping itself is covered by the Rust unit tests in [src/ffi.rs](../src/ffi.rs).
-- **`FfiException.Clock`** — produced only when `SystemTime::now()` predates the Unix epoch, during state construction in [src/authorization.rs](../src/authorization.rs) and ID Token validation in [src/id_token.rs](../src/id_token.rs). No scripted fixture can make the host clock misbehave, and the C4–C5 refreshes are cancelled before they reach state construction. Rust unit tests cover the mapping.
+- **`FfiException.Clock`** — produced only when `SystemTime::now()` predates the Unix epoch, during state construction in [src/authorization/state.rs](../src/authorization/state.rs) and ID Token validation in [src/id_token.rs](../src/id_token.rs). No scripted fixture can make the host clock misbehave, and the C4–C5 refreshes are cancelled before they reach state construction. Rust unit tests cover the mapping.
 - **`FfiException.Randomness`** — produced only when the platform secure random generator fails (the `random_token` used for the E1 end-session state and the authorization path in [src/pkce.rs](../src/pkce.rs)). The fixtures cannot make the OS CSPRNG fail, so the variant is unreachable through the generated bindings without fault injection. Rust unit tests cover the mapping.
 - **`FfiException.Internal`** — produced only if `FfiAuthenticationState.toJson` fails to serialize the state (serde, in [src/ffi.rs](../src/ffi.rs)). The state shape contains only strings, integers, and options, which serde always serializes, so the S1 round trip cannot fail this way and no fixture can force it.
 
