@@ -330,10 +330,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v4
+      - name: Setup Android
+        uses: ./.github/actions/setup-android
         with:
           packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          compile-sdk: android-35
+          build-tools: 35.0.0
       - uses: gradle/actions/setup-gradle@v6
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
@@ -383,10 +385,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v4
+      - name: Setup Android
+        uses: ./.github/actions/setup-android
         with:
           packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          compile-sdk: android-35
+          build-tools: 35.0.0
       - uses: gradle/actions/setup-gradle@v6
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
@@ -436,3 +440,4 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: scripts/check-windows-release-consumer.ps1 -Package "dist/native-oidc-windows-$env:RELEASE_VERSION.zip"
+
