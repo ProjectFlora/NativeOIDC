@@ -12,7 +12,7 @@ creates the tag itself (see [Why CI creates the tag](#why-ci-creates-the-tag)).
 | 1. Prepare | Pull request to `main` | Version, changelog, and docs updated |
 | 2. Candidate run | Release workflow, `publish: false` | All packages built and consumer-validated; nothing published |
 | 3. Publish run | Release workflow from `main`, `publish: true` | Release commit, `vX.Y.Z` tag, GitHub Release with assets and `SHA256SUMS`, and the Android library on Maven Central |
-| 4. Verify | Published release consumer validation workflow; real system-browser verification on a Mac and a Windows machine | Published assets and the Swift package resolve and build; the real-browser result is recorded |
+| 4. Verify | Published release consumer validation workflow; real system-browser verification on a Mac and a Windows machine | Published assets and the Swift package resolve and build; the published documentation set matches its commit; the real-browser result is recorded |
 
 Every release run — a candidate or a publish — starts with a key server
 check: it derives the fingerprint of every primary key in the
@@ -99,6 +99,14 @@ workflows together, after checking the
 [runner-images README](https://github.com/actions/runner-images/tree/main/images/macos)
 for the image's installed Xcode versions and simulator runtimes.
 
+The **Build release documentation set** step summary gives the
+documentation set's file count, the SHA-256 of the archive (the set is
+assembled twice and both assemblies must be identical), and which language
+guides still being written are present; an absent guide names its tracking
+issue. Download the `release-docs` artifact, open
+`NativeOIDC-Docs-X.Y.Z/README.md`, and check that it names the version and
+the dispatched commit, and that a few of its guide links open.
+
 When a change touches the Maven Central publication, add
 `-f dry_run_maven=true` to the candidate run. The `dry_run_maven` job runs the
 `publish_maven` steps against the real Maven Central and Central Portal, but
@@ -141,8 +149,9 @@ Then the `publish` job:
    dispatched `main` commit (it fails if anything else changed).
 2. Creates the annotated `vX.Y.Z` tag on that commit and pushes **only the
    tag**. `main` is not updated.
-3. Creates the GitHub Release with the Apple, Android, Windows, and API docs
-   assets plus `SHA256SUMS`, and release notes generated from the previous
+3. Creates the GitHub Release with the Apple, Android, and Windows packages
+   and the documentation set (`NativeOIDC-Docs-X.Y.Z.zip`) as assets, plus
+   `SHA256SUMS`, and release notes generated from the previous
    release (see [Release notes range](#release-notes-range)).
 
 After the GitHub Release is created, the `publish_maven` job publishes
@@ -250,8 +259,19 @@ sources and javadoc jars, and their signatures), a strict
 dependencies, and the full consumer smoke on an emulator (Issue #137).
 
 Its `spm` job resolves the `vX.Y.Z` tag through Swift Package Manager by URL, which also verifies the
-manifest's checksum against the published archive. Record the run URL in
-the release tracking issue.
+manifest's checksum against the published archive.
+
+Its `docs` job downloads `NativeOIDC-Docs-X.Y.Z.zip`, verifies it against
+`SHA256SUMS`, and checks it with `scripts/check-release-docs.py` against the
+tag's first parent, the commit the release was built from (the release
+commit changes only `Package.swift`): the version and full commit SHA on
+the entry page, the required files, every relative link, the file list,
+and that every repository file in the set is byte-identical to that
+commit. A successful candidate run does not show that the published set is
+correct; this job does.
+
+Record the run URL, with the result of every job including `docs`, in the
+release tracking issue.
 
 CI does not open a real system browser on macOS or Windows. Run the
 [real system-browser verification](real-browser-verification.md) on a Mac
@@ -536,7 +556,10 @@ fails closed instead of uploading a second deployment. To resume:
   coordinates of v0.7.0 and later, and the license notices of v0.7.1 and
   later (see [License notices](#license-notices)). Releases up to v0.6.0
   used the former names, and v0.7.0 lacks the notices, so none of them can
-  be revalidated with the current workflow.
+  be revalidated with the current workflow. Releases up to v0.8.0 published
+  the Rust API reference alone as `NativeOIDC-API-Docs-<version>.zip`
+  instead of the documentation set; the `docs` job reports them as not
+  applicable, and their assets are not rewritten.
 
 - The `publish` job needs `contents: write`. If tag rulesets protect `v*`,
   allow `github-actions[bot]` (the GitHub Actions app) to create those tags.

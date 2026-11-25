@@ -287,6 +287,16 @@ of the temporary CI validation artifacts:
 | Rust API reference | [NativeOIDC-API-Docs-0.8.0.zip](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.8.0/NativeOIDC-API-Docs-0.8.0.zip) |
 | SHA-256 checksums for all four assets | [SHA256SUMS](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.8.0/SHA256SUMS) |
 
+Releases after v0.8.0 replace `NativeOIDC-API-Docs-<version>.zip` with
+`NativeOIDC-Docs-<version>.zip`, the complete documentation set of that
+release: the shared user guide, the public API coverage matrix, the Swift,
+Kotlin, Windows C++ and Windows .NET guides, the Rust API reference, the
+Windows ABI and
+.NET reference with the C header and the C# wrapper, and the examples, all
+from the release's commit. Unzip it and open
+`NativeOIDC-Docs-<version>/README.md`, which names the version and the full
+commit SHA; its links work without a repository checkout.
+
 Download the desired asset and `SHA256SUMS` from the same release. For example,
 from the directory containing the Android AAR and checksum file:
 

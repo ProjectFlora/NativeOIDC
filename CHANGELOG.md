@@ -6,6 +6,20 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+### Distribution
+
+- Each release now publishes `NativeOIDC-Docs-<version>.zip` in place of
+  `NativeOIDC-API-Docs-<version>.zip`: the complete documentation set of
+  the release commit, with the shared user guide, the public API coverage
+  matrix, the language guides, the Rust API reference, the Windows ABI and
+  .NET reference with the C header and the C# wrapper, and the examples.
+  Its entry page names the version and the full commit SHA, and its links
+  work without a repository checkout. CI builds and checks the set on every
+  change to it, and the published release consumer validation checks the
+  published asset against `SHA256SUMS` and the release commit. Releases up
+  to v0.8.0 keep their `NativeOIDC-API-Docs` asset
+  ([#89](https://github.com/ProjectFlora/NativeOIDC/issues/89)).
+
 ### Fixed
 
 - On Android API 28–30, `AndroidAuthorizationAdapter.authorize` no longer

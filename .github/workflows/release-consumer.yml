@@ -436,3 +436,67 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: scripts/check-windows-release-consumer.ps1 -Package "dist/native-oidc-windows-$env:RELEASE_VERSION.zip"
+
+  docs:
+    name: Validate published documentation set
+    runs-on: ubuntu-latest
+    steps:
+      # The tag points at the release commit, which changes only
+      # Package.swift on top of the commit the release was built from
+      # (release.yml publish). The documentation set records that build
+      # commit, so the checks run against the tag's first parent.
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0
+      - id: commit
+        name: Find the commit the release was built from
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! -f scripts/check-release-docs.py ]]; then
+            # Releases before #89 published NativeOIDC-API-Docs (rustdoc
+            # only), not the documentation set, and they are not rewritten.
+            echo "v$RELEASE_VERSION predates the release documentation set (#89): nothing to validate" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "applicable=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          if [[ "$changed" != Package.swift ]]; then
+            echo "v$RELEASE_VERSION is not a release commit that changes only Package.swift: $changed" >&2
+            exit 1
+          fi
+          build_commit=$(git rev-parse HEAD^1)
+          git checkout -q --detach "$build_commit"
+          echo "sha=$build_commit" >> "$GITHUB_OUTPUT"
+          echo "applicable=true" >> "$GITHUB_OUTPUT"
+      - name: Download and verify the documentation set
+        if: steps.commit.outputs.applicable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          mkdir dist
+          gh release download "v$RELEASE_VERSION" \
+            --pattern "NativeOIDC-Docs-$RELEASE_VERSION.zip" \
+            --pattern SHA256SUMS \
+            --dir dist
+          cd dist
+          grep -F "  NativeOIDC-Docs-$RELEASE_VERSION.zip" SHA256SUMS | shasum -a 256 -c -
+      - name: Validate the published documentation set
+        if: steps.commit.outputs.applicable == 'true'
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          BUILD_COMMIT: ${{ steps.commit.outputs.sha }}
+        run: |
+          mkdir "$RUNNER_TEMP/docs"
+          unzip -q "dist/NativeOIDC-Docs-$RELEASE_VERSION.zip" -d "$RUNNER_TEMP/docs"
+          python3 scripts/check-release-docs.py "$RUNNER_TEMP/docs" \
+            --version "$RELEASE_VERSION" --commit-sha "$BUILD_COMMIT" --repo-root .
+          {
+            echo "### Documentation set"
+            echo
+            echo "- \`NativeOIDC-Docs-$RELEASE_VERSION.zip\` matches SHA256SUMS: \`$(sha256sum "dist/NativeOIDC-Docs-$RELEASE_VERSION.zip" | cut -d' ' -f1)\`"
+            echo "- Entry, links, required files and file list valid for $RELEASE_VERSION at \`$BUILD_COMMIT\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -80,6 +80,12 @@ The [Windows C++ user guide](https://github.com/ProjectFlora/NativeOIDC/blob/mai
 builds on this with CMake setup, JSON request construction, DPAPI-protected state storage,
 refresh, logout, timeouts, and error handling.
 
+Releases after v0.8.0 also publish `NativeOIDC-Docs-<version>.zip`, the
+documentation of every platform from the same commit as this package: the
+Windows C++ and .NET guides, the Windows ABI and .NET reference, the Rust API
+reference, and the examples. Download it with `SHA256SUMS` from the same
+GitHub Release, verify it, and open `NativeOIDC-Docs-<version>/README.md`.
+
 ## .NET interop
 
 The same C ABI can be called from C# or VB.NET using P/Invoke. Declare UTF-8

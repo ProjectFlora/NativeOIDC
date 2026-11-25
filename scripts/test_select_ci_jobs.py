@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import subprocess
 import tempfile
@@ -12,9 +13,15 @@ def selected(*paths):
 
 
 class RepresentativeChangeTests(unittest.TestCase):
-    def test_documentation_only_runs_nothing(self):
-        self.assertEqual(selected("README.md", "CHANGELOG.md", "docs/user-guide.md",
-                                  "docs/agent-workflows/issue-to-pr.md", "ROADMAP.md"), set())
+    def test_unshipped_documentation_runs_nothing(self):
+        self.assertEqual(selected("CHANGELOG.md", "docs/agent-workflows/issue-to-pr.md", ".gitignore"), set())
+
+    def test_release_documentation_runs_tests(self):
+        # The Tests job builds and checks the release documentation set.
+        self.assertEqual(selected("README.md", "docs/user-guide.md", "ROADMAP.md", "FEATURE_MATRIX.md"), {"test"})
+        self.assertEqual(selected("scripts/build-release-docs.py"), {"test"})
+        self.assertEqual(selected("scripts/check-release-docs.py"), {"test"})
+        self.assertEqual(selected("scripts/test_check_release_docs.py"), {"test"})
 
     def test_shared_rust_core_runs_every_platform(self):
         self.assertEqual(selected("src/authorization/session.rs"), ALL - {"licenses", "spm_manifest"})
@@ -23,11 +30,11 @@ class RepresentativeChangeTests(unittest.TestCase):
         self.assertEqual(selected("src/windows/loopback.rs"), {"msrv", "test", "lint", "coverage", "windows"})
 
     def test_swift_adapter_runs_apple_only(self):
-        self.assertEqual(selected("Sources/NativeOIDC/MacOSAuthorizationAdapter.swift"), {"apple"})
+        self.assertEqual(selected("Sources/NativeOIDC/MacOSAuthorizationAdapter.swift"), {"apple", "test"})
 
     def test_swift_tests_run_apple(self):
         # #167 moves macOS smoke checks into SwiftTests.
-        self.assertEqual(selected("SwiftTests/NativeOIDCTests/NewTests.swift"), {"apple"})
+        self.assertEqual(selected("SwiftTests/NativeOIDCTests/NewTests.swift"), {"apple", "test"})
 
     def test_generated_swift_bindings_run_apple_and_binding_check(self):
         self.assertEqual(selected("Sources/NativeOIDC/native_oidc.swift"), {"apple", "spm_bindings"})
@@ -36,11 +43,11 @@ class RepresentativeChangeTests(unittest.TestCase):
         # #166 runs these on API 28 and API 35.
         self.assertEqual(
             selected("native/android/src/androidTest/kotlin/net/projectflora/nativeoidc/AndroidExternalBrowserAuthorizationTest.kt"),
-            {"android"},
+            {"android", "test"},
         )
 
     def test_windows_adapter_runs_windows_only(self):
-        self.assertEqual(selected("native/windows/dotnet/NativeOidcWindows.cs"), {"windows"})
+        self.assertEqual(selected("native/windows/dotnet/NativeOidcWindows.cs"), {"windows", "test"})
 
     def test_workflow_change_runs_everything(self):
         self.assertEqual(selected(".github/workflows/ci.yml"), ALL)
@@ -57,12 +64,12 @@ class RepresentativeChangeTests(unittest.TestCase):
 class SharedInputTests(unittest.TestCase):
     def test_files_shipped_in_packages_are_not_documentation(self):
         self.assertEqual(selected("LICENSE"), {"apple", "android", "windows"})
-        self.assertEqual(selected("docs/swift-xcframework.md"), {"apple"})
-        self.assertEqual(selected("native/windows/README.md"), {"windows"})
+        self.assertEqual(selected("docs/swift-xcframework.md"), {"apple", "test"})
+        self.assertEqual(selected("native/windows/README.md"), {"windows", "test"})
 
     def test_compiled_guide_is_not_documentation(self):
-        self.assertEqual(selected("docs/windows-cpp-guide.md"), {"windows"})
-        self.assertEqual(selected("docs/windows-dotnet-guide.md"), {"windows"})
+        self.assertEqual(selected("docs/windows-cpp-guide.md"), {"windows", "test"})
+        self.assertEqual(selected("docs/windows-dotnet-guide.md"), {"windows", "test"})
 
     def test_notice_template_runs_licenses_and_packages(self):
         self.assertEqual(selected("about.hbs"), {"licenses", "apple", "android", "windows"})
@@ -74,7 +81,7 @@ class SharedInputTests(unittest.TestCase):
         self.assertEqual(selected("scripts/package-windows.ps1"), {"test", "windows"})
         self.assertEqual(selected("scripts/test_select_ios_simulator.py"), {"test"})
         self.assertEqual(selected("scripts/check-macos-real-browser.sh"), {"test"})
-        self.assertEqual(selected("native/apple/MacOSRealBrowserCheck.swift"), {"apple"})
+        self.assertEqual(selected("native/apple/MacOSRealBrowserCheck.swift"), {"apple", "test"})
         self.assertEqual(selected("scripts/generate-bindings.sh"), {"test", "apple", "android", "spm_bindings"})
         self.assertEqual(selected("scripts/apple-phase-timing.sh"), {"test", "apple"})
         self.assertEqual(selected("scripts/check-apple-static-link-smoke.sh"), {"test", "apple"})
@@ -89,7 +96,19 @@ class SharedInputTests(unittest.TestCase):
     def test_union_of_paths(self):
         self.assertEqual(selected("README.md", "native/windows/include/native_oidc_windows.h",
                                   "native/consumer-smoke/android/app/build.gradle.kts"),
-                         {"android", "windows"})
+                         {"android", "windows", "test"})
+
+    def test_release_documentation_set_inputs_run_tests(self):
+        # Every repository file the release documentation set ships must
+        # select the Tests job, which builds and checks the set; a guide
+        # that starts linking a new file is caught here.
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        spec = importlib.util.spec_from_file_location(
+            "build_release_docs", os.path.join(root, "scripts", "build-release-docs.py"))
+        build_release_docs = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build_release_docs)
+        missing = [path for path in build_release_docs.link_closure(root) if "test" not in classify(path)[0]]
+        self.assertEqual(missing, [], "add `test` to the rule for each path (docs/ci-job-selection.md)")
 
     def test_every_tracked_file_is_classified(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -134,7 +153,7 @@ class DiffRangeTests(GitRepositoryTestCase):
         self.commit("docs/user-guide.md")
         self.commit("native/windows/README.md")
         jobs, context = compute("push", {"before": before})
-        self.assertEqual(set(jobs), {"windows"})
+        self.assertEqual(set(jobs), {"windows", "test"})
         self.assertEqual(context["files"], ["docs/user-guide.md", "native/windows/README.md"])
 
     def test_first_push_runs_everything(self):
@@ -163,7 +182,7 @@ class DiffRangeTests(GitRepositoryTestCase):
         self.commit("src/lib.rs")  # on the base branch: not part of the PR
         self.git("merge", "-q", "--no-ff", "-m", "merge", "feature")
         jobs, context = compute("pull_request", {})
-        self.assertEqual(set(jobs), {"apple"})
+        self.assertEqual(set(jobs), {"apple", "test"})
         self.assertEqual(context["files"], ["Sources/NativeOIDC/IOSAuthorizationAdapter.swift"])
 
     def test_pull_request_without_merge_commit_runs_everything(self):
@@ -235,15 +254,15 @@ class VerifyTests(unittest.TestCase):
 class ReportTests(unittest.TestCase):
     def test_report_lists_every_group_and_file(self):
         report = select_ci_jobs.report_markdown(
-            select(["docs/user-guide.md", "native/android/build.gradle.kts"]),
+            select(["CHANGELOG.md", "native/android/build.gradle.kts"]),
             {"mode": "diff", "base": "a" * 40, "head": "b" * 40,
-             "files": ["docs/user-guide.md", "native/android/build.gradle.kts"]},
+             "files": ["CHANGELOG.md", "native/android/build.gradle.kts"]},
         )
         for job in JOBS:
             self.assertIn(f"| {job} |", report)
         self.assertIn("| android | yes | Android adapter, tests or consumer |", report)
         self.assertIn("| windows | no |", report)
-        self.assertIn("- `docs/user-guide.md` → none (documentation)", report)
+        self.assertIn("- `CHANGELOG.md` → none (documentation)", report)
 
     def test_report_names_why_everything_runs(self):
         report = select_ci_jobs.report_markdown(select_ci_jobs.select_all("first push"),
