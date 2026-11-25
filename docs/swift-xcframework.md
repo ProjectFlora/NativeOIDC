@@ -24,6 +24,11 @@ unzip "NativeOIDC-Apple-$VERSION.zip"
 Replace `0.8.0` with the release version you downloaded. The archive extracts
 to `NativeOIDC-Apple/`.
 
+Releases after v0.8.0 also publish `NativeOIDC-Docs-<version>.zip`, the
+documentation of every platform from the same commit as this package: the
+Swift guide, the shared user guide, the API references, and the examples.
+Verify it the same way and open `NativeOIDC-Docs-<version>/README.md`.
+
 ## Add the package to Xcode
 
 If you install with Swift Package Manager (v0.5.0 and later), skip this

@@ -2,6 +2,8 @@
 
 Return to the [documentation index](README.md). This reference supplements
 the release's Linux-generated rustdoc, which excludes the Windows module.
+Releases after v0.8.0 publish both, with the header and the C# wrapper, in
+the release documentation set (`NativeOIDC-Docs-<version>.zip`).
 Use the [Windows user guide](../native/windows/README.md) for JSON examples,
 the [Windows C++ user guide](windows-cpp-guide.md) for complete C++ usage,
 and the [public header](../native/windows/include/native_oidc_windows.h) for

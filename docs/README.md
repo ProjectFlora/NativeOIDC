@@ -20,8 +20,8 @@ by each language and the examples and checks available today.
 
 These are the current entry points, not a claim that all language guides are
 complete. [#63](https://github.com/ProjectFlora/NativeOIDC/issues/63) tracks
-completion; [#89](https://github.com/ProjectFlora/NativeOIDC/issues/89) tracks
-distribution of the complete, version-matched documentation set. Apple and
+completion. Each release after v0.8.0 publishes this documentation as a
+version-matched set (see [API reference](#api-reference)). Apple and
 Android public APIs target Swift and Kotlin only; Objective-C and Java hosts
 should use an app-side wrapper, as described in the
 [Swift guide](swift-guide.md#objective-c-interoperability) (Objective-C) or the
@@ -35,13 +35,23 @@ types and functions used by Swift and Kotlin. The source API names in that
 reference are Rust names; use the generated bindings from the same release
 for Swift/Kotlin spelling and signatures.
 
-The existing `NativeOIDC-API-Docs-<version>.zip` release asset contains Rust
-HTML documentation. It is built on Linux, so it excludes the Windows module.
+Each release after v0.8.0 publishes `NativeOIDC-Docs-<version>.zip`, built
+from the release's commit: this index and every file it links (the guides,
+the coverage matrix, the references, the header, the wrapper, and the
+examples, at their repository paths under `repo/`), and the Rust API
+reference under `rust-api/`. After unzipping, start at
+`NativeOIDC-Docs-<version>/README.md`, which names the version and the full
+commit SHA and lists every file; relative links work inside the unzipped
+directory. Verify the archive with the release's `SHA256SUMS`. Releases up
+to v0.8.0 published the Rust API reference alone, as
+`NativeOIDC-API-Docs-<version>.zip`.
+
+The Rust API reference is built on Linux, so it excludes the Windows module.
 The [Windows ABI and .NET reference](windows-api.md), the
 [C header](../native/windows/include/native_oidc_windows.h), and the
 [C# wrapper](../native/windows/dotnet/NativeOidcWindows.cs) cover that public
 surface without requiring Windows rustdoc. A local Windows `cargo doc` also
-includes the Windows Rust module. Full user-guide packaging remains #89.
+includes the Windows Rust module.
 
 ## Version and verification policy
 
