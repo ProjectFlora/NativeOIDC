@@ -810,10 +810,42 @@ already-invalid token. With explicit configuration, revocation needs
 Without it, the call throws and sign-out still deletes the state. A host
 that also wants the access token revoked makes a second call.
 
-For a full logout, call `EndProviderSessionAsync` first (it needs the ID
-Token), then `SignOutAsync`. Because `AuthClient` holds its state lock for
-each whole operation, a refresh that started earlier finishes before
-sign-out deletes the state, and cannot write it back afterwards.
+For a full logout, end the provider session first (it needs the ID Token),
+then sign out locally. End-session can fail: the configuration may have no
+end-session endpoint, the browser may not open, or the user may close it
+until the timeout or a Cancel button stops the wait. Local sign-out must
+still run, with its own timeout and without the cancelled token:
+
+```csharp
+// The failures of a full logout; null when that step succeeded.
+public sealed record LogoutResult(Exception? EndSessionError, Exception? RevocationError);
+
+public sealed partial class AuthClient
+{
+    // Ends the provider session, then signs out locally whatever the
+    // end-session result. cancellationToken stops only the end-session.
+    public async Task<LogoutResult> LogOutAsync(
+        TimeSpan endSessionTimeout, CancellationToken cancellationToken = default)
+    {
+        Exception? endSessionError = null;
+        try
+        {
+            await EndProviderSessionAsync(endSessionTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            endSessionError = error;
+        }
+        var revocationError = await SignOutAsync(TimeSpan.FromSeconds(30), CancellationToken.None)
+            .ConfigureAwait(false);
+        return new LogoutResult(endSessionError, revocationError);
+    }
+}
+```
+
+Because `AuthClient` holds its state lock for each whole operation, a
+refresh that started earlier finishes before sign-out deletes the state, and
+cannot write it back afterwards.
 
 ## 7. Dynamic registration and additional parameters
 
@@ -979,6 +1011,9 @@ is missing:
   state unchanged.
 - `SignOutAsync` revokes the refresh token and deletes the state, and still
   deletes it when revocation fails with HTTP 503.
+- `LogOutAsync` still deletes the state when end-session fails (no
+  end-session endpoint) or its token was cancelled, and reports both
+  failures.
 - Errors that need no browser: a single explicit endpoint, a non-loopback
   redirect, a reserved additional parameter, end-session without its
   endpoint, refresh without a stored state, and a `null` request. Sign-in
@@ -1033,7 +1068,7 @@ Evidence for this guide (commit `e1078cd`):
 | Tokens and expiry | [3](#tokens-and-expiry) | Host reads state JSON | Fixture |
 | Secure persistence and restoration | [4](#4-secure-persistence-and-restoration) | Host (DPAPI example) | Fixture |
 | Refresh and re-save | [5](#5-refresh-and-re-save) | Available | Fixture: success, rejection, cancellation |
-| End-session | [6](#provider-end-session-rp-initiated-logout) | Available | Compile and early error only; browser flow by Windows unit tests with a simulated browser |
+| End-session | [6](#provider-end-session-rp-initiated-logout) | Available | Compile, early error, and local sign-out after its failure; browser flow by Windows unit tests with a simulated browser |
 | Revocation and local deletion | [6](#token-revocation-and-local-deletion) | Revocation available; deletion is host | Fixture: success and failure |
 | Dynamic registration | [7](#7-dynamic-registration-and-additional-parameters) | Not exposed | — |
 | Additional parameters | [7](#7-dynamic-registration-and-additional-parameters) | Available | Fixture: rejection |

@@ -259,6 +259,21 @@ async Task CheckLocalErrorsAsync()
             is OperationCanceledException,
         "AuthorizeAsync with a token cancelled before the call throws OperationCanceledException");
 
+    // A full logout whose end-session fails before the browser opens still
+    // signs out locally. Without a revocation endpoint the revocation fails
+    // locally too, so no request reaches the provider.
+    using var noLogoutEndpoints = new AuthClient(MockConfig() with { RevocationEndpoint = null }, store);
+    store.Save(StoredStateJson("net-guide-refresh-4", Tokens.UnixNow() + 3600));
+    var logout = await noLogoutEndpoints.LogOutAsync(TimeSpan.FromSeconds(10));
+    Check(logout.EndSessionError is InvalidOperationException, "LogOutAsync reports the failed end-session");
+    Check(logout.RevocationError is InvalidOperationException, "LogOutAsync reports the failed revocation");
+    Check(store.Load() is null, "LogOutAsync deletes the stored state when end-session fails");
+
+    store.Save(StoredStateJson("net-guide-refresh-4", Tokens.UnixNow() + 3600));
+    var cancelledLogout = await noLogoutEndpoints.LogOutAsync(TimeSpan.FromSeconds(10), cancelled.Token);
+    Check(cancelledLogout.EndSessionError is OperationCanceledException, "LogOutAsync reports the cancelled end-session");
+    Check(store.Load() is null, "LogOutAsync deletes the stored state when its token was cancelled");
+
     var command = new SignInCommand(single);
     Check(await command.RunAsync() == "Sign-in failed. Try again.", "SignInCommand reports a failed sign-in");
     Check(!command.IsRunning, "SignInCommand is idle after the sign-in finished");
