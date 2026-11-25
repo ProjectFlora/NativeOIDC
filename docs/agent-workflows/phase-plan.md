@@ -50,6 +50,7 @@ This phase changes no code and opens no PR.
 ```
 
 - Estimate the Effort from the plan itself: about `Very Low` for a change to one file with no new tests, up to `Very High` for changes across modules, public API, or security-sensitive logic. A smaller model may implement plans estimated `Low` or `Very Low`, so keep those plans short, with exact files and steps
+- If the issue already has an Effort, write the plan for that Effort (a `Low` or `Very Low` issue gets a short, exact plan). If your estimate differs, say so in the Effort estimate; do not change the field
 - A plan is ready only when it has no open questions. Do not leave "TBD" or "to be decided during implementation"
 - Each new plan comment replaces the previous one. The implement phase uses the latest plan (see "Reading plan comments" in [common-rules.md](common-rules.md))
 
