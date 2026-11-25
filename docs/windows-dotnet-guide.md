@@ -368,7 +368,7 @@ public sealed partial class AuthClient : IDisposable
         });
 
     // Runs one operation under the state lock. The timeout starts once the
-    // lock is held; when it elapses, the operation's token is cancelled.
+    // lock is held.
     private async Task<T> RunLockedAsync<T>(
         TimeSpan timeout,
         CancellationToken cancellationToken,
@@ -377,14 +377,25 @@ public sealed partial class AuthClient : IDisposable
         await stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            limit.CancelAfter(timeout);
-            return await operation(limit.Token).ConfigureAwait(false);
+            return await WithTimeoutAsync(timeout, cancellationToken, operation).ConfigureAwait(false);
         }
         finally
         {
             stateLock.Release();
         }
+    }
+
+    // Passes the operation a token that is cancelled by cancellationToken or
+    // when the timeout elapses. An operation already cancelled does not start.
+    private static async Task<T> WithTimeoutAsync<T>(
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<T>> operation)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        limit.CancelAfter(timeout);
+        limit.Token.ThrowIfCancellationRequested();
+        return await operation(limit.Token).ConfigureAwait(false);
     }
 }
 ```
@@ -749,12 +760,15 @@ public sealed partial class AuthClient
 {
     // Does not touch the stored state.
     public Task<string> EndProviderSessionAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        RunLockedAsync<string>(timeout, cancellationToken, token =>
-        {
-            var state = store.Load();
-            var idTokenHint = state is null ? null : Tokens.Read(state).IdToken;
-            return NativeOidcWindows.EndSessionAsync(Requests.EndSession(config, idTokenHint), token);
-        });
+        RunLockedAsync(timeout, cancellationToken, EndSessionLockedAsync);
+
+    // Called with the state lock held.
+    private Task<string> EndSessionLockedAsync(CancellationToken token)
+    {
+        var state = store.Load();
+        var idTokenHint = state is null ? null : Tokens.Read(state).IdToken;
+        return NativeOidcWindows.EndSessionAsync(Requests.EndSession(config, idTokenHint), token);
+    }
 }
 ```
 
@@ -779,28 +793,31 @@ public sealed partial class AuthClient
     // Returns the revocation failure, or null. The user is signed out
     // locally either way.
     public Task<Exception?> SignOutAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
-        RunLockedAsync<Exception?>(timeout, cancellationToken, async token =>
+        RunLockedAsync(timeout, cancellationToken, SignOutLockedAsync);
+
+    // Called with the state lock held.
+    private async Task<Exception?> SignOutLockedAsync(CancellationToken token)
+    {
+        Exception? revocationError = null;
+        try
         {
-            Exception? revocationError = null;
-            try
+            if (store.Load() is { } state)
             {
-                if (store.Load() is { } state)
-                {
-                    var tokens = Tokens.Read(state);
-                    var request = tokens.RefreshToken is { } refreshToken
-                        ? Requests.Revocation(config, refreshToken, "refresh_token")
-                        : Requests.Revocation(config, tokens.AccessToken, "access_token");
-                    await NativeOidcWindows.RevokeAsync(request, token).ConfigureAwait(false);
-                }
+                var tokens = Tokens.Read(state);
+                var request = tokens.RefreshToken is { } refreshToken
+                    ? Requests.Revocation(config, refreshToken, "refresh_token")
+                    : Requests.Revocation(config, tokens.AccessToken, "access_token");
+                await NativeOidcWindows.RevokeAsync(request, token).ConfigureAwait(false);
             }
-            catch (Exception error)
-            {
-                // Provider, network, timeout, or an unreadable state.
-                revocationError = error;
-            }
-            store.Remove();
-            return revocationError;
-        });
+        }
+        catch (Exception error)
+        {
+            // Provider, network, timeout, or an unreadable state.
+            revocationError = error;
+        }
+        store.Remove();
+        return revocationError;
+    }
 }
 ```
 
@@ -814,7 +831,11 @@ For a full logout, end the provider session first (it needs the ID Token),
 then sign out locally. End-session can fail: the configuration may have no
 end-session endpoint, the browser may not open, or the user may close it
 until the timeout or a Cancel button stops the wait. Local sign-out must
-still run, with its own timeout and without the cancelled token:
+still run, with its own timeout and without the cancelled token. Both steps
+also run under one hold of the state lock. Otherwise a sign-in started
+while the logout page is open could save a new session, and sign-out would
+then revoke and delete that session instead of the one whose ID Token went
+to the provider:
 
 ```csharp
 // The failures of a full logout; null when that step succeeded.
@@ -823,29 +844,40 @@ public sealed record LogoutResult(Exception? EndSessionError, Exception? Revocat
 public sealed partial class AuthClient
 {
     // Ends the provider session, then signs out locally whatever the
-    // end-session result. cancellationToken stops only the end-session.
+    // end-session result. cancellationToken stops only the end-session; the
+    // logout itself always runs, so it waits for the lock without a token.
     public async Task<LogoutResult> LogOutAsync(
         TimeSpan endSessionTimeout, CancellationToken cancellationToken = default)
     {
-        Exception? endSessionError = null;
+        await stateLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            await EndProviderSessionAsync(endSessionTimeout, cancellationToken).ConfigureAwait(false);
+            Exception? endSessionError = null;
+            try
+            {
+                await WithTimeoutAsync(endSessionTimeout, cancellationToken, EndSessionLockedAsync)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception error)
+            {
+                endSessionError = error;
+            }
+            var revocationError = await WithTimeoutAsync(
+                TimeSpan.FromSeconds(30), CancellationToken.None, SignOutLockedAsync).ConfigureAwait(false);
+            return new LogoutResult(endSessionError, revocationError);
         }
-        catch (Exception error)
+        finally
         {
-            endSessionError = error;
+            stateLock.Release();
         }
-        var revocationError = await SignOutAsync(TimeSpan.FromSeconds(30), CancellationToken.None)
-            .ConfigureAwait(false);
-        return new LogoutResult(endSessionError, revocationError);
     }
 }
 ```
 
 Because `AuthClient` holds its state lock for each whole operation, a
 refresh that started earlier finishes before sign-out deletes the state, and
-cannot write it back afterwards.
+cannot write it back afterwards. An operation queued behind the logout runs
+after the state is deleted.
 
 ## 7. Dynamic registration and additional parameters
 
@@ -1013,7 +1045,8 @@ is missing:
   deletes it when revocation fails with HTTP 503.
 - `LogOutAsync` still deletes the state when end-session fails (no
   end-session endpoint) or its token was cancelled, and reports both
-  failures.
+  failures. A refresh queued while the logout runs starts only after the
+  state is deleted, so it sends no request.
 - Errors that need no browser: a single explicit endpoint, a non-loopback
   redirect, a reserved additional parameter, end-session without its
   endpoint, refresh without a stored state, and a `null` request. Sign-in

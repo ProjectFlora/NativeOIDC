@@ -274,6 +274,18 @@ async Task CheckLocalErrorsAsync()
     Check(cancelledLogout.EndSessionError is OperationCanceledException, "LogOutAsync reports the cancelled end-session");
     Check(store.Load() is null, "LogOutAsync deletes the stored state when its token was cancelled");
 
+    // A refresh started while the logout runs waits for the whole logout.
+    // Had it run between end-session and sign-out, it would have sent a
+    // refresh request, which the provider rejects as unexpected.
+    store.Save(StoredStateJson("net-guide-refresh-4", 1));
+    var runningLogout = noLogoutEndpoints.LogOutAsync(TimeSpan.FromSeconds(10));
+    var queuedRefresh = noLogoutEndpoints.RefreshAsync(TimeSpan.FromSeconds(10));
+    await runningLogout;
+    var queuedError = await CaughtAsync(() => queuedRefresh);
+    Check(queuedError is InvalidOperationException && queuedError.Message == "Not signed in.",
+        "a refresh queued behind LogOutAsync runs after the state is deleted");
+    Check(store.Load() is null, "the queued refresh stores no state");
+
     var command = new SignInCommand(single);
     Check(await command.RunAsync() == "Sign-in failed. Try again.", "SignInCommand reports a failed sign-in");
     Check(!command.IsRunning, "SignInCommand is idle after the sign-in finished");
