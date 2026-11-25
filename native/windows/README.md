@@ -104,6 +104,10 @@ compatible Windows .NET application:
 var stateJson = await NativeOidcWindows.AuthorizeAsync(requestJson, cancellationToken);
 ```
 
+The [Windows .NET user guide](https://github.com/ProjectFlora/NativeOIDC/blob/main/docs/windows-dotnet-guide.md)
+builds on this with project setup, JSON request construction, DPAPI-protected state storage,
+refresh, logout, cancellation, and error handling.
+
 VB.NET can call the same C ABI with P/Invoke.
 
 The adapter currently targets the `x86_64-pc-windows-msvc` Rust target. The

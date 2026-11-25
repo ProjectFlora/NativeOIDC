@@ -4,6 +4,7 @@ Return to the [documentation index](README.md). This reference supplements
 the release's Linux-generated rustdoc, which excludes the Windows module.
 Use the [Windows user guide](../native/windows/README.md) for JSON examples,
 the [Windows C++ user guide](windows-cpp-guide.md) for complete C++ usage,
+the [Windows .NET user guide](windows-dotnet-guide.md) for complete C# usage,
 and the [public header](../native/windows/include/native_oidc_windows.h) for
 declarations. This describes the source revision being read, not a new ABI.
 
@@ -85,7 +86,8 @@ features must not be presented as Windows ABI operations.
 
 The [wrapper](../native/windows/dotnet/NativeOidcWindows.cs) in namespace
 `ProjectFlora.NativeOidc` targets .NET Standard 2.1 and loads
-`native_oidc.dll` using P/Invoke with UTF-8 strings and Cdecl.
+`native_oidc.dll` using P/Invoke with UTF-8 strings and Cdecl. For complete
+C# usage, see the [Windows .NET user guide](windows-dotnet-guide.md).
 
 | Method | Return |
 | --- | --- |
@@ -100,5 +102,4 @@ Null input throws `ArgumentNullException`; native cancellation becomes
 `OperationCanceledException`; other native errors or unusable native results
 become `InvalidOperationException`. Deployment/loading errors can also surface
 from P/Invoke. There are no additional typed discovery, state, registration
-or expiry APIs in the wrapper. Installation and complete C# examples are
-tracked by [#88](https://github.com/ProjectFlora/NativeOIDC/issues/88).
+or expiry APIs in the wrapper.

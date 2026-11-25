@@ -184,8 +184,9 @@ before the 1.0.0 tag; the pre-1.0 release policy in
 - Windows desktop applications use the C ABI in `native/windows/include` for
   authorization, token refresh, OIDC end-session, and token revocation. The ABI
   is callable from C++ and from .NET through P/Invoke; see
-  [`native/windows/README.md`](native/windows/README.md) and the
-  [Windows C++ user guide](docs/windows-cpp-guide.md).
+  [`native/windows/README.md`](native/windows/README.md), the
+  [Windows C++ user guide](docs/windows-cpp-guide.md), and the
+  [Windows .NET user guide](docs/windows-dotnet-guide.md).
 - Generate the public Rust API reference locally with
   `cargo doc --locked --no-deps`; the HTML output is written to
   `target/doc/native_oidc/index.html`.
@@ -611,7 +612,9 @@ the adapter.
   C++ and VB.NET hosts can call the C ABI directly. The
   [Windows C++ user guide](docs/windows-cpp-guide.md) walks a C++ host from
   the release ZIP through sign-in, DPAPI-protected state, refresh, logout,
-  cancellation, and error handling.
+  cancellation, and error handling. The
+  [Windows .NET user guide](docs/windows-dotnet-guide.md) does the same for a
+  C# host through these wrappers.
 - Call each operation from a worker thread. A C-compatible cancellation handle
   cancels the callback wait and in-flight HTTP operations. Successful
   authorization and refresh results contain serialized token state and must be

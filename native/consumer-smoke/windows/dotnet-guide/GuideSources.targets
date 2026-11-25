@@ -1,0 +1,40 @@
+<Project>
+  <!--
+    Shared by the .NET guide fixtures. Before each build it extracts the C#
+    code of docs/windows-dotnet-guide.md (extract-guide-blocks.ps1) into the
+    intermediate directory and compiles it with the package's wrapper, so the
+    guide's code is what gets built. Windows-only, like the guide: the
+    extraction runs Windows PowerShell.
+
+    Set NativeOidcPackage to the extracted Windows release ZIP. Set
+    CompileGuideProgram to true to also compile the guide's Program.cs block.
+  -->
+  <PropertyGroup>
+    <NativeOidcGuide Condition="'$(NativeOidcGuide)' == ''">$(MSBuildThisFileDirectory)..\..\..\..\docs\windows-dotnet-guide.md</NativeOidcGuide>
+  </PropertyGroup>
+
+  <!-- The package items from the guide's project file (section 1). -->
+  <ItemGroup>
+    <Compile Include="$(NativeOidcPackage)\dotnet\NativeOidcWindows.cs" Link="NativeOidc\NativeOidcWindows.cs" />
+    <None Include="$(NativeOidcPackage)\native_oidc.dll" Link="native_oidc.dll" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <Target Name="NativeOidcCheckPackage" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(NativeOidcPackage)\dotnet\NativeOidcWindows.cs') Or !Exists('$(NativeOidcPackage)\native_oidc.dll')"
+           Text="NativeOidcPackage must point to the extracted Windows release package, got '$(NativeOidcPackage)'." />
+  </Target>
+
+  <Target Name="NativeOidcExtractGuide" BeforeTargets="BeforeBuild" DependsOnTargets="NativeOidcCheckPackage">
+    <PropertyGroup>
+      <!-- IntermediateOutputPath is only defined after the project body. -->
+      <NativeOidcGuideOutput>$([MSBuild]::NormalizeDirectory($(MSBuildProjectDirectory), $(IntermediateOutputPath), 'guide'))</NativeOidcGuideOutput>
+    </PropertyGroup>
+    <Exec Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)extract-guide-blocks.ps1&quot; -Guide &quot;$(NativeOidcGuide)&quot; -OutputDirectory &quot;$(NativeOidcGuideOutput.TrimEnd('\'))&quot;" />
+    <ItemGroup>
+      <Compile Include="$(NativeOidcGuideOutput)GuideClient.cs" />
+      <Compile Include="$(NativeOidcGuideOutput)Program.cs" Condition="'$(CompileGuideProgram)' == 'true'" />
+      <FileWrites Include="$(NativeOidcGuideOutput)GuideClient.cs;$(NativeOidcGuideOutput)Program.cs" />
+    </ItemGroup>
+  </Target>
+</Project>
