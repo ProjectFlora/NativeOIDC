@@ -35,20 +35,30 @@ runs:
         #   served; the 0.9.2 release publishes a prebuilt
         #   x86_64-unknown-linux-gnu for the ubuntu-latest coverage job, and
         #   its report format is what the summary step parses).
-        declare -A versions=(
-          [cargo-deny]=0.20.2
-          [cargo-about]=0.9.3
-          [cargo-llvm-cov]=0.9.2
-        )
+        #
+        # A case lookup, not an associative array: the macOS runners run steps
+        # with /bin/bash, which is still Bash 3.2 and has no `declare -A`
+        # (this step must resolve on every OS the jobs run on).
+        version_for() {
+          case "$1" in
+            cargo-deny) echo "0.20.2" ;;
+            cargo-about) echo "0.9.3" ;;
+            cargo-llvm-cov) echo "0.9.2" ;;
+            *) echo "" ;;
+          esac
+        }
         specs=()
         for tool in $(tr ',' ' ' <<< "${{ inputs.tools }}"); do
           if [[ "$tool" == *@* ]]; then
             specs+=("$tool")
-          elif [[ -n "${versions[$tool]:-}" ]]; then
-            specs+=("$tool@${versions[$tool]}")
           else
-            echo "::error::Unknown cargo tool '${tool}': add its version to the map in setup-cargo-tools deliberately, or pass an explicit ${tool}@version."
-            exit 1
+            version=$(version_for "$tool")
+            if [[ -n "$version" ]]; then
+              specs+=("$tool@$version")
+            else
+              echo "::error::Unknown cargo tool '${tool}': add its version to the map in setup-cargo-tools deliberately, or pass an explicit ${tool}@version."
+              exit 1
+            fi
           fi
         done
         if [ "${#specs[@]}" -eq 0 ]; then
