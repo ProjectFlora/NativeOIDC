@@ -89,7 +89,7 @@ RULES = (
     (("scripts/check-spm-manifest.sh", "scripts/update-package-swift.py"), {"test", "spm_manifest"},
      "Swift package manifest check"),
     (("scripts/test_normalize_zip.py",), {"test", "apple"}, "zip normalizer tests (real ditto runs on macOS)"),
-    (("scripts/apple-phase-timing.sh", "scripts/check-apple-adapters.sh",
+    (("scripts/apple-phase-timing.sh", "scripts/boot-ios-simulator.sh", "scripts/check-apple-adapters.sh",
       "scripts/check-apple-release-consumer.sh", "scripts/check-apple-static-link-smoke.sh",
       "scripts/check-ios-authorization-flow.sh", "scripts/check-spm-package.sh",
       "scripts/install-ios-simulator-runtime.sh", "scripts/ios-mock-oauth-provider.py",

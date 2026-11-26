@@ -6,15 +6,16 @@ set -euo pipefail
 # order and records how long each took (scripts/apple-phase-timing.sh) in the
 # step summary, including a failed run's last phase:
 #
-# 1. Build: UniFFI bindings and the four Rust release slices.
+# 1. Build: UniFFI bindings and the four Rust release slices. Meanwhile the
+#    iOS simulator boots in the background (scripts/boot-ios-simulator.sh).
 # 2. Stage: Swift sources, notices, README, headers and the universal macOS
 #    library in target/apple/release-package.
 # 3. XCFramework: create it, and check that its canonical Info.plist is the
 #    same across two create-xcframework runs.
 # 4. Verify: the macOS static-link smoke test
 #    (scripts/check-apple-static-link-smoke.sh) and the iOS simulator
-#    authorization flow (scripts/check-ios-authorization-flow.sh), which
-#    records its simulator phases separately.
+#    authorization flow (scripts/check-ios-authorization-flow.sh) on that
+#    simulator, once its background boot has finished.
 # 5. Archive: the release zip and its determinism self-test.
 #
 # Each verification script also runs on its own against an existing staging.
@@ -72,6 +73,102 @@ else
 fi
 package_started=$SECONDS
 
+# The iOS simulator boots in the background (scripts/boot-ios-simulator.sh);
+# the iOS flow waits for it. The selection file names the device before its
+# boot starts, so cleanup can shut down a device this run booted even if the
+# run stops while it is still booting. While the boot runs, a sampler logs
+# the host load split between the build, the simulator and everything else
+# as `[overlap]` lines (#235); like the phase timing, it is diagnostic only.
+simulator_selection_file="$repo_root/target/apple/ios-simulator-selection.tsv"
+simulator_boot_log="$repo_root/target/apple/ios-simulator-boot.log"
+simulator_boot_pid=""
+simulator_boot_log_shown=false
+overlap_sampler_pid=""
+mkdir -p "$repo_root/target/apple"
+rm -f "$simulator_selection_file" "$simulator_boot_log"
+
+overlap_sampler() {
+    local started
+    started=$(date +%s)
+    set +e
+    echo "[overlap] hw.ncpu=$(sysctl -n hw.ncpu) hw.perflevel0.physicalcpu=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null) hw.memsize=$(sysctl -n hw.memsize)" >&2
+    while :; do
+        ps -Ao pcpu=,command= | awk -v elapsed=$(($(date +%s) - started)) -v load="$(sysctl -n vm.loadavg)" '
+            { cpu = $1; $1 = "" }
+            /CoreSimulator|RuntimeRoot|launchd_sim|simctl/ { simulator += cpu; next }
+            /rustc|cargo|clang|[\/ ]ld( |$)|ld64|[\/ ]cc( |$)/ { build += cpu; next }
+            { other += cpu }
+            END { printf "[overlap] +%ds loadavg %s build %.0f%% simulator %.0f%% other %.0f%%\n", elapsed, load, build, simulator, other }
+        ' >&2
+        ps -Aceo pcpu=,comm= -r 2>/dev/null | head -n 6 | awk '{ printf "%s%s %s", (NR > 1 ? "; " : "[overlap]   top: "), $1, $2 } END { print "" }' >&2
+        sleep 15
+    done
+}
+
+# Stop the sampler loop before its current command, so no shell reports the
+# command's termination; the job notice for the loop is discarded.
+stop_overlap_sampler() {
+    local children
+    if [[ -z "$overlap_sampler_pid" ]]; then
+        return 0
+    fi
+    children=$(pgrep -P "$overlap_sampler_pid" | tr '\n' ' ' || true)
+    kill "$overlap_sampler_pid" || true
+    # Word splitting is intended: the list holds process ids.
+    # shellcheck disable=SC2086
+    kill $children || true
+    wait "$overlap_sampler_pid" || true
+    overlap_sampler_pid=""
+} >/dev/null 2>&1
+
+show_simulator_boot_log() {
+    simulator_boot_log_shown=true
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        echo "::group::iOS simulator boot log"
+    else
+        echo "--- iOS simulator boot log ---"
+    fi
+    cat "$simulator_boot_log" 2>/dev/null || true
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        echo "::endgroup::"
+    fi
+}
+
+stop_simulator() {
+    local status=$1 simulator_id simulator_state _
+    stop_overlap_sampler
+    if [[ -n "$simulator_boot_pid" ]]; then
+        # Stop the boot script and the simctl call it is waiting on.
+        pkill -TERM -P "$simulator_boot_pid" >/dev/null 2>&1 || true
+        kill "$simulator_boot_pid" >/dev/null 2>&1 || true
+        wait "$simulator_boot_pid" 2>/dev/null || true
+        simulator_boot_pid=""
+    fi
+    if ((status != 0)) && [[ "$simulator_boot_log_shown" == false && -f "$simulator_boot_log" ]]; then
+        show_simulator_boot_log
+    fi
+    if [[ ! -s "$simulator_selection_file" ]]; then
+        return 0
+    fi
+    IFS=$'\t' read -r simulator_id simulator_state _ < "$simulator_selection_file" || true
+    if [[ -n "$simulator_id" && "$simulator_state" != Booted ]]; then
+        if ! xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1; then
+            echo "warning: could not shut down iOS simulator $simulator_id; run: xcrun simctl shutdown $simulator_id" >&2
+        fi
+    fi
+    if ((status != 0)); then
+        echo "--- booted iOS simulators after cleanup ---" >&2
+        xcrun simctl list devices booted >&2 || true
+    fi
+}
+
+start_simulator_boot() {
+    scripts/boot-ios-simulator.sh "$simulator_selection_file" > "$simulator_boot_log" 2>&1 &
+    simulator_boot_pid=$!
+    overlap_sampler &
+    overlap_sampler_pid=$!
+}
+
 # A failure to remove the self-test outputs must not skip the phase table or
 # replace the packaging error, so it is held until the table is written. It
 # fails a run that otherwise succeeded.
@@ -79,6 +176,7 @@ cleanup() {
     local status=$? cleanup_status=0
     rm -rf "$scratch_xcframework" "$recheck" || cleanup_status=$?
     phase_fail_open
+    stop_simulator "$status"
     if ((status == 0 && cleanup_status == 0)); then
         phase_record "Total" ok $((SECONDS - package_started))
     else
@@ -96,6 +194,8 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+
+start_simulator_boot
 
 export IPHONEOS_DEPLOYMENT_TARGET=18.0
 export MACOSX_DEPLOYMENT_TARGET=15.0
@@ -184,9 +284,26 @@ phase_begin "Verify: macOS static-link smoke"
 scripts/check-apple-static-link-smoke.sh
 phase_end
 
-# The iOS flow records its own phases (app build, simulator selection, boot,
-# install, launch, result) in the same table.
-scripts/check-ios-authorization-flow.sh
+phase_begin "Wait: iOS simulator boot"
+if wait "$simulator_boot_pid"; then
+    simulator_boot_status=0
+else
+    simulator_boot_status=$?
+fi
+simulator_boot_pid=""
+stop_overlap_sampler
+show_simulator_boot_log
+if ((simulator_boot_status != 0)); then
+    echo "Booting the iOS simulator in the background failed (exit $simulator_boot_status); see the boot log above" >&2
+    exit 1
+fi
+phase_end
+IFS=$'\t' read -r simulator_id _ < "$simulator_selection_file"
+
+# The iOS flow records its own phases (app build, install, launch, result)
+# in the same table. It uses the simulator booted above and leaves its
+# shutdown to cleanup.
+IOS_SIMULATOR_UDID=$simulator_id scripts/check-ios-authorization-flow.sh
 
 phase_begin "Archive: zip and determinism self-test"
 
