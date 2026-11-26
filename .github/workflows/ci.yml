@@ -85,6 +85,13 @@ jobs:
           retention-days: 14
       - name: Generate native bindings
         run: scripts/generate-bindings.sh
+      # The SPM match check runs here, after the test steps, so a binding
+      # drift fails the job without hiding test results. It reuses the
+      # generation above via generate-bindings.sh's fingerprint cache (no
+      # second cargo build or uniffi-bindgen pass) and diffs the checked-in
+      # Sources/NativeOIDC/native_oidc.swift against the generated output.
+      - name: Swift package bindings match
+        run: scripts/check-spm-bindings.sh
 
   licenses:
     name: Dependency licenses
