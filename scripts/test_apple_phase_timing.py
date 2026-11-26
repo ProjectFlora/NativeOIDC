@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
@@ -178,6 +179,72 @@ class PackageCleanupTestCase(BashHelperMixin, unittest.TestCase):
         self.assertIn("| Total | failed |", result.stdout)
         self.assertIn("Could not remove the packaging self-test outputs", result.stderr)
         self.assertFalse(os.path.exists(self.timing_file))
+
+
+@unittest.skipUnless(BASH and shutil.which("perl"), "bash or perl is not installed")
+class SettleSamplerTestCase(BashHelperMixin, unittest.TestCase):
+    """The iOS flow's settle sampler, with a stub that starts a long child."""
+
+    def run_sampler(self, between):
+        lines = script_lines("check-ios-authorization-flow.sh")
+        start = first_line(lines, "settle_start() {")
+        end = first_line(lines, "} >/dev/null 2>&1", start)
+        functions = "\n".join(lines[start:end + 1])
+        child_file = os.path.join(self.directory, "child.pid")
+        body = (functions + "\n"
+                # The stub records its child, a command that outlives any test.
+                'settle_sampler() { sleep 60 & echo "$!" > "$SETTLE_CHILD_FILE"; wait; }\n'
+                f'export SETTLE_CHILD_FILE="{child_file}"\n'
+                f'settle_log="{os.path.join(self.directory, "settle.log")}"\nsettle_pid=""\n'
+                "settle_start\n" + between + "settle_stop\n"
+                'echo "stopped:$settle_pid"\n')
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped:\n", result.stdout)
+        return child_file
+
+    def assert_stopped(self, child_file):
+        with open(child_file, encoding="utf-8") as handle:
+            child = int(handle.read())
+        for _ in range(50):
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.1)
+        os.kill(child, 9)
+        self.fail("the sampler's child outlived settle_stop")
+
+    def test_stop_stops_the_running_sampler_and_its_child(self):
+        child_file = self.run_sampler('while [[ ! -s "$SETTLE_CHILD_FILE" ]]; do sleep 0.1; done\n')
+        self.assert_stopped(child_file)
+
+    def test_stop_during_startup_stops_a_child_started_in_between(self):
+        # The perl override holds the launcher before it makes the group, so
+        # settle_stop's first group signal must fail. The kill override then
+        # releases the launcher and waits for the sampler's child before the
+        # process signal, so only the final group signal can stop the child.
+        gate = os.path.join(self.directory, "gate")
+        first_status = os.path.join(self.directory, "first-status")
+        child_file = self.run_sampler(
+            "perl() {\n"
+            f'    while [[ ! -e "{gate}" ]]; do sleep 0.05; done\n'
+            '    exec perl "$@"\n'
+            "}\n"
+            "kill() {\n"
+            "    local status=0\n"
+            '    builtin kill "$@" || status=$?\n'
+            f'    if [[ ! -e "{gate}" ]]; then\n'
+            f'        echo "$status" > "{first_status}"\n'
+            f'        : > "{gate}"\n'
+            '        for _ in {1..100}; do [[ -s "$SETTLE_CHILD_FILE" ]] && break; sleep 0.1; done\n'
+            "    fi\n"
+            '    return "$status"\n'
+            "}\n")
+        with open(first_status, encoding="utf-8") as handle:
+            self.assertNotEqual(handle.read().strip(), "0", "the group existed before the first signal")
+        self.assertTrue(os.path.exists(child_file), "the sampler did not start its child within 10s")
+        self.assert_stopped(child_file)
 
 
 class ScriptOrderTestCase(unittest.TestCase):

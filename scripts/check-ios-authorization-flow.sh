@@ -17,6 +17,8 @@ provider_log="$repo_root/target/apple/ios-mock-provider.log"
 provider_pid=""
 simulator_id=""
 booted_by_script=false
+settle_log="$repo_root/target/apple/ios-flow-settle-sampler.log"
+settle_pid=""
 
 # Installed before any phase or resource, so every exit path records the
 # phase that stopped the script (timing writes are best-effort and cannot
@@ -24,6 +26,7 @@ booted_by_script=false
 # simulator this script booted.
 cleanup() {
     phase_fail_open
+    settle_stop || true
     if [[ -n "$simulator_id" ]]; then
         xcrun simctl terminate "$simulator_id" "$bundle_id" >/dev/null 2>&1 || true
     fi
@@ -36,6 +39,74 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+
+# Settle diagnostics (#235). The first command after the boot status wait
+# (the uninstall below) waits while the simulator is still settling: on the
+# 3-vCPU CI runners its boot keeps the host saturated (load averages of
+# several hundred) for minutes after `bootstatus -b` returns, and every
+# device command (`simctl spawn`, `listapps`, `io screenshot`) blocks until
+# it settles, so no cheaper readiness check exists. While the uninstall
+# runs, a sampler records the host load and the busiest processes; the log
+# is printed after it. Like the phase timing, this is best-effort: nothing
+# here can stop the flow or change its result.
+settle_sampler() {
+    local started
+    started=$(date +%s)
+    set +e
+    echo "runner: $(uname -a)"
+    echo "hw.ncpu=$(sysctl -n hw.ncpu) hw.memsize=$(sysctl -n hw.memsize)"
+    while :; do
+        echo "--- +$(($(date +%s) - started))s loadavg $(sysctl -n vm.loadavg)"
+        top -l 2 -n 0 -s 1 | grep 'CPU usage' | tail -n 1
+        ps -Aceo pcpu=,rss=,comm= -r 2>/dev/null | head -n 8
+        sleep 9
+    done
+}
+
+settle_start() {
+    if ! { mkdir -p "$(dirname -- "$settle_log")" && : > "$settle_log"; } 2>/dev/null; then
+        echo "warning: could not start the simulator settle sampler" >&2
+        return 0
+    fi
+    # The sampler runs in its own process group (perl makes it the group
+    # leader before running it, and gives up if it cannot), so stopping it
+    # stops every command it has started, whatever it is running.
+    perl -e 'setpgrp(0, 0) or exit 125; exec @ARGV or exit 127' \
+        bash -c "$(declare -f settle_sampler); settle_sampler" >> "$settle_log" 2>&1 &
+    settle_pid=$!
+}
+
+# Stop the sampler's process group. The group may not exist yet when this
+# runs (perl has not called setpgrp), so the process itself is stopped too,
+# and once it has exited the group is signalled again: a command the sampler
+# started in between is still in the group. The job notice for the stopped
+# sampler is discarded.
+settle_stop() {
+    if [[ -z "$settle_pid" ]]; then
+        return 0
+    fi
+    kill -TERM -- "-$settle_pid" || true
+    kill -TERM "$settle_pid" || true
+    wait "$settle_pid" || true
+    kill -TERM -- "-$settle_pid" || true
+    settle_pid=""
+} >/dev/null 2>&1
+
+settle_report() {
+    if [[ -z "$settle_pid" ]]; then
+        return 0
+    fi
+    settle_stop
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        echo "::group::iOS simulator settle sampler"
+    else
+        echo "--- iOS simulator settle sampler ---"
+    fi
+    cat "$settle_log" 2>/dev/null || true
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        echo "::endgroup::"
+    fi
+}
 
 phase_begin "iOS flow: check host, SDK and simulator slice"
 if [[ "$(uname -m)" != arm64 ]]; then
@@ -129,8 +200,11 @@ for runtime, devices in json.load(sys.stdin).get("devices", {}).items():
 
 phase_begin "iOS flow: simctl bootstatus"
 xcrun simctl bootstatus "$simulator_id" -b
+settle_start || true
 phase_begin "iOS flow: uninstall previous app"
 xcrun simctl uninstall "$simulator_id" "$bundle_id" >/dev/null 2>&1 || true
+phase_end
+settle_report || true
 phase_begin "iOS flow: start mock provider"
 rm -f "$provider_port_file"
 python3 scripts/ios-mock-oauth-provider.py --port-file "$provider_port_file" \
