@@ -150,7 +150,7 @@ This roadmap tracks work remaining for the initial scope in
   [OIDC platform evaluation](docs/oidc-platform-evaluation.md#release-bucket-proposal)
   found changes that alter the saved state JSON, the public API, or which
   responses are accepted, so they ship and are validated in 0.x first:
-  refreshed ID Tokens checked against the original claims
+  refreshed ID Tokens, when present, checked against the original claims
   ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)), issuer
   identifiers without a path
   ([#261](https://github.com/ProjectFlora/NativeOIDC/issues/261)), the
@@ -161,7 +161,9 @@ This roadmap tracks work remaining for the initial scope in
   error text validation
   ([#265](https://github.com/ProjectFlora/NativeOIDC/issues/265)), and the
   loopback HTTP endpoint policy
-  ([#269](https://github.com/ProjectFlora/NativeOIDC/issues/269)). The
+  ([#269](https://github.com/ProjectFlora/NativeOIDC/issues/269)), and
+  rejection of untrusted additional ID Token audiences
+  ([#272](https://github.com/ProjectFlora/NativeOIDC/issues/272)). The
   `v0.10.0` milestone lists the full set. `max_age`/`auth_time` support
   ([#263](https://github.com/ProjectFlora/NativeOIDC/issues/263)) waits for a
   later 0.x release.

@@ -49,14 +49,15 @@ is not evidence of conformance or behavior.
   ([finding S4](#static-findings)). Providers that use such issuers cannot be
   used for OIDC on any surface.
 - **Over-lenient checks (confirmed).** Refresh accepts an ID Token for a
-  different subject and replaces the stored one. The authorization response
+  different subject and replaces the stored one. ID Tokens with an untrusted
+  additional audience are accepted. The authorization response
   `iss` parameter is not checked. Callback and registration error text reaches
   `Display`, Kotlin exception messages, and Swift error descriptions with
   newlines and control characters intact.
 - **Release direction.** Most fixes change behavior, the saved state JSON, or
   the public API. They fit the v0.10.0 rule (see
   [Release buckets](#release-bucket-proposal)), which confirms that v0.10.0
-  comes before the v1.0.0 candidate. The follow-ups are #260–#270.
+  comes before the v1.0.0 candidate. The follow-ups are #260–#270 and #272.
 - **Linux.** It has no browser or loopback integration, no distribution
   channel, and no execution evidence beyond Rust core unit tests on the CI
   host. Linux stays development and CI only for 1.0.0, as an explicit
@@ -78,14 +79,15 @@ product scope** (a recorded product decision).
 | External user agent | Required | RFC 8252 §5 and §8.12 (embedded user agents MUST NOT be used) | Adapters use ASWebAuthenticationSession, the system browser, or Custom Tabs |
 | `state` and exact callback matching | Required | RFC 6749 §10.12; RFC 9700 §4.7 | |
 | `nonce` | Required when sent | Core §3.1.3.7 item 11 ("a nonce Claim MUST be present") | The library always sends a nonce with `openid` |
-| ID Token signature, `iss`, `aud`, `exp` | Required | Core §3.1.3.7 items 2, 3, 6, 9 | |
+| ID Token `iss`, `aud`, `exp` | Required | Core §3.1.3.7 items 2, 3, 9. Item 3 also requires rejecting a token that "contains additional audiences not trusted by the Client" | The client ID is required in `aud`; additional audiences are not checked for trust (D17) |
+| ID Token signature | Required for tokens not received directly from the token endpoint; for a token received directly from it, Core §3.1.3.7 item 6 allows TLS server validation instead | Core §3.1.3.7 items 6–7 | Product policy, stricter than required: NativeOIDC always verifies the signature, with RS256 or ES256 only (D10) |
 | ID Token `azp` | Conditional (SHOULD) | Core §3.1.3.7 items 4–5 | Implemented |
 | ID Token `acr` | Conditional (SHOULD, when requested) | Core §3.1.3.7 item 12 | Host can request `acr_values`; no check and no claims API (see G3) |
 | ID Token `auth_time` with `max_age` | Conditional (SHOULD, when requested) | Core §3.1.2.1 (OP MUST return `auth_time` when `max_age` is used); §3.1.3.7 item 13 | Host can send `max_age`; no check and no claims API (see G4) |
 | Validated identity (issuer + subject) for the host | Required by the product's account model; the spec defines `iss`+`sub` as the identifier | Core §2 (`sub` is unique only within the issuer); §5.3.2 (UserInfo `sub` MUST match the ID Token) | Not exposed on any surface (see G3) |
 | UserInfo | Optional extension for the RP; out of product scope | Core §5.3 has no RP MUST; §15.2 binds dynamic OPs only | Host calls UserInfo with the access token and MUST compare `sub` with the ID Token (§5.3.2). Today the host must decode the raw ID Token itself to get `sub` (see G3) |
 | Refresh | Required by the product scope | RFC 6749 §6; Core §12.2 | |
-| ID Token returned by refresh | Required when present | Core §12.2: `iss`, `sub`, `aud` MUST equal the original; `auth_time` MUST be the original. These bind the OP; checking them is the RP's only defense when an OP or a mixed-up configuration violates them | See S1 |
+| ID Token returned by refresh | Conditional: only when the refresh response contains one (Core §12.2: the response "might not contain an id_token") | Core §12.2 (binds the OP): `iss`, `sub`, `aud` MUST equal the original; if the refreshed token contains `auth_time`, it MUST be the original authentication time, and a refreshed token without `auth_time` is compliant; `azp` rules are left to extensions | G1 adds an RP-side defensive check of these OP requirements; it must not require an ID Token or `auth_time` on refresh. See S1 |
 | `token_type` handling | Required (client) | RFC 6749 §7.1 (MUST NOT use a token whose type it does not understand); §5.1 (value is case-insensitive); Core §3.1.3.3 (MUST be Bearer unless negotiated) | The library does not use access tokens itself; the host does (see G8) |
 | Save and restore state | Product requirement | None (not a protocol feature) | Host owns encrypted storage |
 | Cancellation | Product requirement | None | |
@@ -160,7 +162,7 @@ accepts it). A SHOULD-level difference counts only if no reason is recorded.
 | ID | Behavior | Spec and level | Library behavior | Direction | Evidence | Disposition |
 | --- | --- | --- | --- | --- | --- | --- |
 | D1 | Authorization response `iss` (RFC 9207) | RFC 9207 §2.4: clients MUST compare `iss` when present and reject a mismatch; RFC 9700 §4.4.2: mix-up defense MUST when talking to more than one AS | `iss` is kept as an additional parameter and never compared (`src/authorization/session.rs:210-265`); discovery does not read `authorization_response_iss_parameter_supported` | Over-lenient (conditional) | Confirmed by test: a callback with a foreign `iss` was accepted | Gap (G5) |
-| D2 | Refresh ID Token consistency | Core §12.2 (OP MUST keep `iss`, `sub`, `aud`, `auth_time`) | Not compared (S1) | Over-lenient | Confirmed by test | Gap (G1) |
+| D2 | Refresh ID Token consistency | Core §12.2 (when an ID Token is returned, the OP MUST keep `iss`, `sub`, `aud`, and, if `auth_time` is present, the original `auth_time`) | Not compared (S1) | Over-lenient | Confirmed by test | Gap (G1) |
 | D3 | `auth_time` / `acr` checks | Core §3.1.3.7 items 12–13 (SHOULD) | Not checked, no recorded reason (S2) | Over-lenient | Confirmed by test | Gap (G4) |
 | D4 | Issuer without a path | Discovery §4.3, Core §3.1.3.7 item 2 (MUST exact match) | Never matches (S4) | Over-strict | Confirmed by test | Gap (G2) |
 | D5 | `token_type` | RFC 6749 §7.1 (client MUST NOT use a token it does not understand); §5.1 case-insensitive | Any non-empty value is stored unchanged (`src/authorization/state.rs:225`); `N_A` and `bearer` are both accepted as is. The library never uses the access token itself | Not a divergence for the library; host responsibility is undocumented | Confirmed by test | Host responsibility (G8) |
@@ -175,6 +177,7 @@ accepts it). A SHOULD-level difference counts only if no reason is recorded.
 | D14 | JWKS with unsupported extra keys | RFC 7517 §5 (implementations SHOULD ignore keys with a `kty` they do not understand) | A set with an extra `enc` RSA-OAEP-256 key, a PS256 key, an unknown `kty`, an `oct` key, or an unknown `alg` still validates a token signed by the RS256 key | Not a divergence | Confirmed by test | Not a divergence |
 | D15 | Discovered endpoints over HTTPS | Discovery §3 (`issuer` uses https); RFC 6749 §3.1–3.2 (TLS for the endpoints) | Enforced (`src/authorization/discovery.rs:110-119`) | Not a divergence | Existing discovery tests | Not a divergence |
 | D16 | `jku`/`jwk`/`crit` headers, RSA < 2048 bits | RFC 7515 §4.1.11 (unknown `crit` MUST be rejected); RFC 7518 §3.3 (RSA keys MUST be ≥ 2048 bits) | Rejected (`src/id_token.rs:184-198,230`) | Not a divergence | Existing ID Token tests | Not a divergence |
+| D17 | Untrusted additional audiences | Core §3.1.3.7 item 3 (MUST reject a token with additional audiences not trusted by the client) | `aud` must contain the client ID, and `azp` must match when there are several audiences (`src/id_token.rs:240-268`); other audiences are never checked, and no surface lets the host list trusted ones | Over-lenient | Confirmed by test: `aud` `["native-client", "https://untrusted.example"]` with matching `azp` was accepted | Gap (G12) |
 
 ## Logging and secret exposure
 
@@ -289,7 +292,7 @@ have no milestone; the bucket is written in the issue.
 
 | ID | Follow-up | Bucket | Priority | Effort | Reason for the bucket |
 | --- | --- | --- | --- | --- | --- |
-| G1 ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)) | Record the validated ID Token claims in the state and compare `iss`, `sub`, `aud`, `auth_time`, and `azp` of a refreshed ID Token with them (S1, D2) | v0.10.0 | High | Medium | Changes the saved state JSON (needs a migration rule for older state) and makes refresh reject tokens it accepts today |
+| G1 ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)) | Record the validated ID Token claims in the state. When a refresh response contains an ID Token, compare its `iss`, `sub`, and `aud` with them, and its `auth_time` only when the refreshed token has one. Do not require an ID Token or `auth_time` on refresh (S1, D2) | v0.10.0 | High | Medium | Changes the saved state JSON (needs a migration rule for older state) and makes refresh reject tokens it accepts today |
 | G2 ([#261](https://github.com/ProjectFlora/NativeOIDC/issues/261)) | Accept issuer identifiers without a path: carry the issuer as an exact string for discovery and `iss` comparison (S4, D4) | v0.10.0 | High | Medium | Interoperability blocker on every surface. The fix may change the Rust `issuer: Url` signatures and the value returned by `FfiServiceConfiguration.issuer()`. Worth shipping early to validate |
 | G3 ([#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)) | Expose the validated identity (issuer, subject, and selected claims such as `auth_time`, `acr`, `amr`) on every surface: Rust, UniFFI, C ABI JSON, .NET (S3) | v0.10.0 | High | High | New public API on all surfaces, built on G1's stored claims. Needed for account binding and for the UserInfo `sub` check. Shipping it in 0.x lets the record shape be adjusted before 1.0.0 |
 | G4 ([#263](https://github.com/ProjectFlora/NativeOIDC/issues/263)) | Support `max_age` (and requested `acr`) with `auth_time`/`acr` validation (S2, D3) | Later 0.x | Medium | Medium | Depends on G1 and G3. Adding an option field is a record change |
@@ -300,5 +303,6 @@ have no milestone; the bucket is written in the issue.
 | G9 ([#268](https://github.com/ProjectFlora/NativeOIDC/issues/268)) | Allow `logout_hint` and `ui_locales` on end-session requests (D8) | v1.0.0後 | Low | Low | Additive API for an optional feature |
 | G10 ([#269](https://github.com/ProjectFlora/NativeOIDC/issues/269)) | Decide and record the loopback-HTTP endpoint policy (D7): keep it for local development with a recorded reason, or require HTTPS for revocation (RFC 7009 §2) | v0.10.0 | Low | Low | If HTTPS is required, configurations that work today will be rejected |
 | G11 ([#270](https://github.com/ProjectFlora/NativeOIDC/issues/270)) | Accept IPv6 loopback (`http://[::1]`) redirects on macOS and Windows (D9) | v1.0.0後 | Low | Medium | Additive; RECOMMENDED only |
+| G12 ([#272](https://github.com/ProjectFlora/NativeOIDC/issues/272)) | Reject ID Tokens with untrusted additional audiences, optionally with a host-configured list of trusted audiences (D17). Found by the review of #271 and approved on 2026-11-27 | v0.10.0 | Medium | Low | Validation starts rejecting tokens that pass today |
 | — | Linux | Option C (decided) | — | — | No work item; revisit after 1.0.0 together with #64 |
 | — | #133 (Swift 6) | Proposed: Later 0.x (recorded only) | — | — | May change `Sendable` requirements on host-implemented protocols (see Related issues). Its milestone is unchanged |
