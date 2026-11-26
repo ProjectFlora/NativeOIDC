@@ -52,9 +52,9 @@ jobs:
           fetch-depth: 0
       - uses: $/.github/actions/setup-rust-toolchain
       # A release ships only dependencies under licenses deny.toml allows.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-deny@0.20.2
+          tools: cargo-deny
       - run: cargo deny check licenses
       - id: version
         name: Match SemVer release version to Cargo package version
@@ -165,9 +165,9 @@ jobs:
           toolchain: 1.100.0
       - uses: $/.github/actions/setup-xcode
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       - name: Record toolchain versions
         run: |
           {
@@ -218,9 +218,9 @@ jobs:
           # does not hash on its own, so changing either starts a fresh cache.
           cache-key: android-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API_LEVEL }}
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
@@ -299,9 +299,9 @@ jobs:
       - run: cargo build --locked --lib --target x86_64-pc-windows-msvc
       - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       - run: scripts/generate-third-party-licenses.sh
         shell: bash
       - name: Build and package Windows library

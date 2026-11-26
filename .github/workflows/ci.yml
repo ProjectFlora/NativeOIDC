@@ -97,11 +97,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: $/.github/actions/setup-rust-toolchain
-      # cargo-deny and cargo-about at pinned versions, so a new release of
-      # either cannot change the result (deny.toml, about.toml).
-      - uses: taiki-e/install-action@v2
+      # cargo-deny and cargo-about at the versions the setup-cargo-tools map
+      # pins, so a new release of either cannot change the result (deny.toml,
+      # about.toml).
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-deny@0.20.2,cargo-about@0.9.3
+          tools: cargo-deny,cargo-about
       - run: cargo deny check licenses
       - run: scripts/generate-third-party-licenses.sh
       - uses: actions/upload-artifact@v7
@@ -138,9 +139,9 @@ jobs:
           mode: latest
       - uses: $/.github/actions/setup-rust-toolchain
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       # The real-ditto tests run only here: they need macOS tools, so the
       # Linux `test` job (which runs the rest of the suite) skips them.
       - name: Test the zip normalizer against real ditto
@@ -228,9 +229,9 @@ jobs:
       - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
       - run: dotnet build native/windows/dotnet/NativeOidcWindows.csproj --configuration Release
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       - run: scripts/generate-third-party-licenses.sh
         shell: bash
       - name: Build current Windows package and validate external consumers
@@ -296,9 +297,9 @@ jobs:
           # does not hash on its own, so changing either starts a fresh cache.
           cache-key: android-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API_LEVEL }}
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - id: android_release_aar
         run: ./native/android/gradlew -p native/android assembleRelease
@@ -373,8 +374,12 @@ jobs:
       - uses: $/.github/actions/setup-rust-toolchain
         with:
           components: llvm-tools-preview
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked
+      # cargo-llvm-cov at the pinned version (the setup-cargo-tools map),
+      # installed from the prebuilt release binary instead of a source
+      # `cargo install` that compiled whatever the registry served.
+      - uses: $/.github/actions/setup-cargo-tools
+        with:
+          tools: cargo-llvm-cov
       - name: Generate LCOV report
         run: cargo llvm-cov --workspace --all-targets --all-features --lcov --output-path lcov.info
       - name: Report coverage summary
