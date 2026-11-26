@@ -46,7 +46,7 @@ Configuration evidence:
   [macOS 15 image](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md),
   and, for release builds, [macOS 26 image](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md).
   Release builds use a stable Xcode 26.x because App Store Connect requires
-  apps built with Xcode 26 or later; `XCODE_VERSION` in the release
+  apps built with Xcode 26 or later; the `setup-xcode` action in the release
   workflows selects it, and the iOS 18 runtime is installed with
   [`install-ios-simulator-runtime.sh`](../scripts/install-ios-simulator-runtime.sh).
   The latest lane uses the Xcode 27 image because `macos-latest` currently

@@ -50,8 +50,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
-      - uses: Swatinem/rust-cache@v2
+      # The MSRV channel; the setup-rust-toolchain action (toolchain input) is
+      # the one place it is named.
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.99.1
       - run: cargo test --locked --workspace --all-targets --all-features
 
   test:
@@ -61,8 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
       - name: Test Python scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: cargo test --locked --workspace --all-targets --all-features
@@ -100,12 +102,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      # cargo-deny and cargo-about at pinned versions, so a new release of
-      # either cannot change the result (deny.toml, about.toml).
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-rust-toolchain
+      # cargo-deny and cargo-about at the versions the setup-cargo-tools map
+      # pins, so a new release of either cannot change the result (deny.toml,
+      # about.toml).
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-deny@0.20.2,cargo-about@0.9.3
+          tools: cargo-deny,cargo-about
       - run: cargo deny check licenses
       - run: scripts/generate-third-party-licenses.sh
       - uses: actions/upload-artifact@v7
@@ -133,29 +136,18 @@ jobs:
       IOS_SIMULATOR_MAJOR_VERSION: ${{ matrix.ios_simulator }}
     steps:
       - uses: actions/checkout@v7
-      - name: Select newest installed Xcode for latest iOS
+      # The `latest` iOS lane (the xcode-27 preview runner) selects the
+      # newest installed stable Xcode itself; the `18` lane keeps the runner
+      # image's default selection.
+      - uses: $/.github/actions/setup-xcode
         if: matrix.ios_simulator == 'latest'
-        run: |
-          developer_dir=$(python3 - <<'PY'
-          import glob
-          import re
-          candidates = []
-          for path in glob.glob('/Applications/Xcode*.app'):
-              match = re.fullmatch(r'/Applications/Xcode_(\d+(?:\.\d+)*)\.app', path)
-              if match:
-                  candidates.append((tuple(map(int, match[1].split('.'))), path))
-          if not candidates:
-              raise SystemExit('No stable versioned Xcode installation found')
-          print(max(candidates)[1] + '/Contents/Developer')
-          PY
-          )
-          echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-about@0.9.3
+          mode: latest
+      - uses: $/.github/actions/setup-rust-toolchain
+      # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
+      - uses: $/.github/actions/setup-cargo-tools
+        with:
+          tools: cargo-about
       # The real-ditto tests run only here: they need macOS tools, so the
       # Linux `test` job (which runs the rest of the suite) skips them.
       - name: Test the zip normalizer against real ditto
@@ -229,15 +221,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
       - run: cargo build --locked --lib --target x86_64-pc-windows-msvc
       - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
       - run: dotnet build native/windows/dotnet/NativeOidcWindows.csproj --configuration Release
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       - run: scripts/generate-third-party-licenses.sh
         shell: bash
       - name: Build current Windows package and validate external consumers
@@ -284,35 +275,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      # Java, the SDK platform and build-tools, the NDK, and Gradle come from
+      # the shared setup-android action. The NDK version is written once, as
+      # the action's input; the action exports ANDROID_NDK_HOME,
+      # ANDROID_NDK_VERSION, ANDROID_API_LEVEL and ANDROID_COMPILE_SDK for
+      # the steps below (the rust-cache key, the emulator levels, the Gradle
+      # build).
+      - uses: $/.github/actions/setup-android
         with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
+          ndk: 27.2.12479018
+      - uses: $/.github/actions/setup-rust-toolchain
         with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
-      - uses: dtolnay/rust-toolchain@stable
+          # Cache compiled Cargo dependencies for the host and both Android ABIs
+          # that check-android-targets.sh builds under Gradle. The workspace's own
+          # crates are rebuilt each run: caching them too (cache-workspace-crates)
+          # did not shorten warm runs and grew the cache by about 40% (#190).
+          # The key adds the NDK version and native API level, which rust-cache
+          # does not hash on its own, so changing either starts a fresh cache.
+          cache-key: android-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API_LEVEL }}
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
-      - name: Configure Android NDK
-        env:
-          ANDROID_API_LEVEL: '28'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Cache compiled Cargo dependencies for the host and both Android ABIs
-      # that check-android-targets.sh builds under Gradle. The workspace's own
-      # crates are rebuilt each run: caching them too (cache-workspace-crates)
-      # did not shorten warm runs and grew the cache by about 40% (#190).
-      # The key adds the NDK version and native API level, which rust-cache
-      # does not hash on its own, so changing either starts a fresh cache.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
-      - uses: gradle/actions/setup-gradle@v6
+          tools: cargo-about
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - id: android_release_aar
         run: ./native/android/gradlew -p native/android assembleRelease
@@ -321,11 +305,13 @@ jobs:
         run: sudo chmod a+rw /dev/kvm
       # The emulator tests run on the minSdk (API 28) and on the compileSdk and
       # consumer targetSdk (API 35), one after the other in this job, so the
-      # required "Android adapters validation" check covers both (#166).
+      # required "Android adapters validation" check covers both (#166). The
+      # levels are the setup-android action's exports (ANDROID_API_LEVEL,
+      # ANDROID_COMPILE_SDK).
       - name: Run Android callback tests on an emulator (API 28)
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: ${{ env.ANDROID_API_LEVEL }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -339,7 +325,7 @@ jobs:
         if: ${{ !cancelled() && steps.android_release_aar.outcome == 'success' && steps.android_emulator_kvm.outcome == 'success' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ env.ANDROID_COMPILE_SDK }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -366,10 +352,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: $/.github/actions/setup-rust-toolchain
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
@@ -383,12 +368,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: $/.github/actions/setup-rust-toolchain
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked
+      # cargo-llvm-cov at the pinned version (the setup-cargo-tools map),
+      # installed from the prebuilt release binary instead of a source
+      # `cargo install` that compiled whatever the registry served.
+      - uses: $/.github/actions/setup-cargo-tools
+        with:
+          tools: cargo-llvm-cov
       - name: Generate LCOV report
         run: cargo llvm-cov --workspace --all-targets --all-features --lcov --output-path lcov.info
       - name: Report coverage summary

@@ -12,22 +12,13 @@ on:
 permissions:
   contents: read
 
-env:
-  # The Apple and SPM jobs select the same Xcode as the release workflow's
-  # Apple jobs (XCODE_VERSION in release.yml), so the published archive is
-  # validated with the toolchain that built and pre-validated it
-  # (Issue #135). Keep the two in sync.
-  XCODE_VERSION: '26.6'
-
 jobs:
   apple:
     name: Validate published Apple consumer
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: $/.github/actions/setup-xcode
       - name: Record toolchain versions
         run: |
           {
@@ -61,16 +52,16 @@ jobs:
   # which is a fact about the library, tracked for removal in
   # Issue #133.
   #
-  # This job selects the release workflow's Xcode (XCODE_VERSION above)
-  # rather than tracking whatever the image ships (Issue #135): the
-  # post-publication audit then validates the published archive with the
-  # toolchain that built and pre-validated it, a stable Xcode 26.x that
-  # App Store Connect accepts. A newer Swift reaches this job only when
-  # XCODE_VERSION is bumped, so new diagnostics show up in that pull
-  # request rather than in an audit run. A failure here is triaged with the
-  # toolchain versions recorded in the first step, and fixed with a fixture
-  # pull request, or routed to Issue #133 when it reflects an API shape a
-  # real Swift 6 consumer would hit.
+  # This job selects the release workflow's Xcode (the setup-xcode action's
+  # version input, shared with release.yml) rather than tracking whatever the
+  # image ships (Issue #135): the post-publication audit then validates the
+  # published archive with the toolchain that built and pre-validated it, a
+  # stable Xcode 26.x that App Store Connect accepts. A newer Swift reaches
+  # this job only when the action's version is bumped, so new diagnostics
+  # show up in that pull request rather than in an audit run. A failure here
+  # is triaged with the toolchain versions recorded in the first step, and
+  # fixed with a fixture pull request, or routed to Issue #133 when it
+  # reflects an API shape a real Swift 6 consumer would hit.
   #
   # Every other Swift validation in this repository compiles in the Swift
   # 5 language mode (the in-tree package's targets are pinned to it, and
@@ -82,9 +73,11 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
+      # Referenced with the self-repo `$/` syntax, which resolves the action
+      # in the dispatched repository without a checkout: this job
+      # deliberately checks nothing out (the consumer is a foreign package,
+      # below).
+      - uses: $/.github/actions/setup-xcode
       # Record the toolchain before any build, so a red run is attributable
       # to a toolchain version at a glance.
       - name: Record toolchain versions
@@ -223,9 +216,8 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
+      # The `$/` self-repo syntax, as in the spm job above: no checkout.
+      - uses: $/.github/actions/setup-xcode
       - name: Record toolchain versions
         run: |
           {
@@ -326,15 +318,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v6
+      # Java, the SDK platform and build-tools, and Gradle from the shared
+      # setup-android action (no NDK: this job validates the published AAR,
+      # it does not build Rust for Android).
+      - uses: $/.github/actions/setup-android
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
       - name: Download and verify Android release archive
@@ -349,12 +336,14 @@ jobs:
             --dir dist
           cd dist
           grep -F "  native-oidc-android-$RELEASE_VERSION.aar" SHA256SUMS | shasum -a 256 -c -
+      # On the minSdk: the level the setup-android action exports, so a
+      # documented minSdk bump also updates this consumer test.
       - name: Run Android release consumer on an emulator
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: ${{ env.ANDROID_API_LEVEL }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -379,23 +368,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: scripts/check-android-maven-publication-status.sh "$RELEASE_VERSION"
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v6
+      # Java, the SDK platform and build-tools, and Gradle from the shared
+      # setup-android action (no NDK: this job validates the published AAR,
+      # it does not build Rust for Android).
+      - uses: $/.github/actions/setup-android
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
+      # On the minSdk: the level the setup-android action exports, so a
+      # documented minSdk bump also updates this consumer test.
       - name: Run Android release consumer (Maven Central) on an emulator
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: ${{ env.ANDROID_API_LEVEL }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false

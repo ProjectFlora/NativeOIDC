@@ -89,15 +89,18 @@ The **Validate release version** step summary names the release the
 generated notes will start from and links the comparison; it must be the
 previous release (see [Release notes range](#release-notes-range)).
 
-The Apple jobs build and validate with the Xcode set by `XCODE_VERSION` in
-`release.yml` (a stable Xcode 26.x, since App Store Connect requires Xcode
-26 or later), and `release-consumer.yml` sets the same version. Check the
-**Build Apple release package** step summary for the recorded Rust and Xcode
-versions and the iOS simulator runtime the iOS flow ran on. To change the
-Xcode version, update the runner label and `XCODE_VERSION` in both
-workflows together, after checking the
+The Apple jobs build and validate with the Xcode the `setup-xcode`
+composite action selects (a stable Xcode 26.x, since App Store Connect
+requires Xcode 26 or later), the same version in `release.yml` and
+`release-consumer.yml`. Check the **Build Apple release package** step
+summary for the recorded Rust and Xcode versions and the iOS simulator
+runtime the iOS flow ran on. To change the Xcode version, update the
+runner label and the action's `version` input together, after checking
+the
 [runner-images README](https://github.com/actions/runner-images/tree/main/images/macos)
 for the image's installed Xcode versions and simulator runtimes.
+[docs/ci-toolchains.md](ci-toolchains.md) records where the pin lives
+and how to bump it.
 
 The **Build release documentation set** step summary gives the
 documentation set's file count, the SHA-256 of the archive (the set is
@@ -301,8 +304,10 @@ locations). The notices are generated, never edited by hand:
   `RUST_STANDARD_LIBRARY_COPYRIGHT.html`. The output therefore depends on
   `Cargo.lock` and the toolchain, and each package generates it with the
   toolchain that builds it. The release workflow pins every package job to
-  the same Rust version (`dtolnay/rust-toolchain@1.100.0`), so all packages
-  ship the same notices; change them together.
+  the same Rust version (the `setup-rust-toolchain` action's `toolchain`
+  input, spelled out in the package jobs of `release.yml`), so all
+  packages ship the same notices; change them together, as documented in
+  [docs/ci-toolchains.md](ci-toolchains.md).
 - The Apple packaging script, the Android release build
   (`generateLicenseNotices`) and `scripts/package-windows.ps1` (after the
   workflow step that runs the script) put the files into the packages.
@@ -327,8 +332,9 @@ Maintenance:
   standard library gained a license other than `MIT OR Apache-2.0` (its
   `library/` sources in rust-src).
 - **A cargo-about or cargo-deny update**: change the version in
-  `scripts/generate-third-party-licenses.sh` (cargo-about) and in every
-  `taiki-e/install-action` step of `ci.yml` and `release.yml` together.
+  `scripts/generate-third-party-licenses.sh` (cargo-about) and in the
+  `setup-cargo-tools` action's version map (which installs the tools the
+  `ci.yml` and `release.yml` checks use) together.
 
 `release-consumer.yml` runs the same consumer checks, so it requires the
 notices too and can validate only v0.7.1 and later. v0.1.0 through v0.7.0

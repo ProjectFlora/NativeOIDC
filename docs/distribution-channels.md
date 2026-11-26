@@ -244,7 +244,8 @@ of the SPM channel in two:
   Swift 6 side. Its generated consumer package uses `swift-tools-version:
   6.0` and pins no language mode, so it compiles in the Swift 6 language
   mode, the mode new consumer apps ship in. It selects the release
-  workflow's Xcode (`XCODE_VERSION`, a stable Xcode 26.x;
+  workflow's Xcode (the `setup-xcode` action's `version` input, a stable
+  Xcode 26.x;
   [Issue #135](https://github.com/ProjectFlora/NativeOIDC/issues/135)),
   recording the versions in the step summary so a red run is
   attributable.
@@ -258,7 +259,8 @@ The job no longer tracks whatever toolchain the runner image ships: it
 validates that pairing with the Xcode that built and pre-validated the
 published archive, a stable Xcode 26.x that App Store Connect accepts
 ([Issue #135](https://github.com/ProjectFlora/NativeOIDC/issues/135)).
-A newer Swift reaches the job only when `XCODE_VERSION` is bumped, so new
+A newer Swift reaches the job only when the action's `version` input is
+bumped, so new
 diagnostics surface in that pull request rather than in an audit run. The
 job is a post-publication audit (it consumes published artifacts; see
 [Releasing](releasing.md)), so a failure is triaged with the recorded

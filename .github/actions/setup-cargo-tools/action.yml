@@ -1,0 +1,73 @@
+name: Setup cargo tools
+description: |-
+  Installs cargo tools from prebuilt release binaries (taiki-e/install-action,
+  checksum-verified) at the versions this repository's checks depend on. One
+  source of truth for the tool versions; the workflow files only name the
+  tools a job needs. Where each version lives and how to change it:
+  docs/ci-toolchains.md.
+inputs:
+  tools:
+    description: |-
+      Comma-separated cargo tools to install, each as `name` or
+      `name@version`, for example `cargo-deny,cargo-about`.
+      - A bare `name` installs the version from the map below.
+      - An explicit `name@version` installs that version as given,
+        overriding the map.
+      - A bare `name` that is missing from the map fails the step: the map
+        is the deliberate record of which versions the checks run, and an
+        unknown tool must not silently resolve to a different one.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Resolve the tool versions
+      id: resolve
+      run: |
+        # The versions the checks of this repository depend on:
+        # - cargo-deny: a new release can change the license and advisory
+        #   results (deny.toml), so the CI and release checks pin it.
+        # - cargo-about: a new release can change the generated
+        #   THIRD_PARTY_LICENSES.txt, so the checks pin it; the version must
+        #   match the one scripts/generate-third-party-licenses.sh requires.
+        # - cargo-llvm-cov: pinned so the coverage job installs the same
+        #   prebuilt binary every run (the unpinned `cargo install
+        #   cargo-llvm-cov --locked` source-compiled whatever the registry
+        #   served; the 0.9.2 release publishes a prebuilt
+        #   x86_64-unknown-linux-gnu for the ubuntu-latest coverage job, and
+        #   its report format is what the summary step parses).
+        #
+        # A case lookup, not an associative array: the macOS runners run steps
+        # with /bin/bash, which is still Bash 3.2 and has no `declare -A`
+        # (this step must resolve on every OS the jobs run on).
+        version_for() {
+          case "$1" in
+            cargo-deny) echo "0.20.2" ;;
+            cargo-about) echo "0.9.3" ;;
+            cargo-llvm-cov) echo "0.9.2" ;;
+            *) echo "" ;;
+          esac
+        }
+        specs=()
+        for tool in $(tr ',' ' ' <<< "${{ inputs.tools }}"); do
+          if [[ "$tool" == *@* ]]; then
+            specs+=("$tool")
+          else
+            version=$(version_for "$tool")
+            if [[ -n "$version" ]]; then
+              specs+=("$tool@$version")
+            else
+              echo "::error::Unknown cargo tool '${tool}': add its version to the map in setup-cargo-tools deliberately, or pass an explicit ${tool}@version."
+              exit 1
+            fi
+          fi
+        done
+        if [ "${#specs[@]}" -eq 0 ]; then
+          echo "::error::No tools to install: the 'tools' input is empty."
+          exit 1
+        fi
+        IFS=,; echo "resolved=${specs[*]}" >> "$GITHUB_OUTPUT"
+      shell: bash
+    - name: Install the cargo tools
+      uses: taiki-e/install-action@v2
+      with:
+        tool: ${{ steps.resolve.outputs.resolved }}

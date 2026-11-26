@@ -39,15 +39,6 @@ concurrency:
   group: release-${{ inputs.version }}
   cancel-in-progress: false
 
-env:
-  # Every Apple job (the release build and its consumer and manifest checks)
-  # selects this one Xcode on the macos-26 image. App Store Connect requires
-  # apps built with Xcode 26 or later, so the archive is built and validated
-  # with a stable Xcode 26.x — the one the macos-26 image ships as its
-  # default, so no extra download (Issue #135). Update the runner label and
-  # this version together, from the runner-images README, not the label.
-  XCODE_VERSION: '26.6'
-
 jobs:
   validate_version:
     name: Validate release version
@@ -59,11 +50,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: $/.github/actions/setup-rust-toolchain
       # A release ships only dependencies under licenses deny.toml allows.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-deny@0.20.2
+          tools: cargo-deny
       - run: cargo deny check licenses
       - id: version
         name: Match SemVer release version to Cargo package version
@@ -164,20 +155,19 @@ jobs:
       # The archive's bytes are shaped by the toolchain (the rustc version is
       # part of rustc's -C metadata hash; the Xcode version shapes the
       # xcframework), and the manifest's checksum is computed from them. Pin
-      # both to exact versions (Xcode via XCODE_VERSION above) and record the
+      # both to exact versions (Xcode via the setup-xcode action) and record the
       # exact versions in the step summary so a release archive can be tied
       # to the toolchain that built it. Pinning does not make a rebuild
       # byte-identical; the published checksum is always computed from this
       # run's archive (see docs/releasing.md).
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: maxim-lobanov/setup-xcode@v1
+      - uses: $/.github/actions/setup-rust-toolchain
         with:
-          xcode-version: ${{ env.XCODE_VERSION }}
-      - uses: Swatinem/rust-cache@v2
+          toolchain: 1.100.0
+      - uses: $/.github/actions/setup-xcode
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       - name: Record toolchain versions
         run: |
           {
@@ -207,44 +197,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      # Java, the SDK platform and build-tools, the NDK, and Gradle come from
+      # the shared setup-android action. The NDK version is written once, as
+      # the action's input; the action exports ANDROID_NDK_HOME,
+      # ANDROID_NDK_VERSION and ANDROID_API_LEVEL for the Gradle build and
+      # the emulator below.
+      - uses: $/.github/actions/setup-android
         with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          ndk: 27.2.12479018
       # The same Rust as the Apple job, so every package links the same
       # standard library and ships the same notices for it.
-      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.100.0
+          # Cache compiled Cargo dependencies for the host and both Android ABIs
+          # that check-android-targets.sh builds under Gradle. The workspace's own
+          # crates are rebuilt each run: caching them too (cache-workspace-crates)
+          # did not shorten warm runs and grew the cache by about 40% (#190).
+          # The key adds the NDK version and native API level, which rust-cache
+          # does not hash on its own, so changing either starts a fresh cache.
+          cache-key: android-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API_LEVEL }}
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
-      - name: Configure Android NDK
-        env:
-          ANDROID_API_LEVEL: '28'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Cache compiled Cargo dependencies for the host and both Android ABIs
-      # that check-android-targets.sh builds under Gradle. The workspace's own
-      # crates are rebuilt each run: caching them too (cache-workspace-crates)
-      # did not shorten warm runs and grew the cache by about 40% (#190).
-      # The key adds the NDK version and native API level, which rust-cache
-      # does not hash on its own, so changing either starts a fresh cache.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
-      - uses: gradle/actions/setup-gradle@v6
+          tools: cargo-about
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
+      # On the minSdk, the setup-android action's exported ANDROID_API_LEVEL.
       - name: Run Android callback tests on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: ${{ env.ANDROID_API_LEVEL }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -282,8 +266,9 @@ jobs:
       - uses: actions/checkout@v7
       # Pinned like the package jobs, so a rebuild of the same commit
       # uses the same rustdoc.
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.100.0
       # Builds and runs the examples the documentation ships.
       - run: cargo test --locked --workspace --all-targets --all-features
       - run: cargo doc --locked --no-deps
@@ -308,14 +293,15 @@ jobs:
       - uses: actions/checkout@v7
       # The same Rust as the Apple job, so every package links the same
       # standard library and ships the same notices for it.
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.100.0
       - run: cargo build --locked --lib --target x86_64-pc-windows-msvc
       - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
-      - uses: taiki-e/install-action@v2
+      - uses: $/.github/actions/setup-cargo-tools
         with:
-          tool: cargo-about@0.9.3
+          tools: cargo-about
       - run: scripts/generate-third-party-licenses.sh
         shell: bash
       - name: Build and package Windows library
@@ -335,9 +321,7 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: $/.github/actions/setup-xcode
       - name: Record toolchain versions
         run: |
           {
@@ -358,25 +342,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v6
+      # Java, the SDK platform and build-tools, and Gradle from the shared
+      # setup-android action (no NDK: this job validates the published AAR,
+      # it does not build Rust for Android).
+      - uses: $/.github/actions/setup-android
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
       - uses: actions/download-artifact@v8
         with:
           name: release-android
           path: dist
+      # On the minSdk: the level the setup-android action exports, so a
+      # documented minSdk bump also updates this consumer test.
       - name: Run Android release consumer on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: ${{ env.ANDROID_API_LEVEL }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -404,9 +385,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: $/.github/actions/setup-xcode
       - name: Record toolchain versions
         run: |
           {
@@ -552,27 +531,16 @@ jobs:
         run: |
           python3 scripts/android_maven_central_release.py decide "$RELEASE_VERSION" \
             --expected-sha256 "$EXPECTED_SHA256"
-      - uses: actions/setup-java@v6
-        if: steps.decide.outputs.decision == 'upload'
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        if: steps.decide.outputs.decision == 'upload'
-        with:
-          packages: platform-tools
       # No NDK or cargo-about: the adopted AAR replaces the AAR build, the
-      # only user of the Rust NDK builds and the license notices. The host
-      # Rust, the same toolchain as the android job, generates the UniFFI
-      # bindings for the sources and javadoc jars.
-      - if: steps.decide.outputs.decision == 'upload'
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: dtolnay/rust-toolchain@1.100.0
+      # only user of the Rust NDK builds and the license notices.
+      - uses: $/.github/actions/setup-android
         if: steps.decide.outputs.decision == 'upload'
-      - uses: Swatinem/rust-cache@v2
+      # The host Rust, the same toolchain as the android job, generates the
+      # UniFFI bindings for the sources and javadoc jars.
+      - uses: $/.github/actions/setup-rust-toolchain
         if: steps.decide.outputs.decision == 'upload'
-      - uses: gradle/actions/setup-gradle@v6
-        if: steps.decide.outputs.decision == 'upload'
+        with:
+          toolchain: 1.100.0
       - name: Build and check the signed Central bundle
         if: steps.decide.outputs.decision == 'upload'
         env:
@@ -652,17 +620,15 @@ jobs:
           MAVEN_USER: ${{ secrets.MAVEN_USER }}
           MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
         run: python3 scripts/android_maven_central_release.py probe "$RELEASE_VERSION" --read-only
-      - uses: actions/setup-java@v6
+      # No NDK or cargo-about: the adopted AAR is validated, not built. Java,
+      # the SDK platform and build-tools, and Gradle come from the shared
+      # setup-android action; the host Rust, the same toolchain as the
+      # android job, generates the UniFFI bindings for the sources and
+      # javadoc jars.
+      - uses: $/.github/actions/setup-android
+      - uses: $/.github/actions/setup-rust-toolchain
         with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: Swatinem/rust-cache@v2
-      - uses: gradle/actions/setup-gradle@v6
+          toolchain: 1.100.0
       - name: Build and check the signed Central bundle
         env:
           ADOPTED_AAR: ${{ steps.aar.outputs.path }}
