@@ -28,14 +28,14 @@ the exact public API used below.
 
 In Xcode, choose **File > Add Package Dependencies...**, enter
 `https://github.com/ProjectFlora/NativeOIDC`, set **Dependency Rule** to
-**Up to Next Minor Version** from `0.8.0`, and add the `NativeOIDC` library to
+**Up to Next Minor Version** from `0.9.0`, and add the `NativeOIDC` library to
 your app target. In a `Package.swift` manifest:
 
 ```swift
 dependencies: [
     .package(
         url: "https://github.com/ProjectFlora/NativeOIDC",
-        .upToNextMinor(from: "0.8.0")
+        .upToNextMinor(from: "0.9.0")
     ),
 ],
 targets: [
@@ -58,7 +58,7 @@ for the manifest rules and the pre-1.0 versioning policy.
 ### XCFramework archive
 
 To integrate without SPM, download and verify the release archive from the
-[GitHub Release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.8.0)
+[GitHub Release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.9.0)
 and add its `NativeOIDC.xcframework` and `Swift/` sources to the app target,
 both from the same release. See
 [Swift XCFramework installation](swift-xcframework.md).
@@ -870,8 +870,9 @@ The Swift examples in this guide are exercised at the following scope:
   `scripts/check-apple-release-consumer.sh` compiles the mirror against the
   release archive's generated bindings, adapters, and XCFramework — the
   distributed artifacts, not the module sources — for a macOS host (which it
-  then runs) and for the iOS simulator (linked). The published `v0.8.0`
-  simulator slice is arm64-only, so the iOS build excludes `x86_64`.
+  then runs) and for the iOS simulator (linked). The release simulator slice
+  is arm64-only (as in the published `v0.8.0`), so the iOS build excludes
+  `x86_64`.
 - **Runtime**: the macOS host runs the representative state-update,
   cancellation, and error branches the examples rely on (#85): a scripted
   refresh that updates the state in place and round-trips it through JSON, an
@@ -905,6 +906,10 @@ The Swift examples in this guide are exercised at the following scope:
   end-session, revocation, and registration examples are not executed against
   a real IdP or on real devices, consistent with the repository's
   [live IdP interoperability](live-idp-interoperability.md) policy.
+- **v0.9.0**: the `swift test` count above is for `v0.8.0`. The published
+  v0.9.0 results (release consumer validation and the real system-browser
+  check) are recorded in the release tracking issue
+  [#241](https://github.com/ProjectFlora/NativeOIDC/issues/241).
 
 ### Example verification commands
 
@@ -912,10 +917,10 @@ From a checkout that includes the consumer app, against a downloaded and
 checksum-verified release archive:
 
 ```sh
-scripts/check-apple-release-consumer.sh dist/NativeOIDC-Apple-0.8.0.zip
+scripts/check-apple-release-consumer.sh dist/NativeOIDC-Apple-0.9.0.zip
 ```
 
-From a checkout at tag `v0.8.0`:
+From a checkout at tag `v0.9.0`:
 
 ```sh
 # Package build for macOS, including the generated API and both adapters.

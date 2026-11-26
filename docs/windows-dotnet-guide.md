@@ -14,8 +14,8 @@ and the JSON request examples for each operation are in the
 through the C ABI. The [API coverage matrix](api-coverage.md) lists every
 operation.
 
-The guide targets the published **v0.8.0** release. The Windows header, C
-ABI, .NET wrapper, and request/response JSON on current `main` are unchanged
+The guide targets the published **v0.9.0** release. The Windows header, C
+ABI, .NET wrapper, and request/response JSON are unchanged
 from v0.8.0. Check the matching tag when you install another version.
 
 Every `csharp` block in this guide, together with the `Program.cs` of the
@@ -25,7 +25,7 @@ provider. See [section 9](#9-verification-coverage-and-known-limits).
 
 ## 1. Versions, installation, and build
 
-| Item | v0.8.0 |
+| Item | v0.9.0 |
 | --- | --- |
 | Wrapper | C# source, `ProjectFlora.NativeOidc.NativeOidcWindows`, targeting .NET Standard 2.1 |
 | Hosts | Any .NET implementation of .NET Standard 2.1 on Windows: .NET Core 3.0 or later and .NET 5 or later. .NET Framework does not implement .NET Standard 2.1 |
@@ -37,21 +37,21 @@ provider. See [section 9](#9-verification-coverage-and-known-limits).
 
 ### Download and verify
 
-Download `native-oidc-windows-0.8.0.zip` and `SHA256SUMS` from the
-[v0.8.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.8.0),
+Download `native-oidc-windows-0.9.0.zip` and `SHA256SUMS` from the
+[v0.9.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.9.0),
 then verify the checksum from the download directory and extract the ZIP
 next to the project file:
 
 ```powershell
-$asset = 'native-oidc-windows-0.8.0.zip'
+$asset = 'native-oidc-windows-0.9.0.zip'
 $expected = ((Select-String SHA256SUMS -Pattern "  $([regex]::Escape($asset))$").Line -split '\s+')[0]
 $actual = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw 'SHA-256 mismatch' }
-Expand-Archive $asset -DestinationPath third_party/native-oidc-windows-0.8.0
+Expand-Archive $asset -DestinationPath third_party/native-oidc-windows-0.9.0
 ```
 
 The ZIP has no top-level directory, so the extracted
-`third_party/native-oidc-windows-0.8.0` directory is the package root. It
+`third_party/native-oidc-windows-0.9.0` directory is the package root. It
 contains:
 
 | File | Use |
@@ -78,7 +78,7 @@ output directory. The examples also use DPAPI through the
     <!-- native_oidc.dll is x64 only. -->
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <NativeOidcPackage>$(MSBuildProjectDirectory)\third_party\native-oidc-windows-0.8.0</NativeOidcPackage>
+    <NativeOidcPackage>$(MSBuildProjectDirectory)\third_party\native-oidc-windows-0.9.0</NativeOidcPackage>
   </PropertyGroup>
   <ItemGroup>
     <!-- Keep the package's own files out of the default **/*.cs glob. -->
@@ -1063,17 +1063,20 @@ Studio (C++ and CMake) and the .NET SDK:
 
 ```powershell
 # A downloaded release ZIP (verify its checksum first, see section 1)
-scripts/check-windows-release-consumer.ps1 -Package native-oidc-windows-0.8.0.zip
+scripts/check-windows-release-consumer.ps1 -Package native-oidc-windows-0.9.0.zip
 ```
 
 CI runs the same script on every change to the Windows adapter, its
 fixtures, or this guide (`windows_core` on Windows Server, `windows_client`
 on a Windows 11 client runner with x64 emulation), against a package built
 from the branch. The `Published release consumer validation` workflow
-checks out the release tag's own scripts, so for v0.8.0 it runs only the
-consumers that existed at that tag, not these guide examples.
+checks out the release tag's own scripts. From v0.9.0, the tag includes
+these guide examples, so the workflow runs them against the published
+package; for v0.8.0 it ran only the consumers that existed at that tag.
 
-Evidence for this guide (commit `526bcb3`):
+Evidence for this guide (commit `526bcb3`, before v0.9.0; the published
+v0.9.0 results are recorded in the release tracking issue
+[#241](https://github.com/ProjectFlora/NativeOIDC/issues/241)):
 
 - Executed in CI: CI built a package from the branch and compiled all 13
   `csharp` blocks. It ran the 51 checks against that package, and all of

@@ -572,7 +572,7 @@ private suspend fun guideSignIn(
             additionalTokenParameters = emptyList(),
         ),
         AndroidRedirectConfiguration(
-            // v0.8.0 checks App Link verification with an API 31 class.
+            // v0.9.0 falls back on API 28–30 by itself; the guard also covers v0.8.0.
             appLinkUri =
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     "https://login.example.com/oauth/callback"
