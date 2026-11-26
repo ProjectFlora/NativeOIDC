@@ -41,6 +41,18 @@ This roadmap tracks work remaining for the initial scope in
   clients.
 - **Redirect policy:** Prefer verified HTTPS links on iOS/iPadOS and Android,
   with custom URI scheme fallbacks; use loopback redirects on macOS and Windows.
+- **Loopback HTTP endpoints:** Decided 2026-11-27
+  ([#269](https://github.com/ProjectFlora/NativeOIDC/issues/269)). Explicitly
+  configured authorization, token, and revocation endpoints may use loopback
+  HTTP (`127.0.0.0/8`, `::1`, `localhost`) as well as HTTPS. The issuer, JWKS,
+  end-session, and registration endpoints, and every discovered endpoint,
+  require HTTPS. RFC 6749 §3.1 and §3.2 require TLS for the authorization and
+  token endpoints, and RFC 7009 §2 says the client MUST verify that the
+  revocation URL is HTTPS. Loopback is accepted anyway because loopback
+  traffic never leaves the device, and local development and the test mock
+  providers need it. Requiring HTTPS, with a test-only path for the mock
+  providers, was declined. Hosts must not ship production configurations that
+  point at loopback HTTP endpoints.
 - **Windows scope:** Include Windows desktop browser and redirect integration
   in v1, using the external browser and loopback redirects. Initially target
   `x86_64-pc-windows-msvc`; support Windows client versions currently supported
