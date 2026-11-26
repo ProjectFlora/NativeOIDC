@@ -8,6 +8,13 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [0.9.0] - 2026-11-27
 
+### Security
+
+- Upgrade `url` from 2.5.8 to 2.5.9 (with `form_urlencoded` 1.2.3), so the
+  release libraries no longer ship a version affected by RUSTSEC-2026-0592,
+  a stack overflow in `Url::origin()` on nested `blob:` URLs. NativeOIDC
+  does not call `Url::origin()`.
+
 ### Distribution
 
 - Each release now publishes `NativeOIDC-Docs-<version>.zip` in place of
