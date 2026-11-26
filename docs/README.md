@@ -12,7 +12,7 @@ by each language and the examples and checks available today.
 
 | Audience | Installation and current usage | Remaining guide work |
 | --- | --- | --- |
-| Swift: iOS/iPadOS and macOS | [XCFramework installation](swift-xcframework.md), [Swift guide](swift-guide.md#objective-c-interoperability), [Apple adapters](../README.md#apple-adapters) | [#85](https://github.com/ProjectFlora/NativeOIDC/issues/85) |
+| Swift: iOS/iPadOS and macOS | [XCFramework installation](swift-xcframework.md), [Swift user guide](swift-guide.md), [Apple adapters](../README.md#apple-adapters) | — |
 | Kotlin: Android | [Kotlin/Android user guide](kotlin-guide.md), [Android adapter](../README.md#android-adapter) | — |
 | C++: Windows | [Windows C++ user guide](windows-cpp-guide.md), [Windows usage](../native/windows/README.md), [ABI reference](windows-api.md) | — |
 | .NET: Windows | [Windows .NET user guide](windows-dotnet-guide.md), [Windows usage](../native/windows/README.md#net-interop), [wrapper contract](windows-api.md#net-wrapper) | — |
