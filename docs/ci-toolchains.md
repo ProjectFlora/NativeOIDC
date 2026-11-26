@@ -104,9 +104,9 @@ too.
 
 **Bumping:** change the input defaults in
 `.github/actions/setup-android/action.yml` (the NDK, at its two call
-sites). Changing `compile-sdk`, `build-tools`, `api-level`, or `ndk`
-changes the Android jobs' `rust-cache` key, so the first Android run after
-the bump is a cache miss.
+sites). Changing `api-level` or `ndk` changes the Android jobs' explicit
+`rust-cache` key. Changing `compile-sdk` or `build-tools` alone leaves
+that key unchanged.
 
 ## Cargo tools (`setup-cargo-tools`)
 
