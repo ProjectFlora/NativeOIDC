@@ -220,21 +220,30 @@ class SettleSamplerTestCase(BashHelperMixin, unittest.TestCase):
         self.assert_stopped(child_file)
 
     def test_stop_during_startup_stops_a_child_started_in_between(self):
-        # settle_stop runs right after the launch, before perl has made the
-        # group, so its first group signal fails. The override then lets the
-        # sampler make the group and start its child before the next signal.
-        delayed = os.path.join(self.directory, "delayed")
+        # The perl override holds the launcher before it makes the group, so
+        # settle_stop's first group signal must fail. The kill override then
+        # releases the launcher and waits for the sampler's child before the
+        # process signal, so only the final group signal can stop the child.
+        gate = os.path.join(self.directory, "gate")
+        first_status = os.path.join(self.directory, "first-status")
         child_file = self.run_sampler(
+            "perl() {\n"
+            f'    while [[ ! -e "{gate}" ]]; do sleep 0.05; done\n'
+            '    exec perl "$@"\n'
+            "}\n"
             "kill() {\n"
             "    local status=0\n"
             '    builtin kill "$@" || status=$?\n'
-            f'    if [[ ! -e "{delayed}" ]]; then\n'
-            f'        : > "{delayed}"\n'
+            f'    if [[ ! -e "{gate}" ]]; then\n'
+            f'        echo "$status" > "{first_status}"\n'
+            f'        : > "{gate}"\n'
             '        for _ in {1..100}; do [[ -s "$SETTLE_CHILD_FILE" ]] && break; sleep 0.1; done\n'
             "    fi\n"
             '    return "$status"\n'
             "}\n")
-        self.assertTrue(os.path.exists(child_file), "the sampler did not start its child")
+        with open(first_status, encoding="utf-8") as handle:
+            self.assertNotEqual(handle.read().strip(), "0", "the group existed before the first signal")
+        self.assertTrue(os.path.exists(child_file), "the sampler did not start its child within 10s")
         self.assert_stopped(child_file)
 
 
