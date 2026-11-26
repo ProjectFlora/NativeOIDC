@@ -1,0 +1,82 @@
+name: Setup Android
+description: |-
+  Installs the Android toolchain (Java, the SDK platform and build-tools,
+  optionally the NDK, and Gradle) for a job, and exports the Android
+  environment for the steps that follow. One source of truth for the
+  Java/SDK/NDK/API versions; the workflow files only name what a job needs
+  (the NDK, when the job builds Rust for Android). Where each version lives
+  and how to change it: docs/ci-toolchains.md.
+inputs:
+  java-version:
+    description: |-
+      The Java major version for Gradle (Temurin).
+    default: '17'
+  packages:
+    description: |-
+      Space-separated `sdkmanager` packages to install (for example
+      `platform-tools`).
+    default: platform-tools
+  compile-sdk:
+    description: |-
+      The SDK platform to install, as `android-NN`. Exported as
+      `ANDROID_COMPILE_SDK` (the bare level) for the emulator steps.
+    default: android-35
+  build-tools:
+    description: |-
+      The SDK build-tools version to install.
+    default: 35.0.0
+  api-level:
+    description: |-
+      The minimum API level the app targets (minSdk), exported as
+      `ANDROID_API_LEVEL` for the emulator steps.
+    default: '28'
+  ndk:
+    description: |-
+      The NDK version to install, as `NN.N.NNNNNNNN`; empty (the default)
+      installs no NDK. Exported as `ANDROID_NDK_VERSION`, and as
+      `ANDROID_NDK_HOME`, for the Gradle builds and the rust-cache key.
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Set up Java
+      uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+    - name: Set up the Android SDK command line tools
+      uses: android-actions/setup-android@v4
+      with:
+        packages: ${{ inputs.packages }}
+    - name: Install the Android SDK packages
+      run: |
+        sdkmanager "platforms;${{ inputs.compile-sdk }}" "build-tools;${{ inputs.build-tools }}"
+        if [ -n "${{ inputs.ndk }}" ]; then
+          sdkmanager "ndk;${{ inputs.ndk }}"
+        fi
+      shell: bash
+    - name: Export the Android environment
+      env:
+        ANDROID_NDK_VERSION: ${{ inputs.ndk }}
+        ANDROID_API_LEVEL: ${{ inputs.api-level }}
+        ANDROID_COMPILE_SDK: ${{ inputs.compile-sdk }}
+      run: |
+        # Exported for the steps that follow: the rust-cache key (the NDK
+        # version and API level, which rust-cache does not hash on its
+        # own), the emulator API levels, and the Gradle build (the NDK
+        # location). Only a job that installs the NDK exports anything;
+        # the no-NDK jobs of release.yml and release-consumer.yml export
+        # nothing, as before.
+        if [ -n "$ANDROID_NDK_VERSION" ]; then
+          {
+            echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+            echo "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION"
+            echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL"
+            # The bare level (`35` from `android-35`), for the emulator's
+            # api-level input.
+            echo "ANDROID_COMPILE_SDK=${ANDROID_COMPILE_SDK#android-}"
+          } >> "$GITHUB_ENV"
+        fi
+      shell: bash
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v6

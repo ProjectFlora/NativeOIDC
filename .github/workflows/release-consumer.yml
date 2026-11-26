@@ -326,15 +326,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v6
+      # Java, the SDK platform and build-tools, and Gradle from the shared
+      # setup-android action (no NDK: this job validates the published AAR,
+      # it does not build Rust for Android).
+      - uses: $/.github/actions/setup-android
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
       - name: Download and verify Android release archive
@@ -349,6 +344,8 @@ jobs:
             --dir dist
           cd dist
           grep -F "  native-oidc-android-$RELEASE_VERSION.aar" SHA256SUMS | shasum -a 256 -c -
+      # On the minSdk. This job installs no NDK, so the setup-android action
+      # exports nothing here and the level stays a literal.
       - name: Run Android release consumer on an emulator
         env:
           RELEASE_VERSION: ${{ inputs.version }}
@@ -379,17 +376,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: scripts/check-android-maven-publication-status.sh "$RELEASE_VERSION"
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v6
+      # Java, the SDK platform and build-tools, and Gradle from the shared
+      # setup-android action (no NDK: this job validates the published AAR,
+      # it does not build Rust for Android).
+      - uses: $/.github/actions/setup-android
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
+      # On the minSdk. This job installs no NDK, so the setup-android action
+      # exports nothing here and the level stays a literal.
       - name: Run Android release consumer (Maven Central) on an emulator
         env:
           RELEASE_VERSION: ${{ inputs.version }}

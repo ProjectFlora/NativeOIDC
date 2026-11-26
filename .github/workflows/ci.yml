@@ -287,14 +287,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      # Java, the SDK platform and build-tools, the NDK, and Gradle come from
+      # the shared setup-android action. The NDK version is written once, as
+      # the action's input; the action exports ANDROID_NDK_HOME,
+      # ANDROID_NDK_VERSION, ANDROID_API_LEVEL and ANDROID_COMPILE_SDK for
+      # the steps below (the rust-cache key, the emulator levels, the Gradle
+      # build).
+      - uses: $/.github/actions/setup-android
         with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          ndk: 27.2.12479018
       - uses: $/.github/actions/setup-rust-toolchain
         with:
           # Cache compiled Cargo dependencies for the host and both Android ABIs
@@ -303,18 +304,11 @@ jobs:
           # did not shorten warm runs and grew the cache by about 40% (#190).
           # The key adds the NDK version and native API level, which rust-cache
           # does not hash on its own, so changing either starts a fresh cache.
-          cache-key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
+          cache-key: android-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API_LEVEL }}
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-about@0.9.3
-      - name: Configure Android NDK
-        env:
-          ANDROID_API_LEVEL: '28'
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - id: android_release_aar
         run: ./native/android/gradlew -p native/android assembleRelease
@@ -323,11 +317,13 @@ jobs:
         run: sudo chmod a+rw /dev/kvm
       # The emulator tests run on the minSdk (API 28) and on the compileSdk and
       # consumer targetSdk (API 35), one after the other in this job, so the
-      # required "Android adapters validation" check covers both (#166).
+      # required "Android adapters validation" check covers both (#166). The
+      # levels are the setup-android action's exports (ANDROID_API_LEVEL,
+      # ANDROID_COMPILE_SDK).
       - name: Run Android callback tests on an emulator (API 28)
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: ${{ env.ANDROID_API_LEVEL }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -341,7 +337,7 @@ jobs:
         if: ${{ !cancelled() && steps.android_release_aar.outcome == 'success' && steps.android_emulator_kvm.outcome == 'success' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ env.ANDROID_COMPILE_SDK }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
