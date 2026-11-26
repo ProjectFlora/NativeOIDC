@@ -6,10 +6,10 @@ set -euo pipefail
 # order and records how long each took (scripts/apple-phase-timing.sh) in the
 # step summary, including a failed run's last phase:
 #
-# 1. Build: UniFFI bindings and the four Rust release slices. Meanwhile the
-#    iOS simulator boots in the background (scripts/boot-ios-simulator.sh).
+# 1. Build: UniFFI bindings and the four Rust release slices.
 # 2. Stage: Swift sources, notices, README, headers and the universal macOS
-#    library in target/apple/release-package.
+#    library in target/apple/release-package. From here on, the iOS
+#    simulator boots in the background (scripts/boot-ios-simulator.sh).
 # 3. XCFramework: create it, and check that its canonical Info.plist is the
 #    same across two create-xcframework runs.
 # 4. Verify: the macOS static-link smoke test
@@ -195,8 +195,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-start_simulator_boot
-
 export IPHONEOS_DEPLOYMENT_TARGET=18.0
 export MACOSX_DEPLOYMENT_TARGET=15.0
 
@@ -214,6 +212,10 @@ for target in \
     cargo build --locked --release --lib --target "$target"
     phase_end
 done
+
+# Started after the Rust slices, so the boot overlaps only staging, the
+# XCFramework and the macOS smoke test, not the CPU-bound builds (#235).
+start_simulator_boot
 
 phase_begin "Stage: sources, notices, headers, macOS library"
 mkdir -p "$repo_root/target/apple" "$package_root/Swift" "$headers"
