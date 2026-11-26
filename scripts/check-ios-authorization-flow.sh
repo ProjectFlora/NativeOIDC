@@ -69,22 +69,26 @@ settle_start() {
         return 0
     fi
     # The sampler runs in its own process group (perl makes it the group
-    # leader before running it), so stopping it stops every command it has
-    # started, whatever it is running at that moment.
-    perl -e 'setpgrp(0, 0); exec @ARGV or exit 127' \
+    # leader before running it, and gives up if it cannot), so stopping it
+    # stops every command it has started, whatever it is running.
+    perl -e 'setpgrp(0, 0) or exit 125; exec @ARGV or exit 127' \
         bash -c "$(declare -f settle_sampler); settle_sampler" >> "$settle_log" 2>&1 &
     settle_pid=$!
 }
 
-# Stop the sampler's process group. Before perl has made the group, the
-# sampler has started no commands yet, so stopping its process is enough.
-# The job notice for the stopped sampler is discarded.
+# Stop the sampler's process group. The group may not exist yet when this
+# runs (perl has not called setpgrp), so the process itself is stopped too,
+# and once it has exited the group is signalled again: a command the sampler
+# started in between is still in the group. The job notice for the stopped
+# sampler is discarded.
 settle_stop() {
     if [[ -z "$settle_pid" ]]; then
         return 0
     fi
-    kill -TERM -- "-$settle_pid" || kill -TERM "$settle_pid" || true
+    kill -TERM -- "-$settle_pid" || true
+    kill -TERM "$settle_pid" || true
     wait "$settle_pid" || true
+    kill -TERM -- "-$settle_pid" || true
     settle_pid=""
 } >/dev/null 2>&1
 
