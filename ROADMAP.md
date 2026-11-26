@@ -141,8 +141,15 @@ None.
   feature set or compatibility guarantees are complete. They may be published
   as regular GitHub Releases while known gaps remain; release notes must state
   the status and limitations.
-- v0.8.0 is the current implementation snapshot. It upgrades
-  `jsonwebtoken` to 12.0.0
+- v0.9.0 is the current implementation snapshot. It publishes the
+  version-matched documentation set with the Swift, Kotlin, Windows C++,
+  and Windows .NET guides
+  ([#89](https://github.com/ProjectFlora/NativeOIDC/issues/89)), makes the
+  Android adapter fall back from an App Link on API 28–30 instead of failing
+  ([#224](https://github.com/ProjectFlora/NativeOIDC/issues/224)), and
+  publishes the GitHub Release AAR itself to Maven Central, resumably
+  ([#180](https://github.com/ProjectFlora/NativeOIDC/issues/180)), on top of
+  v0.8.0, which upgrades `jsonwebtoken` to 12.0.0
   ([#197](https://github.com/ProjectFlora/NativeOIDC/issues/197)), makes
   discovery and client registration honor cancellation
   ([#183](https://github.com/ProjectFlora/NativeOIDC/issues/183)), and adds
