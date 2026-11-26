@@ -102,9 +102,10 @@ a job that installs the NDK additionally exports `ANDROID_NDK_VERSION` and
 as their api-level, so a documented minSdk bump updates those consumer tests
 too.
 
-**Bumping:** change the input defaults in
-`.github/actions/setup-android/action.yml` (the NDK, at its two call
-sites). Changing `api-level` or `ndk` changes the Android jobs' explicit
+**Bumping:** update the defaults in `.github/actions/setup-android/action.yml`
+(the NDK at its two call sites). For an `api-level` or `compile-sdk` bump,
+update `minSdk` or `compileSdk`, respectively, in `native/android/build.gradle.kts`.
+Changing `api-level` or `ndk` changes the Android jobs' explicit
 `rust-cache` key. Changing `compile-sdk` or `build-tools` alone leaves
 that key unchanged.
 
