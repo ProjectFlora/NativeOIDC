@@ -29,7 +29,6 @@ jobs:
       lint: ${{ steps.select.outputs.lint }}
       coverage: ${{ steps.select.outputs.coverage }}
       licenses: ${{ steps.select.outputs.licenses }}
-      spm_bindings: ${{ steps.select.outputs.spm_bindings }}
       spm_manifest: ${{ steps.select.outputs.spm_manifest }}
       apple: ${{ steps.select.outputs.apple }}
       android: ${{ steps.select.outputs.android }}
@@ -86,6 +85,13 @@ jobs:
           retention-days: 14
       - name: Generate native bindings
         run: scripts/generate-bindings.sh
+      # The SPM match check runs here, after the test steps, so a binding
+      # drift fails the job without hiding test results. It reuses the
+      # generation above via generate-bindings.sh's fingerprint cache (no
+      # second cargo build or uniffi-bindgen pass) and diffs the checked-in
+      # Sources/NativeOIDC/native_oidc.swift against the generated output.
+      - name: Swift package bindings match
+        run: scripts/check-spm-bindings.sh
 
   licenses:
     name: Dependency licenses
@@ -206,16 +212,6 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 scripts/select_ci_jobs.py verify
 
-  spm_bindings:
-    name: Swift package bindings match
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.spm_bindings != 'false') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: scripts/check-spm-bindings.sh
 
   spm_manifest:
     name: Swift package manifest is consistent
@@ -440,7 +436,7 @@ jobs:
   # failed, was cancelled, or was skipped although selected.
   ci_result:
     name: CI result
-    needs: [changes, msrv, test, licenses, apple_adapters, spm_bindings, spm_manifest, android_adapters, windows_core, windows_client, lint, coverage]
+    needs: [changes, msrv, test, licenses, apple_adapters, spm_manifest, android_adapters, windows_core, windows_client, lint, coverage]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -454,7 +450,7 @@ jobs:
   report:
     name: PR report
     if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-    needs: [changes, msrv, test, licenses, apple_adapters, spm_bindings, spm_manifest, android_adapters, windows_core, windows_client, lint, coverage]
+    needs: [changes, msrv, test, licenses, apple_adapters, spm_manifest, android_adapters, windows_core, windows_client, lint, coverage]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -473,7 +469,6 @@ jobs:
               ['Tests', '${{ needs.test.result }}', '${{ needs.changes.outputs.test }}'],
               ['Dependency licenses', '${{ needs.licenses.result }}', '${{ needs.changes.outputs.licenses }}'],
               ['Apple adapters validation', '${{ needs.apple_adapters.result }}', '${{ needs.changes.outputs.apple }}'],
-              ['Swift package bindings match', '${{ needs.spm_bindings.result }}', '${{ needs.changes.outputs.spm_bindings }}'],
               ['Swift package manifest is consistent', '${{ needs.spm_manifest.result }}', '${{ needs.changes.outputs.spm_manifest }}'],
               ['Android adapters validation', '${{ needs.android_adapters.result }}', '${{ needs.changes.outputs.android }}'],
               ['Windows core target validation', '${{ needs.windows_core.result }}', '${{ needs.changes.outputs.windows }}'],

@@ -32,7 +32,6 @@ JOBS = (
     "lint",
     "coverage",
     "licenses",
-    "spm_bindings",
     "spm_manifest",
     "apple",
     "android",
@@ -58,8 +57,8 @@ RULES = (
     # (`#[cfg(any(windows, test))]` in src/lib.rs), so Apple, Android and
     # the generated Swift bindings never contain it.
     (("src/windows/**",), RUST | {"windows"}, "Windows Rust module"),
-    (("src/**",), RUST | PACKAGES | {"spm_bindings"}, "shared Rust core"),
-    (("uniffi-bindgen.rs",), RUST | {"apple", "android", "spm_bindings"}, "UniFFI binding generator"),
+    (("src/**",), RUST | PACKAGES, "shared Rust core"),
+    (("uniffi-bindgen.rs",), RUST | {"apple", "android"}, "UniFFI binding generator"),
     (("tests/live-idp/**",), frozenset(), "manual live-IdP fixture, not run in CI"),
     (("tests/**", "examples/**"), RUST, "Rust tests or examples"),
     # License inputs.
@@ -68,7 +67,7 @@ RULES = (
     (("LICENSE",), PACKAGES, "LICENSE shipped in every package"),
     # Swift package and Apple adapters.
     (("Package.swift",), {"apple", "spm_manifest"}, "Swift package manifest"),
-    (("Sources/NativeOIDC/native_oidc.swift",), {"apple", "spm_bindings"}, "generated Swift bindings"),
+    (("Sources/NativeOIDC/native_oidc.swift",), {"apple", "test"}, "generated Swift bindings"),
     # The Tests job builds and checks the release documentation set, which
     # ships the files the documentation links (scripts/build-release-docs.py),
     # so the rules for those files also select it.
@@ -84,9 +83,9 @@ RULES = (
     (("native/windows/**", "native/consumer-smoke/windows/**"), {"windows", "test"}, "Windows adapter or consumer"),
     # Scripts. The Tests job runs every scripts/test_*.py, so each script
     # also selects it.
-    (("scripts/generate-bindings.sh",), {"test", "apple", "android", "spm_bindings"}, "binding generation script"),
+    (("scripts/generate-bindings.sh",), {"test", "apple", "android"}, "binding generation script"),
     (("scripts/generate-third-party-licenses.sh",), {"test", "licenses"} | PACKAGES, "license notice script"),
-    (("scripts/check-spm-bindings.sh",), {"test", "spm_bindings"}, "Swift bindings check"),
+    (("scripts/check-spm-bindings.sh",), {"test"}, "Swift bindings check"),
     (("scripts/check-spm-manifest.sh", "scripts/update-package-swift.py"), {"test", "spm_manifest"},
      "Swift package manifest check"),
     (("scripts/test_normalize_zip.py",), {"test", "apple"}, "zip normalizer tests (real ditto runs on macOS)"),
@@ -286,7 +285,6 @@ JOB_GROUPS = {
     "lint": "lint",
     "coverage": "coverage",
     "licenses": "licenses",
-    "spm_bindings": "spm_bindings",
     "spm_manifest": "spm_manifest",
     "apple_adapters": "apple",
     "android_adapters": "android",
