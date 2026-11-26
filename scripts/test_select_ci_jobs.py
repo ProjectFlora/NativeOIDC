@@ -38,7 +38,7 @@ class RepresentativeChangeTests(unittest.TestCase):
         self.assertEqual(selected("SwiftTests/NativeOIDCTests/NewTests.swift"), {"apple", "test"})
 
     def test_generated_swift_bindings_run_apple_and_binding_check(self):
-        self.assertEqual(selected("Sources/NativeOIDC/native_oidc.swift"), {"apple", "spm_bindings"})
+        self.assertEqual(selected("Sources/NativeOIDC/native_oidc.swift"), {"apple", "test"})
 
     def test_android_emulator_tests_run_android_only(self):
         # #166 runs these on API 28 and API 35.
@@ -83,7 +83,7 @@ class SharedInputTests(unittest.TestCase):
         self.assertEqual(selected("scripts/test_select_ios_simulator.py"), {"test"})
         self.assertEqual(selected("scripts/check-macos-real-browser.sh"), {"test"})
         self.assertEqual(selected("native/apple/MacOSRealBrowserCheck.swift"), {"apple", "test"})
-        self.assertEqual(selected("scripts/generate-bindings.sh"), {"test", "apple", "android", "spm_bindings"})
+        self.assertEqual(selected("scripts/generate-bindings.sh"), {"test", "apple", "android"})
         self.assertEqual(selected("scripts/apple-phase-timing.sh"), {"test", "apple"})
         self.assertEqual(selected("scripts/check-apple-static-link-smoke.sh"), {"test", "apple"})
         self.assertEqual(selected("scripts/test_apple_phase_timing.py"), {"test"})

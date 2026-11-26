@@ -47,11 +47,10 @@ change cannot affect it. Every job runs when:
 | Group | Jobs (check names) |
 | --- | --- |
 | `msrv` | MSRV |
-| `test` | Tests (Rust tests, rustdoc, the release documentation set build and check, binding generation, `scripts/test_*.py`) |
+| `test` | Tests (Rust tests, rustdoc, the release documentation set build and check, binding generation, Swift package bindings match, `scripts/test_*.py`) |
 | `lint` | Formatting and Clippy |
 | `coverage` | Coverage |
 | `licenses` | Dependency licenses |
-| `spm_bindings` | Swift package bindings match |
 | `spm_manifest` | Swift package manifest is consistent |
 | `apple` | Apple adapters validation (iOS 18, iOS latest), and the required `Apple adapters validation` check that collects them |
 | `android` | Android adapters validation (unit tests, API 28 and API 35 emulator tests, release AAR and Maven publication checks) |
@@ -68,24 +67,24 @@ package.
 | `Cargo.toml`, `Cargo.lock` | all | Dependencies, features and version feed every build, the license notices and the Swift package manifest check. |
 | `.gitattributes` | all | Line endings of checked-out build inputs (for example `about.hbs`). |
 | `src/windows/**` | Rust, `windows` | Compiled only for Windows and for tests (`#[cfg(any(windows, test))]` in `src/lib.rs`), so it is in neither the Apple and Android libraries nor the generated bindings. |
-| `src/**` (other) | Rust, packages, `spm_bindings` | The shared core every platform links, and the source of the UniFFI bindings. |
-| `uniffi-bindgen.rs` | Rust, `apple`, `android`, `spm_bindings` | Generates the Swift and Kotlin bindings. |
+| `src/**` (other) | Rust, packages | The shared core every platform links, and the source of the UniFFI bindings. |
+| `uniffi-bindgen.rs` | Rust, `apple`, `android` | Generates the Swift and Kotlin bindings. |
 | `tests/live-idp/**` | none | Manual live-IdP fixture; no CI job uses it. |
 | `tests/**`, `examples/**` | Rust | Rust integration tests and examples. |
 | `deny.toml` | `licenses`, `test` | `cargo deny` reads it, and the release documentation set ships it. |
 | `about.toml`, `about.hbs` | `licenses`, packages | Every package ships the generated third-party notices. |
 | `LICENSE` | packages | Shipped in every package, and the package checks look for it. |
 | `Package.swift` | `apple`, `spm_manifest` | Swift package build and manifest check. |
-| `Sources/NativeOIDC/native_oidc.swift` | `apple`, `spm_bindings` | Generated bindings, compared with a fresh generation. |
+| `Sources/NativeOIDC/native_oidc.swift` | `apple`, `test` | Generated bindings, compared with a fresh generation. The drift diff now runs in the `Tests` job, so `native_oidc.swift` (the checked-in copy) selects `test` as well as `apple`. |
 | `Sources/**`, `SwiftTests/**`, `native/apple/**`, `native/consumer-smoke/apple/**` | `apple`, `test` | Apple adapters, XCTest (including the tests #167 moves there), smoke tests and the release consumer. The guides link some of these files, so the release documentation set ships them. |
 | `docs/swift-xcframework.md` | `apple`, `test` | Shipped as the Apple package's README, and in the release documentation set. |
 | `docs/windows-cpp-guide.md` | `windows`, `test` | The Windows C++ consumer compiles and runs the guide's `cpp` blocks; the release documentation set ships it. |
 | `docs/windows-dotnet-guide.md` | `windows`, `test` | The Windows .NET guide fixture compiles and runs the guide's `csharp` blocks; the release documentation set ships it. |
 | `native/android/**`, `native/consumer-smoke/android/**` | `android`, `test` | Android adapter, unit and emulator tests (including the API 35 run from #166), and the release consumer. The guides link some of these files. |
 | `native/windows/**`, `native/consumer-smoke/windows/**` | `windows`, `test` | Windows header, .NET wrapper, consumers. `native/windows/README.md` is shipped in the Windows package; the header, the wrapper and the guide examples are in the release documentation set. |
-| `scripts/generate-bindings.sh` | `test`, `apple`, `android`, `spm_bindings` | Binding generation. |
+| `scripts/generate-bindings.sh` | `test`, `apple`, `android` | Binding generation. |
 | `scripts/generate-third-party-licenses.sh` | `test`, `licenses`, packages | License notices. |
-| `scripts/check-spm-bindings.sh` | `test`, `spm_bindings` | |
+| `scripts/check-spm-bindings.sh` | `test` | Swift bindings check, now runs inside the `Tests` job after binding generation reuses its output. |
 | `scripts/check-spm-manifest.sh`, `scripts/update-package-swift.py` | `test`, `spm_manifest` | |
 | `scripts/test_normalize_zip.py` | `test`, `apple` | Its real-`ditto` tests run only on macOS. |
 | Apple CI scripts (`apple-phase-timing.sh`, `check-apple-*`, `check-ios-*`, `check-spm-package.sh`, `install-ios-simulator-runtime.sh`, `ios-mock-oauth-provider.py`, `normalize_*.py`, `package-apple-xcframework.sh`, `select_ios_simulator.py`) | `test`, `apple` | |
