@@ -36,7 +36,11 @@ Completing #60 does not satisfy those remaining 1.0.0 readiness gates.
 | Android | API 28 (Android 9); device-reach decision, not a security-patch guarantee; reassess reach, security bulletin, and dependencies before 1.0.0 | `aarch64-linux-android` / `arm64-v8a` and `x86_64-linux-android` / `x86_64`; AAR; Gradle minSdk and NDK API level 28 | Ubuntu host; regular CI runs the adapter and package-consumer tests on two x86_64 `google_apis_playstore` emulators, API 28 (minSdk) and API 35 (compileSdk and consumer targetSdk), one after the other in the `Android adapters validation` job. Release workflows run the consumer test on API 28 only. Verify both native libraries in AAR. arm64 device execution is unverified. compileSdk 35 is a build requirement, not the runtime minimum. |
 | Windows | Microsoft-supported client versions, reviewed each release; concrete edition/version list in README's dated policy | `x86_64-pc-windows-msvc`; DLL, import library, C header, and .NET wrapper ZIP | `windows-latest` Server runner builds/tests and runs C++/.NET consumers. Regular CI also transfers the same package to `windows-11-arm` and runs x64 C++/.NET consumers under emulation, verifying a Windows 11 client host and logging OS/build/image. This adds neither a native ARM64 distribution target nor native x64 client-hardware coverage. Browser callbacks remain simulated in CI; real system-browser flow is checked by the manual [real system-browser verification](real-browser-verification.md). |
 
-Linux is a development/CI host, not a supported distribution platform. tvOS is
+Linux is a development/CI host, not a supported distribution platform, and
+1.0.0 states this as an explicit constraint
+([#252](https://github.com/ProjectFlora/NativeOIDC/issues/252)): the Rust core
+tests run on `ubuntu-latest`, but no Linux browser, callback, or application
+path is built or run. tvOS is
 deferred. Unverified provider and real-device coverage remains documented in
 [live IdP interoperability](live-idp-interoperability.md).
 
@@ -62,6 +66,14 @@ Configuration evidence:
 - CI and package checks: [regular CI](../.github/workflows/ci.yml),
   [release candidate build and consumers](../.github/workflows/release.yml),
   [published release consumers](../.github/workflows/release-consumer.yml).
+
+The features each environment provides, and what the host must do, are
+recorded per environment in the
+[OIDC platform evaluation](oidc-platform-evaluation.md#feature--environment)
+for v0.9.0. In particular, Windows has no standalone discovery or dynamic
+registration, the Apple and Android adapters leave the logout browser to the
+host, and no surface exposes the validated ID Token claims yet
+([#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)).
 
 Alignment means that every declared distribution target is built and packaged,
 runtime minimums agree across documentation and build configuration, and tests

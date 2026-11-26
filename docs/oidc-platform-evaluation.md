@@ -56,11 +56,12 @@ is not evidence of conformance or behavior.
 - **Release direction.** Most fixes change behavior, the saved state JSON, or
   the public API. They fit the v0.10.0 rule (see
   [Release buckets](#release-bucket-proposal)), which confirms that v0.10.0
-  comes before the v1.0.0 candidate.
+  comes before the v1.0.0 candidate. The follow-ups are #260–#270.
 - **Linux.** It has no browser or loopback integration, no distribution
   channel, and no execution evidence beyond Rust core unit tests on the CI
-  host. The recommendation is to keep it development and CI only for 1.0.0
-  (option C under [Linux options](#linux-options)).
+  host. Linux stays development and CI only for 1.0.0, as an explicit
+  constraint (option C under [Linux options](#linux-options), decided
+  2026-11-27).
 
 ## Requirement classification
 
@@ -267,7 +268,8 @@ loopback listener on Linux.
 | B. Dedicated Linux integration | Add a Linux loopback listener and browser launch (probably by making the Windows listener portable) and a Linux package or C ABI before 1.0.0 | Real Linux support with the same callback contract as Windows and macOS | New listener port, packaging, CI on a desktop-capable runner, and a distribution decision (conflicts with #64 unless a non-crates.io channel is chosen). It would go into v0.10.0 or Later 0.x and enlarge the 0.x work |
 | C. Defer Linux | Linux stays a development and CI host for 1.0.0. The docs state it as an explicit 1.0.0 constraint and say the Rust API can be used on Linux without a support guarantee | Matches the current support matrix and #64; no new 1.0.0 commitment without evidence | Linux desktop apps get no supported path until after 1.0.0 |
 
-**Recommendation: C.** Nothing is in place to back a Linux guarantee:
+**Decision (maintainer, 2026-11-27): C.** This was also the recommendation.
+Nothing is in place to back a Linux guarantee:
 there is no package, no listener, and no execution evidence. Option A would
 promise a Rust API compatibility surface that #64 chose not to publish.
 Revisit after 1.0.0 together with #64, or earlier if a Linux consumer appears;
@@ -282,21 +284,21 @@ changes that need migration, or changes worth shipping early for validation;
 unsettled decision; `v1.0.0` for compatible hardening; `v1.0.0後` for work after
 1.0.0.
 
-**Status: proposed, waiting for the maintainer's decision.** Issue links are
-added after approval.
+**Status: approved by the maintainer on 2026-11-27.** `Later 0.x` issues
+have no milestone; the bucket is written in the issue.
 
 | ID | Follow-up | Bucket | Priority | Effort | Reason for the bucket |
 | --- | --- | --- | --- | --- | --- |
-| G1 | Record the validated ID Token claims in the state and compare `iss`, `sub`, `aud`, `auth_time`, and `azp` of a refreshed ID Token with them (S1, D2) | v0.10.0 | High | Medium | Changes the saved state JSON (needs a migration rule for older state) and makes refresh reject tokens it accepts today |
-| G2 | Accept issuer identifiers without a path: carry the issuer as an exact string for discovery and `iss` comparison (S4, D4) | v0.10.0 | High | Medium | Interoperability blocker on every surface. The fix may change the Rust `issuer: Url` signatures and the value returned by `FfiServiceConfiguration.issuer()`. Worth shipping early to validate |
-| G3 | Expose the validated identity (issuer, subject, and selected claims such as `auth_time`, `acr`, `amr`) on every surface: Rust, UniFFI, C ABI JSON, .NET (S3) | v0.10.0 | High | High | New public API on all surfaces, built on G1's stored claims. Needed for account binding and for the UserInfo `sub` check. Shipping it in 0.x lets the record shape be adjusted before 1.0.0 |
-| G4 | Support `max_age` (and requested `acr`) with `auth_time`/`acr` validation (S2, D3) | Later 0.x | Medium | Medium | Depends on G1 and G3. Adding an option field is a record change |
-| G5 | Compare the authorization response `iss` with the configured issuer when present, and honor `authorization_response_iss_parameter_supported` from discovery (D1) | v0.10.0 | Medium | Medium | Changes which callbacks are accepted and may add an error variant |
-| G6 | Validate callback and registration error text the same way as token errors, so control characters cannot reach error messages (D6) | v0.10.0 | Medium | Low | Changes error classification and messages |
-| G7 | Document that `FfiTokenResponse` and error objects print tokens and untrusted provider text on Swift and Kotlin; drop the unneeded `Debug` derives on Windows request types (logging review) | v1.0.0 | Medium | Low | Documentation plus an internal change; no API change |
-| G8 | Document the host's `token_type` check (case-insensitive `Bearer`) and the UserInfo `sub` comparison (D5) | v1.0.0 | Low | Very Low | Documentation only |
-| G9 | Allow `logout_hint` and `ui_locales` on end-session requests (D8) | v1.0.0後 | Low | Low | Additive API for an optional feature |
-| G10 | Decide and record the loopback-HTTP endpoint policy (D7): keep it for local development with a recorded reason, or require HTTPS for revocation (RFC 7009 §2) | v0.10.0 | Low | Low | If HTTPS is required, configurations that work today will be rejected |
-| G11 | Accept IPv6 loopback (`http://[::1]`) redirects on macOS and Windows (D9) | v1.0.0後 | Low | Medium | Additive; RECOMMENDED only |
-| — | Linux | Per the decision above | — | — | Option C adds no work item; option B would become its own issue in v0.10.0 or Later 0.x |
-| — | #133 (Swift 6) | Proposed: Later 0.x | — | — | May change `Sendable` requirements on host-implemented protocols (see Related issues). The milestone stays as set until the maintainer decides |
+| G1 ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)) | Record the validated ID Token claims in the state and compare `iss`, `sub`, `aud`, `auth_time`, and `azp` of a refreshed ID Token with them (S1, D2) | v0.10.0 | High | Medium | Changes the saved state JSON (needs a migration rule for older state) and makes refresh reject tokens it accepts today |
+| G2 ([#261](https://github.com/ProjectFlora/NativeOIDC/issues/261)) | Accept issuer identifiers without a path: carry the issuer as an exact string for discovery and `iss` comparison (S4, D4) | v0.10.0 | High | Medium | Interoperability blocker on every surface. The fix may change the Rust `issuer: Url` signatures and the value returned by `FfiServiceConfiguration.issuer()`. Worth shipping early to validate |
+| G3 ([#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)) | Expose the validated identity (issuer, subject, and selected claims such as `auth_time`, `acr`, `amr`) on every surface: Rust, UniFFI, C ABI JSON, .NET (S3) | v0.10.0 | High | High | New public API on all surfaces, built on G1's stored claims. Needed for account binding and for the UserInfo `sub` check. Shipping it in 0.x lets the record shape be adjusted before 1.0.0 |
+| G4 ([#263](https://github.com/ProjectFlora/NativeOIDC/issues/263)) | Support `max_age` (and requested `acr`) with `auth_time`/`acr` validation (S2, D3) | Later 0.x | Medium | Medium | Depends on G1 and G3. Adding an option field is a record change |
+| G5 ([#264](https://github.com/ProjectFlora/NativeOIDC/issues/264)) | Compare the authorization response `iss` with the configured issuer when present, and honor `authorization_response_iss_parameter_supported` from discovery (D1) | v0.10.0 | Medium | Medium | Changes which callbacks are accepted and may add an error variant |
+| G6 ([#265](https://github.com/ProjectFlora/NativeOIDC/issues/265)) | Validate callback and registration error text the same way as token errors, so control characters cannot reach error messages (D6) | v0.10.0 | Medium | Low | Changes error classification and messages |
+| G7 ([#266](https://github.com/ProjectFlora/NativeOIDC/issues/266)) | Document that `FfiTokenResponse` and error objects print tokens and untrusted provider text on Swift and Kotlin; drop the unneeded `Debug` derives on Windows request types (logging review) | v1.0.0 | Medium | Low | Documentation plus an internal change; no API change |
+| G8 ([#267](https://github.com/ProjectFlora/NativeOIDC/issues/267)) | Document the host's `token_type` check (case-insensitive `Bearer`) and the UserInfo `sub` comparison (D5) | v1.0.0 | Low | Very Low | Documentation only |
+| G9 ([#268](https://github.com/ProjectFlora/NativeOIDC/issues/268)) | Allow `logout_hint` and `ui_locales` on end-session requests (D8) | v1.0.0後 | Low | Low | Additive API for an optional feature |
+| G10 ([#269](https://github.com/ProjectFlora/NativeOIDC/issues/269)) | Decide and record the loopback-HTTP endpoint policy (D7): keep it for local development with a recorded reason, or require HTTPS for revocation (RFC 7009 §2) | v0.10.0 | Low | Low | If HTTPS is required, configurations that work today will be rejected |
+| G11 ([#270](https://github.com/ProjectFlora/NativeOIDC/issues/270)) | Accept IPv6 loopback (`http://[::1]`) redirects on macOS and Windows (D9) | v1.0.0後 | Low | Medium | Additive; RECOMMENDED only |
+| — | Linux | Option C (decided) | — | — | No work item; revisit after 1.0.0 together with #64 |
+| — | #133 (Swift 6) | Proposed: Later 0.x (recorded only) | — | — | May change `Sendable` requirements on host-implemented protocols (see Related issues). Its milestone is unchanged |
