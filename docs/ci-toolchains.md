@@ -53,9 +53,13 @@ plain `Swatinem/rust-cache@v2` step does — so call sites that pass no
 action's exports), because `rust-cache` does not hash the NDK version or the
 API level on its own and changing either must start a fresh cache.
 
-The automatic key includes a hash of the job environment, so a job whose
-environment gains a new exported variable gets a fresh key the next run it
-runs (a one-time cache miss, then warm again).
+The automatic key also hashes the job's Rust environment: the installed
+toolchain versions, the lockfiles, and the environment variables that start
+with `CARGO`, `CC`, `CFLAGS`, `CXX`, `CMAKE`, or `RUST`. A job whose
+environment gains a new exported variable with one of those prefixes gets a
+fresh key the next run it runs (a one-time cache miss, then warm again).
+`ANDROID_*` variables are not among them, so the `setup-android` exports
+never change a `rust-cache` key.
 
 ## Xcode (`setup-xcode`)
 
@@ -90,9 +94,13 @@ follow.
 
 Call sites pass only the `ndk` input (the jobs that build Rust for Android);
 every other value comes from the action's defaults, so it lives in one
-place. A job that passes no `ndk` installs no NDK and exports nothing: the
-no-NDK consumer jobs keep their literal minSdk emulator level for that
-reason.
+place. Every job exports `ANDROID_API_LEVEL` (the minSdk) and
+`ANDROID_COMPILE_SDK` (the bare platform level) for its emulator steps, and
+a job that installs the NDK additionally exports `ANDROID_NDK_VERSION` and
+`ANDROID_NDK_HOME`. The emulator steps of the no-NDK consumer jobs
+(`release.yml`, `release-consumer.yml`) use the exported `ANDROID_API_LEVEL`
+as their api-level, so a documented minSdk bump updates those consumer tests
+too.
 
 **Bumping:** change the input defaults in
 `.github/actions/setup-android/action.yml` (the NDK, at its two call

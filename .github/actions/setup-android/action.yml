@@ -61,22 +61,25 @@ runs:
         ANDROID_API_LEVEL: ${{ inputs.api-level }}
         ANDROID_COMPILE_SDK: ${{ inputs.compile-sdk }}
       run: |
-        # Exported for the steps that follow: the rust-cache key (the NDK
-        # version and API level, which rust-cache does not hash on its
-        # own), the emulator API levels, and the Gradle build (the NDK
-        # location). Only a job that installs the NDK exports anything;
-        # the no-NDK jobs of release.yml and release-consumer.yml export
-        # nothing, as before.
-        if [ -n "$ANDROID_NDK_VERSION" ]; then
-          {
+        # Exported for the steps that follow: the minSdk (ANDROID_API_LEVEL)
+        # and the bare SDK platform level (ANDROID_COMPILE_SDK) for the
+        # emulator steps — in every job, including the no-NDK consumer jobs
+        # of release.yml and release-consumer.yml, whose emulator level is
+        # the export, so a documented minSdk bump updates those consumer
+        # tests too. ANDROID_NDK_VERSION and ANDROID_NDK_HOME are exported
+        # only by a job that installs the NDK, for the rust-cache key and
+        # the Gradle build. rust-cache hashes no ANDROID_* variable, so the
+        # exports change no rust-cache key.
+        {
+          echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL"
+          # The bare level (`35` from `android-35`), for the emulator's
+          # api-level input.
+          echo "ANDROID_COMPILE_SDK=${ANDROID_COMPILE_SDK#android-}"
+          if [ -n "$ANDROID_NDK_VERSION" ]; then
             echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
             echo "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION"
-            echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL"
-            # The bare level (`35` from `android-35`), for the emulator's
-            # api-level input.
-            echo "ANDROID_COMPILE_SDK=${ANDROID_COMPILE_SDK#android-}"
-          } >> "$GITHUB_ENV"
-        fi
+          fi
+        } >> "$GITHUB_ENV"
       shell: bash
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@v6

@@ -336,14 +336,14 @@ jobs:
             --dir dist
           cd dist
           grep -F "  native-oidc-android-$RELEASE_VERSION.aar" SHA256SUMS | shasum -a 256 -c -
-      # On the minSdk. This job installs no NDK, so the setup-android action
-      # exports nothing here and the level stays a literal.
+      # On the minSdk: the level the setup-android action exports, so a
+      # documented minSdk bump also updates this consumer test.
       - name: Run Android release consumer on an emulator
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: ${{ env.ANDROID_API_LEVEL }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
@@ -374,14 +374,14 @@ jobs:
       - uses: $/.github/actions/setup-android
       - name: Enable Android emulator hardware acceleration
         run: sudo chmod a+rw /dev/kvm
-      # On the minSdk. This job installs no NDK, so the setup-android action
-      # exports nothing here and the level stays a literal.
+      # On the minSdk: the level the setup-android action exports, so a
+      # documented minSdk bump also updates this consumer test.
       - name: Run Android release consumer (Maven Central) on an emulator
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 28
+          api-level: ${{ env.ANDROID_API_LEVEL }}
           arch: x86_64
           target: google_apis_playstore
           disable-linux-hw-accel: false
