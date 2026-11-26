@@ -404,10 +404,10 @@ construction, and compilable examples for their language:
 8. Cancellation, timeout policy, errors and platform lifecycle constraints.
 9. Example verification commands, evidence and known limits.
 
-Common behavior is documented here. The [Swift guide](swift-guide.md) carries
-the platform-specific Apple setup, callbacks, and extended examples, and the
-standalone Android guide tracked in
-[#86](https://github.com/ProjectFlora/NativeOIDC/issues/86) will do the same
-for Kotlin; the [Kotlin usage](#kotlin-usage) section above documents the core
-Android lifecycle in the meantime. Sample storage abstractions must say which
-work the application still needs to implement.
+Common behavior is documented here. The language guides carry the
+platform-specific setup, callbacks, and extended examples: the
+[Swift guide](swift-guide.md), the [Kotlin/Android guide](kotlin-guide.md),
+the [Windows C++ guide](windows-cpp-guide.md), and the
+[Windows .NET guide](windows-dotnet-guide.md). The [Kotlin usage](#kotlin-usage)
+section above is a short summary of the Android lifecycle. Sample storage
+abstractions must say which work the application still needs to implement.

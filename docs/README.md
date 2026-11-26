@@ -18,9 +18,10 @@ by each language and the examples and checks available today.
 | .NET: Windows | [Windows .NET user guide](windows-dotnet-guide.md), [Windows usage](../native/windows/README.md#net-interop), [wrapper contract](windows-api.md#net-wrapper) | — |
 | Rust | [Manual authorization example](../examples/manual_authorization.rs), API reference below | [Coverage matrix](api-coverage.md) |
 
-These are the current entry points, not a claim that all language guides are
-complete. [#63](https://github.com/ProjectFlora/NativeOIDC/issues/63) tracks
-completion. Each release after v0.8.0 publishes this documentation as a
+Each language has a complete user guide, from installation to sign-out, with
+examples that are checked against the release packages; the guides state what
+those checks do not cover, such as live identity providers and physical
+devices. Each release after v0.8.0 publishes this documentation as a
 version-matched set (see [API reference](#api-reference)). Apple and
 Android public APIs target Swift and Kotlin only; Objective-C and Java hosts
 should use an app-side wrapper, as described in the

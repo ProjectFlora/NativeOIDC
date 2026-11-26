@@ -6,6 +6,16 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+### Documentation
+
+- The [public API coverage matrix](docs/api-coverage.md) links each operation
+  group to the Swift guide's sections and names the Apple consumer app as
+  where the Swift examples run, as it already did for the Kotlin, C++, and
+  .NET guides. The documentation index and the shared user guide no longer
+  describe the language guides as unfinished. The v0.9.0 documentation set
+  still carries the earlier text
+  ([#63](https://github.com/ProjectFlora/NativeOIDC/issues/63)).
+
 ## [0.9.0] - 2026-11-27
 
 ### Security
