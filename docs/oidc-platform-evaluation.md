@@ -37,11 +37,13 @@ is not evidence of conformance or behavior.
 
 ## Summary
 
-- **Feature coverage.** Every in-scope protocol feature is implemented in the
-  Rust core and reachable from Swift and Kotlin. Windows (C ABI and .NET) has
+- **Feature coverage.** Every in-scope protocol operation (discovery through
+  registration) is implemented in the Rust core and reachable from Swift and
+  Kotlin, with one exception that matters for the release decision: no
+  surface gives applications the validated issuer and subject, which the
+  product's account model needs (S3, follow-up G3). Windows (C ABI and .NET) has
   no standalone discovery, configuration inspection, or dynamic registration,
-  as already documented. No surface exposes the validated ID Token claims
-  (issuer, subject, `auth_time`, `acr`).
+  as already documented.
 - **Interoperability blocker (confirmed).** An issuer identifier without a
   path, such as `https://accounts.google.com`, can never match. The `url`
   crate serializes it as `https://accounts.google.com/`, and both discovery
@@ -108,14 +110,14 @@ Evidence keys are defined under the table.
 
 | Feature | Windows C ABI | Windows .NET | macOS (Swift) | iOS (Swift) | Android (Kotlin) | Linux (Rust API) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Discovery | SDK, only inside an operation (`issuer` in the request JSON; `src/windows/ops.rs:59-63`). No standalone call. [W1, W2] | SDK, same JSON [W2] | SDK `FfiServiceConfiguration.discover` (`src/ffi.rs:269`) [U1, A1] | SDK, same [U1, A1, A2] | SDK, same [U1, K1] | SDK `ServiceConfiguration::discover` (`src/authorization/discovery.rs:20`) [R1] |
+| Discovery | SDK, only inside an operation (`issuer` in the request JSON; `src/windows/ops.rs:59-63`). No standalone call. Windows-surface execution Unverified: W1 parses the `issuer` field only (`src/windows/data.rs:160-167`), and the W2 consumers use explicit endpoints; the discovery logic itself is covered by R1 | SDK, same JSON; Unverified at this surface, as for C ABI | SDK `FfiServiceConfiguration.discover` (`src/ffi.rs:269`) [U1 D1–D7] | SDK, same API [U1 D1–D7, run on the macOS host]; not run on iOS (the A2 flow uses explicit endpoints) | SDK, same API [K1 `UniFfiOperationCoverageTest` D tests] | SDK `ServiceConfiguration::discover` (`src/authorization/discovery.rs:20`) [R1] |
 | Explicit configuration | SDK, request JSON fields [W1, W2] | SDK [W2] | SDK `FfiServiceConfiguration.new` (`src/ffi.rs:257`) [U1] | SDK [U1] | SDK [U1, K1] | SDK `ServiceConfiguration::new` [R1] |
 | Code + S256 PKCE | SDK, inside `native_oidc_windows_authorize` (`src/windows/abi.rs:286`) [W1, W2] | SDK `AuthorizeAsync` [W2] | SDK `begin_authorization` (`src/ffi.rs:423`) [R1, A1] | SDK [R1, A2] | SDK [R1, K1] | SDK `AuthorizationRequest::begin` (`src/authorization/session.rs:122`) [R1, R2] |
 | state, nonce, callback validation | SDK, loopback 127.0.0.1 only (`src/windows/loopback.rs:22`) [W1, W2] | SDK [W2] | SDK, `MacOSAuthorizationAdapter` loopback (`Sources/NativeOIDC/MacOSAuthorizationAdapter.swift:62`) [A1, A3] | SDK, `IOSAuthorizationAdapter` (`Sources/NativeOIDC/IOSAuthorizationAdapter.swift:99`) [A2] | SDK, `AndroidAuthorizationAdapter` (`native/android/src/main/kotlin/net/projectflora/nativeoidc/AndroidAuthorizationAdapter.kt:90`) [K1, K2] | Host: the host captures the callback and calls `parse_redirect` (`src/authorization/session.rs:210`). No loopback listener exists for Linux; the Windows listener is compiled only on Windows (`src/windows/mod.rs:8-14`). No Linux execution evidence |
-| ID Token and JWKS validation | SDK [R1, W1] | SDK [W2] | SDK [R1, U1] | SDK [R1, U1] | SDK [R1, K1] | SDK (`src/id_token.rs:167`) [R1]. Issuers without a path cannot match on any surface (S4) |
+| ID Token and JWKS validation | SDK: the core validation runs behind `native_oidc_windows_authorize` and refresh. Windows-surface execution Unverified: no W1 test or W2 mock provider issues a signed ID Token | SDK; Unverified at this surface, as for C ABI | SDK; binding-level execution Unverified: no U1, A1, or A4 test exchanges a signed ID Token (the core path is R1) | SDK; Unverified at this surface, as for macOS | SDK; Unverified at this surface: no K1–K3 test exchanges a signed ID Token | SDK (`src/id_token.rs:167`) [R1: signed RS256/ES256 tokens, claims, JWKS rotation]. Issuers without a path cannot match on any surface (S4) |
 | Validated identity (iss + sub, auth_time, acr) | Missing: state JSON contains only the raw ID Token | Missing | Missing: only `FfiTokenResponse.idToken` (raw string) | Missing | Missing | Missing: only `TokenResponse::id_token` (raw string). Host could decode the JWT itself after the SDK has verified it; no evidence or example for that path |
 | UserInfo | Host: call UserInfo with the access token; needs a validated `sub` (Missing above) | Host, same | Host, same | Host, same | Host, same | Host, same |
-| Refresh and state update | SDK `native_oidc_windows_refresh` (`src/windows/abi.rs:324`) [W1, W2] | SDK `RefreshAsync` [W2] | SDK `FfiAuthenticationState.refresh` (`src/ffi.rs:627`) [U1, A1] | SDK [U1] | SDK [U1, K1] | SDK `AuthenticationState::refresh` (`src/authorization/state.rs:125`) [R1]. Accepts a different subject (S1) |
+| Refresh and state update | SDK `native_oidc_windows_refresh` (`src/windows/abi.rs:324`) [W1, W2] | SDK `RefreshAsync` [W2] | SDK `FfiAuthenticationState.refresh` (`src/ffi.rs:627`). Successful update: the UniFFI-layer Rust test `native_refresh_preserves_allowed_extension_and_omitted_refresh_token` [R1] and the Apple consumer guide check `guideRefresh` (`native/consumer-smoke/apple/GuideExamplesCommon.swift:770`) on the macOS host [A4]. U1 covers refresh only for cancellation (C4, C5) | SDK, same API. Cancellation: U1 C4–C5. Successful update on iOS: Unverified (the Apple consumer links the iOS simulator library but runs on macOS; the iOS flow smoke A2 does not refresh) | SDK. Successful update: `GuideExamplesTest.refreshUpdatesStateAndKeepsUnrotatedRefreshToken` [K3]. Cancellation: `UniFfiOperationCoverageTest` C4–C5 [K1] | SDK `AuthenticationState::refresh` (`src/authorization/state.rs:125`) [R1]. Accepts a different subject (S1) |
 | Save and restore | SDK, state JSON returned by operations [W1, W2] | SDK, same JSON [W2] | SDK `toJson`/`fromJson` (`src/ffi.rs:596,606`) [U1 S1–S2] | SDK [U1] | SDK [U1, K1] | SDK, Serde on `AuthenticationState` [R1]. Encryption and storage are always the host's |
 | Browser launch, finish, cancel | SDK: system browser, loopback, cancellation handle (`src/windows/abi.rs:222-262`) [W1, W2]; real browser checked only manually ([real-browser verification](real-browser-verification.md)) | SDK, `CancellationToken` [W2] | SDK, browser-opening closure and `cancel` (`MacOSAuthorizationAdapter.swift:136`) [A1, A3]; real browser checked only manually | SDK, `cancel` (`IOSAuthorizationAdapter.swift:153`); OS dismissal returns Cancelled [A2] | SDK, Custom Tab and `cancel` (`AndroidAuthorizationAdapter.kt:159`); closing the Custom Tab does not end the wait (#246) [K2] | Host: no browser launch or listener |
 | Logout (RP-Initiated) | SDK, integrated browser and loopback `native_oidc_windows_end_session` (`src/windows/abi.rs:365`) [W1; W2 error paths only] | SDK `EndSessionAsync` [W2 error paths only] | Host: SDK builds the URL and parses the callback (`begin_end_session`); the host opens the browser. Adapters have no logout method [U1 E1–E5] | Host, same [U1] | Host, same [U1, K1] | Host, same (`src/authorization/end_session.rs`) [R1] |
@@ -249,6 +251,9 @@ loopback listener on Linux.
 - Linux: only the Rust unit and integration tests run on Linux (`ubuntu-latest`,
   x86_64). No Linux application, browser, or callback path has ever run.
 - D7, D8, D9 are from static reading only.
+- ID Token validation and discovery run only in Rust tests (R1, plus U1 and K1
+  for discovery). No Swift, Kotlin, C ABI, or .NET test exchanges a signed ID
+  Token, and no Windows test runs discovery.
 - The Kotlin `toString()` and Swift reflection outputs (G7) were read from the
   generated bindings, not observed in a running app.
 - RFC and OIDC requirement levels were checked against the primary documents
