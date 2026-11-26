@@ -102,8 +102,11 @@ Central. The published
 adds the license notices to every release package. The published
 [v0.8.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.8.0)
 upgrades `jsonwebtoken` and makes discovery and client registration honor
-cancellation. See
-[Download and verify v0.8.0](README.md#download-and-verify-v080) for exact asset
+cancellation. The published
+[v0.9.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.9.0)
+replaces the API reference asset with the version-matched documentation set
+`NativeOIDC-Docs-0.9.0.zip`. See
+[Download and verify v0.9.0](README.md#download-and-verify-v090) for exact asset
 names, download links, and checksum verification using the same release's
 `SHA256SUMS`. The XCFramework contains the generated Swift API and Rust
 library; the AAR contains the generated Kotlin API and Android Rust libraries;

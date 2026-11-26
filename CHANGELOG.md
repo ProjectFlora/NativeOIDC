@@ -6,6 +6,15 @@ interoperability testing and support policies are still evolving. Each release r
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-27
+
+### Security
+
+- Upgrade `url` from 2.5.8 to 2.5.9 (with `form_urlencoded` 1.2.3), so the
+  release libraries no longer ship a version affected by RUSTSEC-2026-0592,
+  a stack overflow in `Url::origin()` on nested `blob:` URLs. NativeOIDC
+  does not call `Url::origin()`.
+
 ### Distribution
 
 - Each release now publishes `NativeOIDC-Docs-<version>.zip` in place of
@@ -19,6 +28,15 @@ interoperability testing and support policies are still evolving. Each release r
   published asset against `SHA256SUMS` and the release commit. Releases up
   to v0.8.0 keep their `NativeOIDC-API-Docs` asset
   ([#89](https://github.com/ProjectFlora/NativeOIDC/issues/89)).
+- Published as a regular GitHub Release while remaining a pre-1.0 version,
+  with the Apple XCFramework, Android AAR, Windows DLL/C ABI package, the
+  documentation set, and SHA-256 checksums. Each package carries `LICENSE`,
+  `THIRD_PARTY_LICENSES.txt`, and `RUST_STANDARD_LIBRARY_COPYRIGHT.html`.
+- The Android library is published to Maven Central as
+  `net.project-flora.nativeoidc:native-oidc-android:0.9.0`. Swift Package
+  Manager remains available through release tags.
+- The public API and the serialized authentication state are unchanged from
+  0.8.0.
 
 ### Fixed
 
@@ -50,7 +68,72 @@ interoperability testing and support policies are still evolving. Each release r
 - The SPM bindings match check now runs inside the `Tests` job on the same
   generation (reusing `generate-bindings.sh`'s fingerprint cache), so the
   duplicate Linux binding generation is gone; `check-spm-bindings.sh` is
-  unchanged and keeps working when run standalone locally.
+  unchanged and keeps working when run standalone locally
+  ([#179](https://github.com/ProjectFlora/NativeOIDC/issues/179)).
+- Callback query parsing, the token request form, ID Token validation, and
+  the parameter-name uniqueness check are each implemented once and shared by
+  the authorization, end-session, refresh, UniFFI, and Windows paths. Error
+  variants, messages, check order, and the token request wire format are
+  unchanged ([#157](https://github.com/ProjectFlora/NativeOIDC/issues/157)).
+- The default browser opener of `MacOSAuthorizationAdapter` is tested for the
+  case where `NSWorkspace` refuses the URL: `authorize` fails with
+  `browserCouldNotBeOpened` and releases the loopback port. The public
+  initializer is unchanged
+  ([#208](https://github.com/ProjectFlora/NativeOIDC/issues/208)).
+- The iOS authorization flow smoke waits up to 90 seconds for the scene to be
+  foreground-active before starting the flow, and records the scene, window,
+  simulator, and provider state on failure
+  ([#203](https://github.com/ProjectFlora/NativeOIDC/issues/203)).
+- The Android emulator tests stop and disable the Play Store before the
+  callback test, so its first-boot sign-in screen no longer covers the Custom
+  Tab ([#215](https://github.com/ProjectFlora/NativeOIDC/issues/215)).
+- Apple packaging writes a phase timing table to the job summary, including
+  the iOS simulator work. Booting the simulator in the background during the
+  Rust build was measured and not adopted because it made the step slower
+  ([#178](https://github.com/ProjectFlora/NativeOIDC/issues/178)); the
+  remaining simulator settling wait was measured on the current runners and
+  is logged with a host load sampler
+  ([#235](https://github.com/ProjectFlora/NativeOIDC/issues/235)).
+- CI, the Release workflow, and the published release consumer validation
+  set up the Rust toolchain, the Android SDK and NDK, Xcode, and the pinned
+  cargo tools through shared composite actions, and the coverage job
+  installs a pinned prebuilt `cargo-llvm-cov`
+  ([#181](https://github.com/ProjectFlora/NativeOIDC/issues/181)).
+
+### Documentation
+
+- Add the user guides for each platform, with examples that CI builds
+  against the release packages and exercises with local test providers (the
+  scope of each is in the guide's verification section): the
+  [Swift guide](docs/swift-guide.md) for iOS/iPadOS and macOS, including
+  Objective-C interoperability
+  ([#85](https://github.com/ProjectFlora/NativeOIDC/issues/85)), the
+  [Kotlin/Android guide](docs/kotlin-guide.md)
+  ([#86](https://github.com/ProjectFlora/NativeOIDC/issues/86)), the
+  [Windows C++ guide](docs/windows-cpp-guide.md)
+  ([#87](https://github.com/ProjectFlora/NativeOIDC/issues/87)), and the
+  [Windows .NET guide](docs/windows-dotnet-guide.md)
+  ([#88](https://github.com/ProjectFlora/NativeOIDC/issues/88)).
+
+### Known limitations
+
+- Live identity-provider interoperability has not been validated, including
+  token revocation.
+- macOS and Windows CI does not open a real system browser. The real
+  system-browser flow is checked by the manual
+  [real system-browser verification](docs/real-browser-verification.md), and
+  its result is recorded for each release.
+- The guide examples run against local mock providers or scripted
+  transports, not a real identity provider, and not on physical devices.
+- The generated Swift API still requires the Swift 5 language mode: UniFFI
+  stays at 0.32.2 until a release with the Swift 6 fix is published
+  ([#133](https://github.com/ProjectFlora/NativeOIDC/issues/133)).
+- The ASCII armor of the Maven Central signature files carries a
+  `Version: BCPG v@RELEASE_NAME@` header. The header is a comment and the
+  signatures verify
+  ([#169](https://github.com/ProjectFlora/NativeOIDC/issues/169)).
+- SPM is supported only through release tags; depending on the `main`
+  branch is not supported.
 
 ## [0.8.0] - 2026-11-22
 

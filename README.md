@@ -226,7 +226,12 @@ release package. The published
 [v0.8.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.8.0)
 upgrades `jsonwebtoken` past GHSA-h395-gr6q-cpjc, makes OIDC discovery and
 dynamic client registration honor cancellation even when the transport does
-not, and accepts loopback HTTP revocation endpoints.
+not, and accepts loopback HTTP revocation endpoints. The published
+[v0.9.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.9.0)
+publishes the complete, version-matched documentation set with the Swift,
+Kotlin, Windows C++, and Windows .NET guides, makes the Android adapter use
+the custom-scheme fallback instead of failing when an App Link is set on
+API 28–30, and publishes the exact GitHub Release AAR to Maven Central.
 The release workflow is dispatched manually with a SemVer version that matches
 the crate version. A run without `publish` validates and packages a release
 candidate. A `publish` run must be dispatched from `main`: it writes the Apple
@@ -274,22 +279,23 @@ For SPM, change the package URL and the product name together, for example
 release is breaking, `.upToNextMinor(from: "0.6.0")` does not move to v0.7.0
 on its own.
 
-## Download and verify v0.8.0
+## Download and verify v0.9.0
 
 The following versioned assets are available from GitHub Releases, independently
 of the temporary CI validation artifacts:
 
 | Asset | Download |
 | --- | --- |
-| Apple XCFramework and generated Swift API | [NativeOIDC-Apple-0.8.0.zip](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.8.0/NativeOIDC-Apple-0.8.0.zip) |
-| Android AAR | [native-oidc-android-0.8.0.aar](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.8.0/native-oidc-android-0.8.0.aar) |
-| Windows DLL/C ABI and C++/.NET interop files | [native-oidc-windows-0.8.0.zip](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.8.0/native-oidc-windows-0.8.0.zip) |
-| Rust API reference | [NativeOIDC-API-Docs-0.8.0.zip](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.8.0/NativeOIDC-API-Docs-0.8.0.zip) |
-| SHA-256 checksums for all four assets | [SHA256SUMS](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.8.0/SHA256SUMS) |
+| Apple XCFramework and generated Swift API | [NativeOIDC-Apple-0.9.0.zip](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.9.0/NativeOIDC-Apple-0.9.0.zip) |
+| Android AAR | [native-oidc-android-0.9.0.aar](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.9.0/native-oidc-android-0.9.0.aar) |
+| Windows DLL/C ABI and C++/.NET interop files | [native-oidc-windows-0.9.0.zip](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.9.0/native-oidc-windows-0.9.0.zip) |
+| Documentation set: guides, references, examples, and the Rust API reference | [NativeOIDC-Docs-0.9.0.zip](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.9.0/NativeOIDC-Docs-0.9.0.zip) |
+| SHA-256 checksums for all four assets | [SHA256SUMS](https://github.com/ProjectFlora/NativeOIDC/releases/download/v0.9.0/SHA256SUMS) |
 
-Releases after v0.8.0 replace `NativeOIDC-API-Docs-<version>.zip` with
-`NativeOIDC-Docs-<version>.zip`, the complete documentation set of that
-release: the shared user guide, the public API coverage matrix, the Swift,
+From v0.9.0, `NativeOIDC-Docs-<version>.zip` replaces
+`NativeOIDC-API-Docs-<version>.zip`, which releases up to v0.8.0 publish
+with the Rust API reference alone. It is the complete documentation set of
+the release: the shared user guide, the public API coverage matrix, the Swift,
 Kotlin, Windows C++ and Windows .NET guides, the Rust API reference, the
 Windows ABI and
 .NET reference with the C header and the C# wrapper, and the examples, all
@@ -301,7 +307,7 @@ Download the desired asset and `SHA256SUMS` from the same release. For example,
 from the directory containing the Android AAR and checksum file:
 
 ```sh
-grep -F '  native-oidc-android-0.8.0.aar' SHA256SUMS | shasum -a 256 -c -
+grep -F '  native-oidc-android-0.9.0.aar' SHA256SUMS | shasum -a 256 -c -
 ```
 
 Use the exact downloaded asset name when verifying another package. GitHub
@@ -418,8 +424,8 @@ host-side smoke of the generated API, and builds for the iOS simulator.
 ## Apple binary package
 
 - Build a package for a specific version with
-  `scripts/package-apple-xcframework.sh 0.8.0`. It creates
-  `target/apple/release-package/NativeOIDC-Apple-0.8.0.zip`, containing an
+  `scripts/package-apple-xcframework.sh 0.9.0`. It creates
+  `target/apple/release-package/NativeOIDC-Apple-0.9.0.zip`, containing an
   `NativeOIDC.xcframework` with static Rust libraries for iOS device,
   iOS simulator, and universal macOS, the generated Swift API source, the
   platform adapters (the same sources the Swift package target compiles),
@@ -433,7 +439,7 @@ host-side smoke of the generated API, and builds for the iOS simulator.
   first.
   The CI `apple-xcframework` artifact is for validation and expires after
   14 days. Use the published Apple archive and `SHA256SUMS` linked in
-  [Download and verify v0.8.0](#download-and-verify-v080) for distribution.
+  [Download and verify v0.9.0](#download-and-verify-v090) for distribution.
 
 ## Apple Swift Package Manager (SPM)
 
@@ -445,7 +451,7 @@ product. The package supports iOS/iPadOS 18 and later and macOS 15 and later.
 
 In Xcode, choose **File > Add Package Dependencies...**, enter
 `https://github.com/ProjectFlora/NativeOIDC`, set **Dependency Rule** to
-**Up to Next Minor Version** from `0.8.0`, and add the `NativeOIDC` library
+**Up to Next Minor Version** from `0.9.0`, and add the `NativeOIDC` library
 to your app target.
 
 In a `Package.swift` manifest, add the package dependency and the
@@ -455,7 +461,7 @@ In a `Package.swift` manifest, add the package dependency and the
 dependencies: [
     .package(
         url: "https://github.com/ProjectFlora/NativeOIDC",
-        .upToNextMinor(from: "0.8.0")
+        .upToNextMinor(from: "0.9.0")
     ),
 ],
 targets: [
@@ -586,15 +592,15 @@ the adapter.
 
   Earlier versions are available only as GitHub Release assets, as described
   in the next item.
-- Download `native-oidc-android-0.8.0.aar` from the
-  [published release](#download-and-verify-v080), verify its checksum, and copy
+- Download `native-oidc-android-0.9.0.aar` from the
+  [published release](#download-and-verify-v090), verify its checksum, and copy
   it into the Android app's `libs` directory.
   Because a raw AAR has no dependency metadata, also declare the runtime
   dependencies used by this module:
 
   ```kotlin
   dependencies {
-      implementation(files("libs/native-oidc-android-0.8.0.aar"))
+      implementation(files("libs/native-oidc-android-0.9.0.aar"))
       implementation("net.java.dev.jna:jna:5.12.0@aar")
       implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
       implementation("androidx.browser:browser:1.8.0")
@@ -679,7 +685,7 @@ the adapter.
   Swift and Kotlin bindings reproducibly; do not hand-edit generated files.
 - v0.5.0 publishes a versioned Apple XCFramework archive, Android AAR,
   Windows DLL/C ABI package, API reference, and `SHA256SUMS` as
-  [GitHub Release assets](#download-and-verify-v080). The
+  [GitHub Release assets](#download-and-verify-v090). The
   XCFramework contains the generated
   Swift API and Rust library for the documented Apple targets; the AAR contains
   the generated Kotlin API and Rust libraries for Android `arm64-v8a` and
@@ -705,7 +711,7 @@ release-time lifecycle check below.
 | iOS / iPadOS | 18 | Apple listed security updates for 27.2.1, 26.7.3, and 18.7.12 on 2026-11-09; the minimum follows the oldest security-updated major generation. |
 | macOS | 15 (Sequoia) | Apple listed security updates for 27.2.1 (Golden Gate), 26.7.3 (Tahoe), and 15.8.3 (Sequoia) on 2026-11-09. Sequoia is in its final security-support year; see the re-evaluation policy below. |
 | Android | API 28 (Android 9) | Google's October 2026 device distribution (Android Studio data, active devices contacting the Play Store) puts API 28+ on 97.1% of devices, meeting the 95% reach target; API 34+ reaches only 56.4%. |
-| Windows | Microsoft-supported Windows client versions (x64), reviewed at each release | As of 2026-11-22 Microsoft supports Windows 11 client editions 25H2, 26H1, and 26H2 (Home/Pro); 24H2 Home/Pro support ended 2026-10-13, and 23H2 Home/Pro support ended 2025-11-11 (its Enterprise/Education support ended 2026-11-10). No fixed minimum OS version. |
+| Windows | Microsoft-supported Windows client versions (x64), reviewed at each release | As of 2026-11-27 Microsoft supports Windows 11 client editions 25H2, 26H1, and 26H2 (Home/Pro); 24H2 Home/Pro support ended 2026-10-13, and 23H2 Home/Pro support ended 2025-11-11 (its Enterprise/Education support ended 2026-11-10). No fixed minimum OS version. |
 
 The Apple versions above are a dated snapshot, not fixed promises. Before
 the 1.0.0 tag, recheck Apple's security updates and record the actual

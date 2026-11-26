@@ -6,7 +6,7 @@ Android-specific setup and Kotlin calls. Behavior shared by every language
 described once in the [shared user guide](user-guide.md) and is not repeated
 here. The [API coverage matrix](api-coverage.md) lists every operation.
 
-The guide targets the published **v0.8.0** release. Check the matching tag
+The guide targets the published **v0.9.0** release. Check the matching tag
 when you install another version: requirements on current `main` can postdate
 a release, and the [support matrix](support-matrix.md) records them.
 
@@ -15,7 +15,7 @@ wrapper in the app (see [Java hosts](#java-hosts)).
 
 ## 1. Versions, installation, and imports
 
-| Item | v0.8.0 |
+| Item | v0.9.0 |
 | --- | --- |
 | Language | Kotlin (coroutines); Java through an app-side Kotlin wrapper |
 | Minimum SDK | API 28 (Android 9). Gradle rejects an app with a lower `minSdk` when it merges the library manifest |
@@ -42,7 +42,7 @@ dependencies:
 
 ```kotlin
 dependencies {
-    implementation("net.project-flora.nativeoidc:native-oidc-android:0.8.0")
+    implementation("net.project-flora.nativeoidc:native-oidc-android:0.9.0")
 }
 ```
 
@@ -50,11 +50,11 @@ dependencies {
 
 Use this channel for releases before v0.7.0, which are not on Maven Central,
 or when Maven Central is unavailable. Download the AAR and
-`SHA256SUMS` from the [v0.8.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.8.0)
+`SHA256SUMS` from the [v0.9.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.9.0)
 and verify the checksum from the download directory:
 
 ```sh
-grep -F '  native-oidc-android-0.8.0.aar' SHA256SUMS | shasum -a 256 -c -
+grep -F '  native-oidc-android-0.9.0.aar' SHA256SUMS | shasum -a 256 -c -
 ```
 
 Copy the AAR into the app's `libs` directory. A raw AAR has no dependency
@@ -62,7 +62,7 @@ metadata, so declare the runtime dependencies yourself:
 
 ```kotlin
 dependencies {
-    implementation(files("libs/native-oidc-android-0.8.0.aar"))
+    implementation(files("libs/native-oidc-android-0.9.0.aar"))
     implementation("net.java.dev.jna:jna:5.12.0@aar")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.browser:browser:1.8.0")
@@ -204,11 +204,14 @@ declaration, authorization fails with
   verified for the app and the URI resolves to the callback activity. The
   [HTTPS callback domain](https-callback-domain.md) procedure shows the file
   and how to check it.
-- **App Links need API 31 or later with v0.8.0.** The adapter checks
-  verification with `DomainVerificationManager`, which was added in API 31.
-  On API 28–30, a non-null `appLinkUri` makes `authorize` fail with
-  `NoClassDefFoundError` before it reaches the custom-scheme fallback. Pass
-  `appLinkUri = null` below API 31, as in the example in section 3.
+- **App Links are used on API 31 and later.** Android reports App Link
+  verification only from API 31 (`DomainVerificationManager`). From v0.9.0,
+  the adapter treats the App Link as unverified on API 28–30 and uses the
+  custom-scheme fallback, or fails with `InvalidRedirectConfiguration` when
+  none is configured. With v0.8.0 and earlier, a non-null `appLinkUri` on
+  API 28–30 makes `authorize` fail with `NoClassDefFoundError`; the example
+  in section 3 passes `appLinkUri = null` below API 31, which works with
+  every version.
 - **Custom scheme (fallback)**: a hierarchical, app-specific scheme such as
   `com.example.app:/oauth/callback`. `http`, `https`, and opaque URIs are
   rejected as `InvalidRedirectConfiguration`.
@@ -244,7 +247,7 @@ suspend fun signIn(
             additionalTokenParameters = emptyList(),
         ),
         AndroidRedirectConfiguration(
-            // v0.8.0 checks App Link verification with an API 31 class.
+            // v0.9.0 falls back on API 28–30 by itself; the guard also covers v0.8.0.
             appLinkUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 "https://login.example.com/oauth/callback"
             } else {
@@ -694,10 +697,10 @@ Commands:
 
 ```sh
 # Against the published Maven Central artifact
-./native/android/gradlew -p native/consumer-smoke/android -PnativeOidcVersion=0.8.0 --refresh-dependencies connectedDebugAndroidTest
+./native/android/gradlew -p native/consumer-smoke/android -PnativeOidcVersion=0.9.0 --refresh-dependencies connectedDebugAndroidTest
 
 # Against a downloaded or locally built release AAR
-scripts/check-android-release-consumer.sh native-oidc-android-0.8.0.aar
+scripts/check-android-release-consumer.sh native-oidc-android-0.9.0.aar
 
 # Library module tests (unit, then emulator)
 ./native/android/gradlew -p native/android testDebugUnitTest
@@ -719,6 +722,10 @@ Recorded results, by tested revision:
   each head commit and the local runs listed in
   [PR #220](https://github.com/ProjectFlora/NativeOIDC/pull/220).
 - Maven Central artifact (`-PnativeOidcVersion=0.8.0`): not run.
+- v0.9.0: the results above are for v0.8.0 and the listed revisions. The
+  published v0.9.0 results (release consumer validation, including the
+  Maven Central artifact) are recorded in the release tracking issue
+  [#241](https://github.com/ProjectFlora/NativeOIDC/issues/241).
 
 ### Coverage by operation
 
@@ -741,8 +748,8 @@ Recorded results, by tested revision:
 
 ### Known limits
 
-- With v0.8.0, App Links work only on API 31 and later; API 28–30 must use
-  the custom-scheme redirect alone (section 2).
+- App Links work only on API 31 and later; on API 28–30 the adapter uses the
+  custom-scheme redirect (section 2).
 - Live identity-provider interoperability and physical-device execution are
   not verified; see [interoperability status](live-idp-interoperability.md)
   and the [support matrix](support-matrix.md). Execution on physical arm64

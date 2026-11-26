@@ -10,8 +10,8 @@ request examples for each operation are in the
 [Windows adapter README](../native/windows/README.md). The
 [API coverage matrix](api-coverage.md) lists every operation.
 
-The guide targets the published **v0.8.0** release. The Windows header, C
-ABI, and request/response JSON on current `main` are unchanged from v0.8.0.
+The guide targets the published **v0.9.0** release. The Windows header, C
+ABI, and request/response JSON are unchanged from v0.8.0.
 Check the matching tag when you install another version.
 
 Every `cpp` block in this guide, together with the `main.cpp` of the
@@ -22,7 +22,7 @@ paths against a local mock provider. See
 
 ## 1. Versions, installation, and build
 
-| Item | v0.8.0 |
+| Item | v0.9.0 |
 | --- | --- |
 | Language | C++20 for the examples (C++/WinRT JSON); the header itself is C and C++ |
 | Architecture | x64 (`x86_64-pc-windows-msvc`). Windows on Arm runs an x64 host under emulation; there is no Arm64 DLL |
@@ -32,16 +32,16 @@ paths against a local mock provider. See
 
 ### Download and verify
 
-Download `native-oidc-windows-0.8.0.zip` and `SHA256SUMS` from the
-[v0.8.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.8.0),
+Download `native-oidc-windows-0.9.0.zip` and `SHA256SUMS` from the
+[v0.9.0 release](https://github.com/ProjectFlora/NativeOIDC/releases/tag/v0.9.0),
 then verify the checksum from the download directory:
 
 ```powershell
-$asset = 'native-oidc-windows-0.8.0.zip'
+$asset = 'native-oidc-windows-0.9.0.zip'
 $expected = ((Select-String SHA256SUMS -Pattern "  $([regex]::Escape($asset))$").Line -split '\s+')[0]
 $actual = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw 'SHA-256 mismatch' }
-Expand-Archive $asset -DestinationPath third_party/native-oidc-windows-0.8.0
+Expand-Archive $asset -DestinationPath third_party/native-oidc-windows-0.9.0
 ```
 
 The ZIP root contains:
@@ -68,7 +68,7 @@ if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "NativeOIDC for Windows requires an x64 MSVC build")
 endif()
 
-set(NATIVE_OIDC_PACKAGE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/native-oidc-windows-0.8.0"
+set(NATIVE_OIDC_PACKAGE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/native-oidc-windows-0.9.0"
     CACHE PATH "Extracted native-oidc-windows ZIP")
 
 add_library(native_oidc SHARED IMPORTED)
@@ -1140,17 +1140,20 @@ Studio (C++ and CMake) and the .NET SDK:
 
 ```powershell
 # A downloaded release ZIP (verify its checksum first, see section 1)
-scripts/check-windows-release-consumer.ps1 -Package native-oidc-windows-0.8.0.zip
+scripts/check-windows-release-consumer.ps1 -Package native-oidc-windows-0.9.0.zip
 ```
 
 CI runs the same script on every change to the Windows adapter, its
 fixtures, or this guide (`windows_core` on Windows Server, `windows_client`
 on a Windows 11 client runner with x64 emulation), against a package built
 from the branch. The `Published release consumer validation` workflow
-checks out the release tag's own scripts, so for v0.8.0 it runs only the
-consumers that existed at that tag, not these guide examples.
+checks out the release tag's own scripts. From v0.9.0, the tag includes
+these guide examples, so the workflow runs them against the published
+package; for v0.8.0 it ran only the consumers that existed at that tag.
 
-Evidence for this guide (commit `eec199e`):
+Evidence for this guide (commit `eec199e`, before v0.9.0; the published
+v0.9.0 results are recorded in the release tracking issue
+[#241](https://github.com/ProjectFlora/NativeOIDC/issues/241)):
 
 - Executed: CI built a package from the branch, then compiled all 19 `cpp`
   blocks, ran the 32 checks against it with all of them passing, and built and
