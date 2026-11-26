@@ -60,7 +60,8 @@ This roadmap tracks work remaining for the initial scope in
   cancellation to active work where supported.
 - **Rust support:** Set Rust 1.99.1 as the MSRV to match the version currently
   used by CI and test it there. Support the documented initial-release target
-  triples in [README.md](README.md); Linux is for development and CI only.
+  triples in [README.md](README.md); Linux is for development and CI only
+  (see the Linux delivery decision below).
   Keep one Rust core crate and add a workspace only if separate Rust crates
   become necessary.
 - **Initial support matrix:** Re-evaluated 2026-11-12. Set iOS/iPadOS minimum
@@ -130,6 +131,42 @@ This roadmap tracks work remaining for the initial scope in
   1.0.0 would; keep the initial scope narrow and revisit the decision if
   demand appears. The guidance for Objective-C hosts is documented in
   [swift-guide.md](docs/swift-guide.md#objective-c-interoperability).
+- **Linux delivery for 1.0.0:** Decided 2026-11-27
+  ([#252](https://github.com/ProjectFlora/NativeOIDC/issues/252)). Linux stays
+  a development and CI host, and 1.0.0 states this as an explicit constraint.
+  The Rust API builds and its tests run on Linux, but there is no Linux
+  browser or loopback integration, no Linux package, and no Linux application
+  execution evidence, so the Rust API can be used on Linux without a support
+  guarantee. Declaring the Rust API a supported Linux surface was declined
+  because it would commit to an API that the crates.io deferral (#64) chose
+  not to publish; a dedicated Linux integration was declined for 1.0.0
+  because it needs a new listener, packaging, and CI. Revisit after 1.0.0
+  together with #64, or earlier if a Linux consumer appears. The options are
+  recorded in the [OIDC platform evaluation](docs/oidc-platform-evaluation.md#linux-options).
+- **Release sequence before 1.0.0:** Decided 2026-11-26 and 2026-11-27
+  ([#252](https://github.com/ProjectFlora/NativeOIDC/issues/252)). Publish
+  v0.10.0 before the v1.0.0 candidate; further 0.x releases (v0.11.0 or later)
+  may follow. The
+  [OIDC platform evaluation](docs/oidc-platform-evaluation.md#release-bucket-proposal)
+  found changes that alter the saved state JSON, the public API, or which
+  responses are accepted, so they ship and are validated in 0.x first:
+  refreshed ID Tokens, when present, checked against the original claims
+  ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)), issuer
+  identifiers without a path
+  ([#261](https://github.com/ProjectFlora/NativeOIDC/issues/261)), the
+  validated identity on every surface
+  ([#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)), the
+  authorization response `iss` check
+  ([#264](https://github.com/ProjectFlora/NativeOIDC/issues/264)), provider
+  error text validation
+  ([#265](https://github.com/ProjectFlora/NativeOIDC/issues/265)), and the
+  loopback HTTP endpoint policy
+  ([#269](https://github.com/ProjectFlora/NativeOIDC/issues/269)), and
+  rejection of untrusted additional ID Token audiences
+  ([#272](https://github.com/ProjectFlora/NativeOIDC/issues/272)). The
+  `v0.10.0` milestone lists the full set. `max_age`/`auth_time` support
+  ([#263](https://github.com/ProjectFlora/NativeOIDC/issues/263)) waits for a
+  later 0.x release.
 
 ## Open decisions
 
@@ -175,6 +212,9 @@ None.
     compatibility guarantees.
   - Complete security-focused protocol and platform edge-case coverage, and
     ensure CI is green for all declared targets and packages.
+  - Ship the v0.10.0 changes listed under "Release sequence before 1.0.0"
+    (and any later 0.x release), and validate them in a published 0.x
+    release before the v1.0.0 candidate.
   - Validate installation and use of each release artifact, publish complete
     API/user documentation, and record the final support matrix.
     [Issue #60](https://github.com/ProjectFlora/NativeOIDC/issues/60) tracks

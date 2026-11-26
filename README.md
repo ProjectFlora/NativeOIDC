@@ -654,6 +654,7 @@ the adapter.
 | macOS | Shared core and native authorization integration |
 | Android | Shared core and native authorization integration |
 | Windows | Shared core and desktop browser/redirect integration (v1 target) |
+| Linux | Development and CI host only; not supported in 1.0.0 |
 | tvOS | Deferred |
 
 ## Rust support
@@ -667,8 +668,11 @@ the adapter.
   - macOS: `aarch64-apple-darwin`, `x86_64-apple-darwin`
   - Android: `aarch64-linux-android`, `x86_64-linux-android`
   - Windows: `x86_64-pc-windows-msvc`
-  - Linux: `x86_64-unknown-linux-gnu` for development and CI only; Linux is
-    not an initial-release platform commitment.
+  - Linux: `x86_64-unknown-linux-gnu` for development and CI only. 1.0.0
+    does not support Linux: there is no Linux browser or loopback
+    integration and no Linux package, and the Rust API can be used there
+    without a support guarantee (see the
+    [Linux delivery decision](ROADMAP.md#confirmed-decisions)).
 - **Cross-target CI:** Build the Rust core for every documented Apple, Android,
   and Windows release target. These checks do not package release artifacts or
   exercise authorization flows on devices.

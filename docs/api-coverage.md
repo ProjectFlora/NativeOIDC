@@ -4,6 +4,14 @@ Return to the [documentation index](README.md). Initial source inventory:
 `d0e4aa37acd801bb367bd533841616bd2a5ed775`. This document accompanies the source
 revision being read; it is not evidence that all examples were executed.
 Update the inventory when a public operation, record, error or adapter changes.
+The [OIDC platform evaluation](oidc-platform-evaluation.md) rechecked this
+table against v0.9.0 (`b51065e`); it adds the Linux view and the
+specification differences.
+
+On Linux, the Rust core column applies, and every "Host" cell also covers
+browser launch and callback capture: there is no Linux adapter or loopback
+listener, and Linux is not supported in 1.0.0 (see the
+[Linux delivery decision](../ROADMAP.md#confirmed-decisions)).
 
 ## Operations by language
 
@@ -43,6 +51,7 @@ languages](user-guide.md#supported-application-languages).
 | HTTP transport | `HttpTransport::execute`, `ReqwestTransport::new` | `NativeHttpTransport::execute`; supplied native implementations | Internal | Internal |
 | Error handling | `AuthError`, `Result` | `FfiError` and adapter errors | Result status/value/free | Exceptions from wrapper |
 | Local sign-out | Host | Host | Host | Host |
+| Validated ID Token claims (issuer, subject) | Not exposed; raw `TokenResponse::id_token` only ([#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)) | Not exposed; raw `FfiTokenResponse` ID Token only | Not exposed; raw ID Token in state JSON | Not exposed |
 
 ## Public data and support types
 

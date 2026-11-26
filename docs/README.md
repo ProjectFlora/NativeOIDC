@@ -77,7 +77,10 @@ in [dependency maintenance](dependency-maintenance.md).
 Build checks, mock-provider tests, and real-provider/device verification are
 different kinds of evidence. Consult the [coverage matrix](api-coverage.md)
 and [interoperability limits](live-idp-interoperability.md) before treating an
-example or CI fixture as a compatibility guarantee.
+example or CI fixture as a compatibility guarantee. The
+[OIDC platform evaluation](oidc-platform-evaluation.md) records, for v0.9.0,
+the feature coverage per environment, the differences from the
+specifications, and the release each follow-up belongs to.
 
 ## Implementation specifications
 
