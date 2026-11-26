@@ -280,6 +280,18 @@ validation configuration; returned ID Tokens are verified before exposure.
 Optional end-session, revocation, and registration endpoints must be supported
 by the provider and discovered or explicitly configured before use.
 
+Explicitly configured authorization, token, and revocation endpoints may also
+use loopback HTTP (`127.0.0.0/8`, `::1`, `localhost`). The issuer, JWKS,
+end-session, and registration endpoints, and every discovered endpoint,
+require HTTPS. OAuth requires TLS for these endpoints (RFC 6749 §3.1 and
+§3.2), and RFC 7009 §2 says the client MUST verify that the revocation URL is
+HTTPS. NativeOIDC accepts loopback anyway because loopback traffic never
+leaves the device, and local development and the test mock providers need it.
+Use loopback HTTP endpoints only for local development and testing; do not
+ship a production configuration that points at one. The decision is recorded
+in the [roadmap](../ROADMAP.md#confirmed-decisions)
+([#269](https://github.com/ProjectFlora/NativeOIDC/issues/269)).
+
 Rust callers supply an async transport and, for `ReqwestTransport`, a Tokio
 runtime. Swift and Kotlin callers supply `NativeHttpTransport`; the supplied
 URLSession and URLConnection implementations can be used. A custom transport
@@ -352,7 +364,8 @@ adapters do not provide a logout method. Rust similarly leaves browser work
 to the host. Windows handles the browser and optional loopback callback.
 
 Revocation requires an HTTPS revocation endpoint; an explicitly configured
-one may also use loopback HTTP, as the token endpoint can. HTTP 200
+one may also use loopback HTTP, as the token endpoint can (see
+[Configure a native public client](#configure-a-native-public-client)). HTTP 200
 completes the operation even for an already-invalid token; it does not
 delete local state.
 Failure does not confirm remote invalidation. The library does not retry

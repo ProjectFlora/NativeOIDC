@@ -15,6 +15,14 @@ interoperability testing and support policies are still evolving. Each release r
   describe the language guides as unfinished. The v0.9.0 documentation set
   still carries the earlier text
   ([#63](https://github.com/ProjectFlora/NativeOIDC/issues/63)).
+- The [roadmap](ROADMAP.md#confirmed-decisions) and the
+  [shared user guide](docs/user-guide.md#configure-a-native-public-client)
+  record why explicitly configured authorization, token, and revocation
+  endpoints may use loopback HTTP although RFC 6749 and RFC 7009 require
+  HTTPS: loopback traffic never leaves the device, and local development and
+  the test mock providers need it. Production configurations should not point
+  at loopback HTTP endpoints. Behavior is unchanged
+  ([#269](https://github.com/ProjectFlora/NativeOIDC/issues/269)).
 
 ## [0.9.0] - 2026-11-27
 
