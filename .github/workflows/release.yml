@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: $/.github/actions/setup-rust-toolchain
       # A release ships only dependencies under licenses deny.toml allows.
       - uses: taiki-e/install-action@v2
         with:
@@ -169,11 +169,12 @@ jobs:
       # to the toolchain that built it. Pinning does not make a rebuild
       # byte-identical; the published checksum is always computed from this
       # run's archive (see docs/releasing.md).
-      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.100.0
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
-      - uses: Swatinem/rust-cache@v2
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
@@ -217,7 +218,16 @@ jobs:
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
       # The same Rust as the Apple job, so every package links the same
       # standard library and ships the same notices for it.
-      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.100.0
+          # Cache compiled Cargo dependencies for the host and both Android ABIs
+          # that check-android-targets.sh builds under Gradle. The workspace's own
+          # crates are rebuilt each run: caching them too (cache-workspace-crates)
+          # did not shorten warm runs and grew the cache by about 40% (#190).
+          # The key adds the NDK version and native API level, which rust-cache
+          # does not hash on its own, so changing either starts a fresh cache.
+          cache-key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
@@ -228,15 +238,6 @@ jobs:
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Cache compiled Cargo dependencies for the host and both Android ABIs
-      # that check-android-targets.sh builds under Gradle. The workspace's own
-      # crates are rebuilt each run: caching them too (cache-workspace-crates)
-      # did not shorten warm runs and grew the cache by about 40% (#190).
-      # The key adds the NDK version and native API level, which rust-cache
-      # does not hash on its own, so changing either starts a fresh cache.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - name: Enable Android emulator hardware acceleration
@@ -282,8 +283,9 @@ jobs:
       - uses: actions/checkout@v7
       # Pinned like the package jobs, so a rebuild of the same commit
       # uses the same rustdoc.
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.100.0
       # Builds and runs the examples the documentation ships.
       - run: cargo test --locked --workspace --all-targets --all-features
       - run: cargo doc --locked --no-deps
@@ -308,8 +310,9 @@ jobs:
       - uses: actions/checkout@v7
       # The same Rust as the Apple job, so every package links the same
       # standard library and ships the same notices for it.
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.100.0
       - run: cargo build --locked --lib --target x86_64-pc-windows-msvc
       - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
@@ -567,12 +570,10 @@ jobs:
       # bindings for the sources and javadoc jars.
       - if: steps.decide.outputs.decision == 'upload'
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: dtolnay/rust-toolchain@1.100.0
+      - uses: $/.github/actions/setup-rust-toolchain
         if: steps.decide.outputs.decision == 'upload'
-      - uses: Swatinem/rust-cache@v2
-        if: steps.decide.outputs.decision == 'upload'
-      - uses: gradle/actions/setup-gradle@v6
-        if: steps.decide.outputs.decision == 'upload'
+        with:
+          toolchain: 1.100.0
       - name: Build and check the signed Central bundle
         if: steps.decide.outputs.decision == 'upload'
         env:
@@ -660,9 +661,9 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: dtolnay/rust-toolchain@1.100.0
-      - uses: Swatinem/rust-cache@v2
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.100.0
       - name: Build and check the signed Central bundle
         env:
           ADOPTED_AAR: ${{ steps.aar.outputs.path }}

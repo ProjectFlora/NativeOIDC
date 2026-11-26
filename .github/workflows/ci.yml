@@ -51,8 +51,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
-      - uses: Swatinem/rust-cache@v2
+      # The MSRV channel; the setup-rust-toolchain action (toolchain input) is
+      # the one place it is named.
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          toolchain: 1.99.1
       - run: cargo test --locked --workspace --all-targets --all-features
 
   test:
@@ -62,8 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
       - name: Test Python scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: cargo test --locked --workspace --all-targets --all-features
@@ -94,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: $/.github/actions/setup-rust-toolchain
       # cargo-deny and cargo-about at pinned versions, so a new release of
       # either cannot change the result (deny.toml, about.toml).
       - uses: taiki-e/install-action@v2
@@ -144,8 +146,7 @@ jobs:
           PY
           )
           echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
@@ -213,8 +214,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
       - run: scripts/check-spm-bindings.sh
 
   spm_manifest:
@@ -233,8 +233,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: $/.github/actions/setup-rust-toolchain
       - run: cargo build --locked --lib --target x86_64-pc-windows-msvc
       - run: cargo test --locked --lib --target x86_64-pc-windows-msvc
       - run: dotnet build native/windows/dotnet/NativeOidcWindows.csproj --configuration Release
@@ -296,7 +295,15 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: $/.github/actions/setup-rust-toolchain
+        with:
+          # Cache compiled Cargo dependencies for the host and both Android ABIs
+          # that check-android-targets.sh builds under Gradle. The workspace's own
+          # crates are rebuilt each run: caching them too (cache-workspace-crates)
+          # did not shorten warm runs and grew the cache by about 40% (#190).
+          # The key adds the NDK version and native API level, which rust-cache
+          # does not hash on its own, so changing either starts a fresh cache.
+          cache-key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
@@ -307,15 +314,6 @@ jobs:
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_API_LEVEL=$ANDROID_API_LEVEL" >> "$GITHUB_ENV"
-      # Cache compiled Cargo dependencies for the host and both Android ABIs
-      # that check-android-targets.sh builds under Gradle. The workspace's own
-      # crates are rebuilt each run: caching them too (cache-workspace-crates)
-      # did not shorten warm runs and grew the cache by about 40% (#190).
-      # The key adds the NDK version and native API level, which rust-cache
-      # does not hash on its own, so changing either starts a fresh cache.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: android-ndk-27.2.12479018-api-${{ env.ANDROID_API_LEVEL }}
       - uses: gradle/actions/setup-gradle@v6
       - run: ./native/android/gradlew -p native/android testDebugUnitTest
       - id: android_release_aar
@@ -370,10 +368,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: $/.github/actions/setup-rust-toolchain
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
@@ -387,10 +384,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: $/.github/actions/setup-rust-toolchain
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked
       - name: Generate LCOV report

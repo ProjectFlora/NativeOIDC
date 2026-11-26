@@ -1,0 +1,52 @@
+name: Setup Rust toolchain
+description: |-
+  Installs the Rust toolchain (dtolnay/rust-toolchain) and the cargo cache
+  (Swatinem/rust-cache) for a job. One source of truth for the toolchain
+  channel and the cache key; the workflow files only name which one a job
+  needs. Where each version lives and how to change it: docs/ci-toolchains.md.
+inputs:
+  toolchain:
+    description: |-
+      The rustup toolchain to install. The intent per kind of job:
+      - CI jobs (ci.yml) leave the default `stable`, which rustup resolves
+        to the current stable at run time, so CI follows stable releases
+        without a workflow change.
+      - Release package jobs (release.yml) pass `1.100.0`, so every package
+        of a release links the same rustc and the archive ties to one
+        toolchain (docs/releasing.md).
+      - The MSRV job (ci.yml) passes `1.99.1`, the minimum supported Rust.
+    default: stable
+  components:
+    description: |-
+      Comma-separated rustup components to install with the toolchain
+      (for example `clippy, rustfmt` or `llvm-tools-preview`); empty for
+      none.
+    default: ''
+  cache-key:
+    description: |-
+      Additional rust-cache key, appended to the action's automatic key.
+      Empty (the default) keeps the automatic key alone, exactly as a plain
+      `Swatinem/rust-cache@v2` step. The Android jobs pass the NDK version
+      and API level, which rust-cache does not hash on its own, so changing
+      either starts a fresh cache.
+    default: ''
+runs:
+  using: composite
+  steps:
+    # Pinned to an immutable commit, not to a version tag or branch: the
+    # versioned refs of dtolnay/rust-toolchain are toolchain-specific and
+    # would make the installed channel follow the ref. With one pinned ref,
+    # the `toolchain` input above is the single source of which channel a
+    # job installs (docs/ci-toolchains.md).
+    - name: Install the Rust toolchain
+      uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+    # An empty key is ignored by rust-cache, which then uses its automatic
+    # key (rust environment and lockfile hashes, plus the job id); an
+    # Android call passes its NDK-derived key instead.
+    - name: Cache the cargo registry and build artifacts
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.cache-key }}
