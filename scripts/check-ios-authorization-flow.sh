@@ -68,22 +68,22 @@ settle_start() {
         echo "warning: could not start the simulator settle sampler" >&2
         return 0
     fi
-    settle_sampler >> "$settle_log" 2>&1 &
+    # The sampler runs in its own process group (perl makes it the group
+    # leader before running it), so stopping it stops every command it has
+    # started, whatever it is running at that moment.
+    perl -e 'setpgrp(0, 0); exec @ARGV or exit 127' \
+        bash -c "$(declare -f settle_sampler); settle_sampler" >> "$settle_log" 2>&1 &
     settle_pid=$!
 }
 
-# Stop the sampler loop before its current command, so no shell reports the
-# command's termination; the job notice for the loop is discarded.
+# Stop the sampler's process group. Before perl has made the group, the
+# sampler has started no commands yet, so stopping its process is enough.
+# The job notice for the stopped sampler is discarded.
 settle_stop() {
-    local children
     if [[ -z "$settle_pid" ]]; then
         return 0
     fi
-    children=$(pgrep -P "$settle_pid" | tr '\n' ' ' || true)
-    kill "$settle_pid" || true
-    # Word splitting is intended: the list holds process ids.
-    # shellcheck disable=SC2086
-    kill $children || true
+    kill -TERM -- "-$settle_pid" || kill -TERM "$settle_pid" || true
     wait "$settle_pid" || true
     settle_pid=""
 } >/dev/null 2>&1
@@ -199,6 +199,7 @@ xcrun simctl bootstatus "$simulator_id" -b
 settle_start || true
 phase_begin "iOS flow: uninstall previous app"
 xcrun simctl uninstall "$simulator_id" "$bundle_id" >/dev/null 2>&1 || true
+phase_end
 settle_report || true
 phase_begin "iOS flow: start mock provider"
 rm -f "$provider_port_file"
