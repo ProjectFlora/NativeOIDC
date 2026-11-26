@@ -42,6 +42,16 @@ Check the following. If anything fails, go back to step 3.
   - Changes / How to verify / Scope of impact
   - Any deviation from the plan, and why
   - Local checks: which ran and passed, and which could not run and why
+- Create the PR non-interactively, with long option names only, and the description in a file:
+
+  ```
+  gh pr create --base main --head issue-{number}-{short-description} --title "{title}" --body-file {path to the description file} --label agent-pr
+  ```
+
+  - Never use the short options (`-b`, `-B`, `-t`, `-H`): `-b` is the body and `-B` is the base branch, and mixing them up sends the description as the base branch
+  - Write the description to a file and pass it with `--body-file`. Do not put Markdown or symbols (`**`, `#`, backticks, dashes) on the command line, where shell quoting can break them, especially on Windows
+  - Pass `--base`, `--head`, `--title`, and `--body-file` every time, so that `gh` never opens an interactive prompt. If a prompt appears anyway, cancel it and run the command again with the missing option
+  - After creating the PR, check its base branch, head branch, title, description, and label with `gh pr view {number} --json baseRefName,headRefName,title,body,labels`. Fix anything wrong with `gh pr edit` using long options
 
 ## How the phase ends
 This phase ends in exactly one of two ways. A summary of changes alone is neither, so it is not an ending.
