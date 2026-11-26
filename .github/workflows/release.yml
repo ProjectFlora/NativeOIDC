@@ -39,15 +39,6 @@ concurrency:
   group: release-${{ inputs.version }}
   cancel-in-progress: false
 
-env:
-  # Every Apple job (the release build and its consumer and manifest checks)
-  # selects this one Xcode on the macos-26 image. App Store Connect requires
-  # apps built with Xcode 26 or later, so the archive is built and validated
-  # with a stable Xcode 26.x — the one the macos-26 image ships as its
-  # default, so no extra download (Issue #135). Update the runner label and
-  # this version together, from the runner-images README, not the label.
-  XCODE_VERSION: '26.6'
-
 jobs:
   validate_version:
     name: Validate release version
@@ -164,7 +155,7 @@ jobs:
       # The archive's bytes are shaped by the toolchain (the rustc version is
       # part of rustc's -C metadata hash; the Xcode version shapes the
       # xcframework), and the manifest's checksum is computed from them. Pin
-      # both to exact versions (Xcode via XCODE_VERSION above) and record the
+      # both to exact versions (Xcode via the setup-xcode action) and record the
       # exact versions in the step summary so a release archive can be tied
       # to the toolchain that built it. Pinning does not make a rebuild
       # byte-identical; the published checksum is always computed from this
@@ -172,9 +163,7 @@ jobs:
       - uses: $/.github/actions/setup-rust-toolchain
         with:
           toolchain: 1.100.0
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: $/.github/actions/setup-xcode
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
         with:
@@ -332,9 +321,7 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: $/.github/actions/setup-xcode
       - name: Record toolchain versions
         run: |
           {
@@ -398,9 +385,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.validate_version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: $/.github/actions/setup-xcode
       - name: Record toolchain versions
         run: |
           {

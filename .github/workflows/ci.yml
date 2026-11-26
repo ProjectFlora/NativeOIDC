@@ -129,23 +129,13 @@ jobs:
       IOS_SIMULATOR_MAJOR_VERSION: ${{ matrix.ios_simulator }}
     steps:
       - uses: actions/checkout@v7
-      - name: Select newest installed Xcode for latest iOS
+      # The `latest` iOS lane (the xcode-27 preview runner) selects the
+      # newest installed stable Xcode itself; the `18` lane keeps the runner
+      # image's default selection.
+      - uses: $/.github/actions/setup-xcode
         if: matrix.ios_simulator == 'latest'
-        run: |
-          developer_dir=$(python3 - <<'PY'
-          import glob
-          import re
-          candidates = []
-          for path in glob.glob('/Applications/Xcode*.app'):
-              match = re.fullmatch(r'/Applications/Xcode_(\d+(?:\.\d+)*)\.app', path)
-              if match:
-                  candidates.append((tuple(map(int, match[1].split('.'))), path))
-          if not candidates:
-              raise SystemExit('No stable versioned Xcode installation found')
-          print(max(candidates)[1] + '/Contents/Developer')
-          PY
-          )
-          echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
+        with:
+          mode: latest
       - uses: $/.github/actions/setup-rust-toolchain
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: taiki-e/install-action@v2
