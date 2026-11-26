@@ -158,8 +158,6 @@ class PackageCleanupTestCase(BashHelperMixin, unittest.TestCase):
         body = (cleanup + "\n"
                 # Only the self-test removal (`rm -rf`) fails; other rm calls run.
                 'rm() { if [[ "$1" == -rf ]]; then return 1; fi; command rm "$@"; }\n'
-                # The simulator shutdown needs simctl; it is not under test here.
-                "stop_simulator() { :; }\n"
                 "scratch_xcframework=scratch.xcframework\nrecheck=recheck.zip\n"
                 "package_started=$SECONDS\ntrap cleanup EXIT\n"
                 "phase_begin 'Archive: zip and determinism self-test'\n" + ending)
@@ -215,7 +213,7 @@ class ScriptOrderTestCase(unittest.TestCase):
 @unittest.skipUnless(BASH, "bash is not installed")
 class AppleScriptSyntaxTestCase(unittest.TestCase):
     def test_apple_packaging_scripts_parse(self):
-        for name in ("apple-phase-timing.sh", "boot-ios-simulator.sh", "check-apple-static-link-smoke.sh",
+        for name in ("apple-phase-timing.sh", "check-apple-static-link-smoke.sh",
                      "check-ios-authorization-flow.sh", "package-apple-xcframework.sh"):
             with self.subTest(script=name):
                 result = subprocess.run((BASH, "-n", os.path.join(SCRIPTS, name).replace("\\", "/")),
