@@ -304,6 +304,31 @@ library does not refresh tokens automatically. Use the access token for
 resource-server calls; ID Tokens are identity assertions. See
 [Authorize and retain state](user-guide.md#authorize-and-retain-state).
 
+### Signed-in user
+
+The state holds the claims of the validated ID Token, also after a refresh
+and after restoring saved state. Bind accounts to the issuer and subject
+together, because `sub` is unique only within its issuer:
+
+```swift
+struct AccountKey: Hashable {
+    let issuer: String
+    let subject: String
+}
+
+/// nil when the state has no ID Token (an authorization without `openid`).
+func accountKey(for state: FfiAuthenticationState) async -> AccountKey? {
+    guard let claims = await state.idTokenClaims() else { return nil }
+    // claims.exp, claims.iat, claims.authTime, claims.acr, claims.amr,
+    // claims.azp, and claims.additionalClaims (JSON text) are also available.
+    return AccountKey(issuer: claims.iss, subject: claims.sub)
+}
+```
+
+If the app calls the UserInfo endpoint, it must check that the UserInfo `sub`
+equals `claims.sub`. See
+[Identify the signed-in user](user-guide.md#identify-the-signed-in-user).
+
 ## Secure state persistence
 
 Serialize the complete state and persist it in host-managed secure storage:

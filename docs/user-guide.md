@@ -329,6 +329,36 @@ a token is valid indefinitely. The library does not automatically refresh
 tokens or retry resource-server calls. ID Tokens are identity assertions;
 use the access token for resource-server authorization.
 
+## Identify the signed-in user
+
+State exposes the claims of the ID Token that the library validated, after
+code exchange, after refresh, and after restoring saved state: Rust
+`AuthenticationState::id_token_claims`, UniFFI
+`FfiAuthenticationState.idTokenClaims()` (Swift and Kotlin), the Windows
+`native_oidc_windows_id_token_claims` function with the state JSON, and .NET
+`NativeOidcWindows.GetIdTokenClaims`. The record holds `iss`, `sub`, `aud`,
+`exp`, and `iat`, and, when the ID Token contains them, `auth_time`, `acr`,
+`amr`, `azp`, and every other claim as JSON (`additional_claims`, such as
+`email` or `nonce`). It is absent when the state has no ID Token, for example
+after an authorization without the `openid` scope. Hosts do not need to
+decode the JWT themselves.
+
+- Bind a local account to the issuer and subject together. `sub` is unique
+  only within its issuer (OpenID Connect Core 1.0 §2), so never bind by `sub`
+  alone, and not by `email` or other claims that can change or be reassigned.
+- If the host calls the provider's UserInfo endpoint, it must check that the
+  UserInfo `sub` equals this `sub`, and discard the response when they differ
+  (Core §5.3.2). The library does not call UserInfo.
+- After a refresh that returns an ID Token, `exp`, `iat`, and the additional
+  claims come from the new ID Token. `auth_time` stays the original value, and
+  `acr`, `amr`, and `azp` keep the original values when the new ID Token omits
+  them. A refresh without an ID Token keeps the record.
+- `acr` must be a string and `amr` an array of strings; an ID Token with other
+  types is rejected.
+- In Rust, state created with `AuthenticationState::new` from a token response
+  that did not come from `exchange_code` or a refresh reports the claims of
+  whatever ID Token that response contains, without validating it.
+
 ## Save, restore, and refresh
 
 Serialize the complete state using Serde in Rust or `to_json` in UniFFI;
@@ -349,17 +379,21 @@ returns a replacement state JSON. Persist the updated complete state after
 every success, including refresh-token rotation. A missing refresh token,
 scope, or ID Token in a successful refresh response retains the old value.
 
-State keeps the identity claims of its ID Token (`iss`, `sub`, `aud`, `azp`,
-and `auth_time`) under `id_token_claims`. A refreshed ID Token must have the
+State keeps the claims of its ID Token under `id_token_claims` (see
+[Identify the signed-in user](#identify-the-signed-in-user)). A refreshed ID
+Token must have the
 same `iss`, `sub`, and `aud` as the original one (OpenID Connect Core 1.0
 §12.2). If it contains `auth_time`, that value must equal the original one;
 a refreshed ID Token without `auth_time` is accepted and the original value
 is kept. Otherwise refresh fails as for any invalid ID Token, and the state
 is unchanged. State saved by v0.9.0 or earlier has no `id_token_claims`; it
 takes them from its stored ID Token when it is restored, so no
-reauthentication is needed. A stored `auth_time` that is not a non-negative
-integer, or that appears more than once, is treated as absent there; the
-other claims are still kept. If that
+reauthentication is needed. State saved with the earlier form of
+`id_token_claims`, without `exp` and `iat`, also takes them from its stored
+ID Token. A stored `auth_time` that is not a non-negative integer, an `acr`
+that is not a string, or an `amr` that is not an array of strings, or any of
+them appearing more than once, is treated as absent there; the other claims
+are still kept. If that
 state has no ID Token, the first ID Token validated on a later refresh
 becomes the one that later refreshes are compared with.
 

@@ -672,6 +672,42 @@ Use the access token with its `token_type` for resource-server calls. The ID
 Token is an identity assertion, not an API credential. Do not log tokens or
 the state JSON.
 
+### Signed-in user
+
+`native_oidc_windows_id_token_claims` reads the claims of the validated ID
+Token from the state JSON, also for state saved by earlier versions, without
+a network request. Bind accounts to the issuer and subject together, because
+`sub` is unique only within its issuer:
+
+```cpp
+struct Account {
+    std::string issuer;
+    std::string subject;
+};
+
+// std::nullopt when the state has no ID Token (an authorization without
+// openid). The claims object also holds exp, iat, and, when present,
+// auth_time, acr, amr, azp, and additional_claims. Throws
+// std::runtime_error when the JSON is not a valid state.
+std::optional<Account> read_account(const std::string& state_json) {
+    const OperationResult result =
+        take_result(native_oidc_windows_id_token_claims(state_json.c_str()));
+    if (result.status != OperationStatus::Success) {
+        throw std::runtime_error(result.value);
+    }
+    if (result.value == "null") {
+        return std::nullopt;
+    }
+    const JsonObject claims = JsonObject::Parse(winrt::to_hstring(result.value));
+    return Account{winrt::to_string(claims.GetNamedString(L"iss")),
+                   winrt::to_string(claims.GetNamedString(L"sub"))};
+}
+```
+
+If the app calls the UserInfo endpoint, it must check that the UserInfo `sub`
+equals this `sub`. See
+[Identify the signed-in user](user-guide.md#identify-the-signed-in-user).
+
 ## 4. Secure persistence and restoration
 
 The state contains the access, refresh, and ID Tokens, so the host must

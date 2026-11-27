@@ -16,6 +16,20 @@ interoperability testing and support policies are still evolving. Each release r
   Windows ABI
   ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)).
 
+### Added
+
+- Every surface returns the claims of the validated ID Token, after code
+  exchange, after refresh, and after restoring saved state, including state
+  saved by v0.9.0 or earlier: Rust `AuthenticationState::id_token_claims`
+  (`IdTokenClaims`), UniFFI `FfiAuthenticationState.idTokenClaims()`
+  (`FfiIdTokenClaims`, Swift and Kotlin), the Windows C ABI function
+  `native_oidc_windows_id_token_claims`, and .NET
+  `NativeOidcWindows.GetIdTokenClaims`. The record holds `iss`, `sub`,
+  `aud`, `exp`, `iat`, `auth_time`, `acr`, `amr`, `azp`, and the other
+  claims as JSON. The guides show account binding with issuer and subject
+  and the UserInfo `sub` comparison
+  ([#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)).
+
 ### Fixed
 
 - The OIDC issuer identifier is kept exactly as the caller or the discovery
@@ -29,12 +43,15 @@ interoperability testing and support policies are still evolving. Each release r
 ### Changed
 
 - Authentication-state JSON has a new optional `id_token_claims` object
-  (`iss`, `sub`, `aud`, and, when present, `azp` and `auth_time`). State saved
-  by earlier versions takes these claims from its stored ID Token when it is
-  restored. Earlier versions ignore the new key when they read state saved by
-  this version. ID Token validation now rejects an `auth_time` claim that is
-  not a non-negative integer, as it already did for `exp` and `iat`
-  ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)).
+  (`iss`, `sub`, `aud`, `exp`, `iat`, and, when present, `auth_time`, `acr`,
+  `amr`, `azp`, and `additional_claims`). State saved by earlier versions
+  takes these claims from its stored ID Token when it is restored. Earlier
+  versions ignore the new key when they read state saved by this version. ID
+  Token validation now rejects an `auth_time` claim that is not a
+  non-negative integer, as it already did for `exp` and `iat`, an `acr` that
+  is not a string, and an `amr` that is not an array of strings
+  ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260),
+  [#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)).
 - Compatibility: `FfiServiceConfiguration.issuer()` (Swift, Kotlin) and Rust
   `ServiceConfiguration::issuer()` return the identifier as given, so
   `https://idp.example` is no longer returned as `https://idp.example/`.

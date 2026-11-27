@@ -543,6 +543,40 @@ Use the access token with its `TokenType` for resource-server calls. The ID
 Token is an identity assertion, not an API credential. Do not log tokens or
 the state JSON.
 
+### Signed-in user
+
+`NativeOidcWindows.GetIdTokenClaims` reads the claims of the validated ID
+Token from the state JSON, also for state saved by earlier versions, without
+a network request. Bind accounts to the issuer and subject together, because
+`sub` is unique only within its issuer; the record's value equality compares
+both:
+
+```csharp
+public sealed record SignedInUser(string Issuer, string Subject)
+{
+    // Null when the state has no ID Token (an authorization without openid).
+    // The claims JSON also holds exp, iat, and, when present, auth_time, acr,
+    // amr, azp, and additional_claims. Throws InvalidOperationException when
+    // the JSON is not a valid state.
+    public static SignedInUser? Read(string stateJson)
+    {
+        var claimsJson = NativeOidcWindows.GetIdTokenClaims(stateJson);
+        if (claimsJson is null)
+        {
+            return null;
+        }
+        using var claims = JsonDocument.Parse(claimsJson);
+        return new SignedInUser(
+            claims.RootElement.GetProperty("iss").GetString() ?? throw new JsonException("iss is null"),
+            claims.RootElement.GetProperty("sub").GetString() ?? throw new JsonException("sub is null"));
+    }
+}
+```
+
+If the app calls the UserInfo endpoint, it must check that the UserInfo `sub`
+equals `Subject`. See
+[Identify the signed-in user](user-guide.md#identify-the-signed-in-user).
+
 ## 4. Secure persistence and restoration
 
 The state contains the access, refresh, and ID Tokens, so the host must

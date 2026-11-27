@@ -72,7 +72,8 @@ recorded per environment in the
 [OIDC platform evaluation](oidc-platform-evaluation.md#feature--environment)
 for v0.9.0. In particular, Windows has no standalone discovery or dynamic
 registration, the Apple and Android adapters leave the logout browser to the
-host, and no surface exposes the validated ID Token claims yet
+host, and in v0.9.0 no surface exposes the validated ID Token claims; the
+next release adds them on every surface
 ([#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)).
 
 Alignment means that every declared distribution target is built and packaged,

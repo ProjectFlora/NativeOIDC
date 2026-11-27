@@ -26,14 +26,16 @@ architecture is `x86_64-pc-windows-msvc`.
 | `native_oidc_windows_refresh` | Refreshes the supplied state; returns replacement authentication-state JSON on success |
 | `native_oidc_windows_end_session` | Opens browser; with redirect waits for validated loopback callback and returns response JSON; otherwise returns an empty success value |
 | `native_oidc_windows_revoke` | Revokes the supplied token; returns an empty success value |
+| `native_oidc_windows_id_token_claims` | Takes state JSON, not a request, and makes no network request; returns the validated ID Token claims as a JSON object, or `null` when the state has no ID Token |
 | `native_oidc_windows_authorization_result_status` | Reads status from any operation result |
 | `native_oidc_windows_authorization_result_value` | Borrows a UTF-8 string owned by the result; copy it before freeing the result |
 | `native_oidc_windows_authorization_result_free` | Releases any operation result; do not use its pointers afterward |
 
 `NativeOidcWindowsCancellationHandle` and `NativeOidcWindowsAuthorizationResult`
-are opaque. `NativeOidcWindowsRefreshResult`, `NativeOidcWindowsEndSessionResult`
-and `NativeOidcWindowsRevocationResult` alias the authorization result type;
-the same result accessors and free function apply to all four operations.
+are opaque. `NativeOidcWindowsRefreshResult`, `NativeOidcWindowsEndSessionResult`,
+`NativeOidcWindowsRevocationResult`, and `NativeOidcWindowsIdTokenClaimsResult`
+alias the authorization result type; the same result accessors and free
+function apply to all five functions that return a result.
 
 | Status constant | Value | Result value |
 | --- | --- | --- |
@@ -77,13 +79,21 @@ No redirect means browser launch success, not confirmed provider logout.
 
 Authentication-state JSON contains `token_response`, optional `expires_at`
 (absolute Unix seconds), optional `oidc_nonce`, and optional
-`id_token_claims` (the ID Token identity that a refreshed ID Token must
-match). Token response contains
+`id_token_claims` (the claims of the validated ID Token, which a refreshed ID
+Token's identity must match). Token response contains
 `access_token`, `token_type`, optional `expires_in`, `refresh_token`, `scope`,
 `id_token`, and preserved additional response fields. Persist the complete
 returned JSON unchanged so expiry and nonce survive restoration. The host
 may inspect it with its JSON library; the ABI has no separate token or expiry
 accessors. See the [state lifecycle](user-guide.md#save-restore-and-refresh).
+
+Read the ID Token claims with `native_oidc_windows_id_token_claims` rather
+than from `id_token_claims` in the JSON: state saved by v0.9.0 or earlier has
+no `id_token_claims`, and the function reads them from the stored ID Token.
+The claims object contains `iss`, `sub`, `aud` (an array), `exp`, `iat`, and,
+when present, `auth_time`, `acr`, `amr`, `azp`, and `additional_claims` (an
+object with every other claim). Bind accounts to `iss` and `sub` together;
+see [Identify the signed-in user](user-guide.md#identify-the-signed-in-user).
 
 The ABI has no standalone discovery, dynamic registration, manual
 authorization-session, or expiry-predicate functions. These shared-core
@@ -102,9 +112,11 @@ C# usage, see the [Windows .NET user guide](windows-dotnet-guide.md).
 | `NativeOidcWindows.RefreshAsync(requestJson, cancellationToken)` | `Task<string>`: updated state JSON |
 | `NativeOidcWindows.EndSessionAsync(requestJson, cancellationToken)` | `Task<string>`: callback JSON or empty string |
 | `NativeOidcWindows.RevokeAsync(requestJson, cancellationToken)` | `Task`: no value |
+| `NativeOidcWindows.GetIdTokenClaims(stateJson)` | `string?`: ID Token claims JSON, or `null` when the state has no ID Token; synchronous, no network request |
 
-All methods accept a string and optional `CancellationToken`. They run the
-blocking call on a worker, register cancellation and release native handles.
+The asynchronous methods accept a string and optional `CancellationToken`.
+They run the blocking call on a worker, register cancellation and release
+native handles. `GetIdTokenClaims` runs on the calling thread.
 Null input throws `ArgumentNullException`; native cancellation becomes
 `OperationCanceledException`; other native errors or unusable native results
 become `InvalidOperationException`. Deployment/loading errors can also surface

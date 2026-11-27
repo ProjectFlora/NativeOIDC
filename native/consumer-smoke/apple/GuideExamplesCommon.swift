@@ -63,6 +63,17 @@ func guideExplicitConfiguration() throws -> FfiServiceConfiguration {
     .withRegistrationEndpoint(endpoint: "https://your-idp.example/register")
 }
 
+/// The guide's signed-in user example.
+struct GuideAccountKey: Hashable {
+  let issuer: String
+  let subject: String
+}
+
+func guideAccountKey(for state: FfiAuthenticationState) async -> GuideAccountKey? {
+  guard let claims = await state.idTokenClaims() else { return nil }
+  return GuideAccountKey(issuer: claims.iss, subject: claims.sub)
+}
+
 /// The guide's authorization-options example.
 func guideAuthorizationOptions() -> FfiAuthorizationOptions {
   // The redirect must be the one for the platform the adapter runs on: the
@@ -602,6 +613,23 @@ private func checkStateUpdate() async throws {
     fatalError("guide check: re-serialized state lost the rotated refresh token")
   }
   print("guide check ok: state update (refresh rotation + JSON round trip)")
+
+  // Signed-in user: the state above has no ID Token, and state saved before
+  // the claims were recorded reads them from its ID Token, whose payload is
+  // {"iss":"https://idp.example","sub":"user-123","aud":"native-public-client",
+  // "exp":2000,"iat":1000}.
+  guard await guideAccountKey(for: restored) == nil else {
+    fatalError("guide check: state without an ID Token returned an account key")
+  }
+  let saved = try FfiAuthenticationState.fromJson(
+    serialized: #"{"token_response":{"access_token":"a","token_type":"Bearer","id_token":"eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lkcC5leGFtcGxlIiwic3ViIjoidXNlci0xMjMiLCJhdWQiOiJuYXRpdmUtcHVibGljLWNsaWVudCIsImV4cCI6MjAwMCwiaWF0IjoxMDAwfQ.c2ln"},"expires_at":null}"#
+  )
+  guard await guideAccountKey(for: saved)
+    == GuideAccountKey(issuer: "https://idp.example", subject: "user-123")
+  else {
+    fatalError("guide check: saved state did not return its issuer and subject")
+  }
+  print("guide check ok: signed-in user (issuer and subject)")
 }
 
 private func checkCancellation() async throws {
