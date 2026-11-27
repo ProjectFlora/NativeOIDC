@@ -7,8 +7,8 @@ use url::Url;
 use crate::{
     parameters::are_parameter_names_unique, revoke_token, AuthError, AuthenticationState,
     AuthorizationRequest, AuthorizationResponse, AuthorizationSession, CancellationHandle,
-    ClientRegistrationRequest, EndSessionRequest, HttpRequest, HttpResponse, HttpTransport, Result,
-    RevocationTokenType, ServiceConfiguration, TokenResponse,
+    ClientRegistrationRequest, EndSessionRequest, HttpRequest, HttpResponse, HttpTransport,
+    IdTokenClaims, Result, RevocationTokenType, ServiceConfiguration, TokenResponse,
 };
 
 /// Errors exposed to Swift and Kotlin callers.
@@ -583,6 +583,65 @@ impl From<&TokenResponse> for FfiTokenResponse {
     }
 }
 
+/// Claims of the ID Token that the library validated, kept in
+/// authentication state.
+///
+/// Identify the end user by `iss` and `sub` together: `sub` is unique only
+/// within its issuer. A host that calls the UserInfo endpoint must check that
+/// the UserInfo `sub` equals this `sub`.
+#[derive(uniffi::Record)]
+pub struct FfiIdTokenClaims {
+    /// Issuer identifier, compared exactly with the configured issuer.
+    pub iss: String,
+    /// Subject identifier, unique within `iss`.
+    pub sub: String,
+    /// Audiences, sorted and de-duplicated.
+    pub aud: Vec<String>,
+    /// Expiration time of the ID Token as Unix time.
+    pub exp: u64,
+    /// Time the ID Token was issued as Unix time.
+    pub iat: u64,
+    /// Time of the end-user authentication as Unix time.
+    #[uniffi(default)]
+    pub auth_time: Option<u64>,
+    /// Authentication Context Class Reference.
+    #[uniffi(default)]
+    pub acr: Option<String>,
+    /// Authentication Methods References.
+    #[uniffi(default)]
+    pub amr: Option<Vec<String>>,
+    /// Authorized party, the client ID when present.
+    #[uniffi(default)]
+    pub azp: Option<String>,
+    /// Every other claim of the ID Token, serialized as JSON text.
+    #[uniffi(default)]
+    pub additional_claims: Vec<FfiJsonParameter>,
+}
+
+impl From<&IdTokenClaims> for FfiIdTokenClaims {
+    fn from(claims: &IdTokenClaims) -> Self {
+        Self {
+            iss: claims.iss.clone(),
+            sub: claims.sub.clone(),
+            aud: claims.aud.clone(),
+            exp: claims.exp,
+            iat: claims.iat,
+            auth_time: claims.auth_time,
+            acr: claims.acr.clone(),
+            amr: claims.amr.clone(),
+            azp: claims.azp.clone(),
+            additional_claims: claims
+                .additional_claims
+                .iter()
+                .map(|(name, value)| FfiJsonParameter {
+                    name: name.clone(),
+                    value_json: value.to_string(),
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Serializable token state. The host application is responsible for secure storage.
 #[derive(uniffi::Object)]
 pub struct FfiAuthenticationState {
@@ -611,6 +670,17 @@ impl FfiAuthenticationState {
     /// Returns the current token response.
     pub async fn token_response(&self) -> FfiTokenResponse {
         FfiTokenResponse::from(self.inner.lock().await.token_response())
+    }
+
+    /// Returns the claims of the validated ID Token, or `None` when the
+    /// state has no readable ID Token. Available after code exchange, after
+    /// refresh, and after restoring saved state.
+    pub async fn id_token_claims(&self) -> Option<FfiIdTokenClaims> {
+        self.inner
+            .lock()
+            .await
+            .id_token_claims()
+            .map(FfiIdTokenClaims::from)
     }
 
     /// Returns access-token expiration as Unix time, if known.
@@ -1467,6 +1537,166 @@ mod tests {
                 assert_eq!(state.to_json().await.unwrap(), before);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn id_token_claims_follow_code_exchange_refresh_and_restore() {
+        use crate::id_token::tests::{jwks, TestKey};
+
+        const ISSUER: &str = "https://idp.example/";
+        let key = TestKey::rs256();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let token_response = |claims: serde_json::Value| {
+            serde_json::json!({
+                "access_token": "access",
+                "token_type": "Bearer",
+                "refresh_token": "refresh",
+                "id_token": key.sign(claims),
+            })
+        };
+        let transport = |bodies: Vec<serde_json::Value>| {
+            Arc::new(QueuedTransport {
+                bodies: Mutex::new(
+                    bodies
+                        .iter()
+                        .map(|body| serde_json::to_vec(body).unwrap())
+                        .collect(),
+                ),
+            })
+        };
+        let configuration = FfiServiceConfiguration::new(
+            "https://idp.example/authorize".into(),
+            "https://idp.example/token".into(),
+        )
+        .unwrap()
+        .with_oidc_validation_endpoints(ISSUER.into(), "https://idp.example/keys".into())
+        .unwrap();
+
+        let mut options = authorization_options();
+        options.scopes = vec!["openid".into()];
+        let session_transport = transport(vec![]);
+        let session =
+            begin_authorization(configuration.clone(), options, session_transport.clone()).unwrap();
+        let nonce = session.nonce().unwrap();
+        session_transport.bodies.lock().unwrap().extend(
+            [
+                token_response(serde_json::json!({
+                    "iss": ISSUER,
+                    "sub": "user-123",
+                    "aud": "native-client",
+                    "exp": now + 300,
+                    "iat": now,
+                    "auth_time": now - 10,
+                    "acr": "urn:example:loa:2",
+                    "amr": ["pwd"],
+                    "nonce": nonce,
+                    "email": "user@example.com",
+                })),
+                jwks(&[&key]),
+            ]
+            .iter()
+            .map(|body| serde_json::to_vec(body).unwrap()),
+        );
+        let url = Url::parse(&session.authorization_url()).unwrap();
+        let state = url
+            .query_pairs()
+            .find(|(name, _)| name == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let response = session
+            .parse_redirect(format!("com.example.app:/callback?code=code&state={state}"))
+            .unwrap();
+        let state = session
+            .exchange_code(response, FfiCancellationHandle::new())
+            .await
+            .unwrap();
+
+        let claims = state.id_token_claims().await.unwrap();
+        assert_eq!(claims.iss, ISSUER);
+        assert_eq!(claims.sub, "user-123");
+        assert_eq!(claims.aud, ["native-client"]);
+        assert_eq!((claims.exp, claims.iat), (now + 300, now));
+        assert_eq!(claims.auth_time, Some(now - 10));
+        assert_eq!(claims.acr.as_deref(), Some("urn:example:loa:2"));
+        assert_eq!(claims.amr, Some(vec!["pwd".to_owned()]));
+        assert_eq!(claims.azp, None);
+        let additional: Vec<_> = claims
+            .additional_claims
+            .iter()
+            .map(|claim| (claim.name.as_str(), claim.value_json.clone()))
+            .collect();
+        assert_eq!(
+            additional,
+            [
+                ("email", "\"user@example.com\"".to_owned()),
+                ("nonce", serde_json::to_string(&nonce).unwrap()),
+            ]
+        );
+
+        state
+            .refresh(
+                configuration.clone(),
+                "native-client".into(),
+                vec![],
+                transport(vec![
+                    token_response(serde_json::json!({
+                        "iss": ISSUER,
+                        "sub": "user-123",
+                        "aud": "native-client",
+                        "exp": now + 600,
+                        "iat": now + 1,
+                    })),
+                    jwks(&[&key]),
+                ]),
+                FfiCancellationHandle::new(),
+            )
+            .await
+            .unwrap();
+        let claims = state.id_token_claims().await.unwrap();
+        assert_eq!((claims.exp, claims.iat), (now + 600, now + 1));
+        assert_eq!(claims.auth_time, Some(now - 10));
+        assert_eq!(claims.acr.as_deref(), Some("urn:example:loa:2"));
+        assert!(claims.additional_claims.is_empty());
+
+        let restored = FfiAuthenticationState::from_json(state.to_json().await.unwrap()).unwrap();
+        let restored_claims = restored.id_token_claims().await.unwrap();
+        assert_eq!(restored_claims.sub, "user-123");
+        assert_eq!(restored_claims.exp, now + 600);
+
+        // State saved before the claims were recorded reads them from its
+        // stored ID Token.
+        let legacy = serde_json::json!({
+            "token_response": {
+                "access_token": "access",
+                "token_type": "Bearer",
+                "id_token": key.sign(serde_json::json!({
+                    "iss": ISSUER,
+                    "sub": "legacy-user",
+                    "aud": "native-client",
+                    "exp": 2_000,
+                    "iat": 1_000,
+                })),
+            },
+            "expires_at": null,
+        });
+        let legacy = FfiAuthenticationState::from_json(legacy.to_string()).unwrap();
+        let legacy_claims = legacy.id_token_claims().await.unwrap();
+        assert_eq!(
+            (legacy_claims.iss.as_str(), legacy_claims.sub.as_str()),
+            (ISSUER, "legacy-user")
+        );
+        assert_eq!((legacy_claims.exp, legacy_claims.iat), (2_000, 1_000));
+
+        let without_id_token = FfiAuthenticationState::from_json(
+            r#"{"token_response":{"access_token":"a","token_type":"Bearer"},"expires_at":null}"#
+                .into(),
+        )
+        .unwrap();
+        assert!(without_id_token.id_token_claims().await.is_none());
     }
 
     #[tokio::test]

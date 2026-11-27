@@ -203,7 +203,29 @@ void check_local_errors(const std::string& base_url, const std::filesystem::path
     check(!signed_out.stored_state().has_value(), "failed operations store no state");
 }
 
+// The guide's read_account on state saved before the ID Token claims were
+// recorded, whose ID Token payload is {"iss":"https://idp.example",
+// "sub":"user-123","aud":"guide-client","exp":2000,"iat":1000}, and on state
+// without an ID Token.
+void check_account() {
+    const std::optional<Account> account = read_account(
+        R"({"token_response":{"access_token":"a","token_type":"Bearer","id_token":"eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lkcC5leGFtcGxlIiwic3ViIjoidXNlci0xMjMiLCJhdWQiOiJndWlkZS1jbGllbnQiLCJleHAiOjIwMDAsImlhdCI6MTAwMH0.c2ln"},"expires_at":null})");
+    check(account.has_value() && account->issuer == "https://idp.example" &&
+              account->subject == "user-123",
+          "read_account returns the issuer and subject of saved state");
+    check(!read_account(stored_state_json("guide-refresh-1", 1)).has_value(),
+          "read_account returns nothing for state without an ID Token");
+    bool invalid_failed = false;
+    try {
+        read_account("{");
+    } catch (const std::runtime_error&) {
+        invalid_failed = true;
+    }
+    check(invalid_failed, "read_account rejects invalid state JSON");
+}
+
 void run(const std::string& base_url, const std::filesystem::path& file) {
+    check_account();
     check_storage(file);
     AuthClient client(mock_config(base_url), file);
     check_refresh(client);

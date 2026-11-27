@@ -304,6 +304,43 @@ library does not refresh tokens automatically. Use the access token for
 resource-server calls; ID Tokens are identity assertions. See
 [Authorize and retain state](user-guide.md#authorize-and-retain-state).
 
+### Signed-in user
+
+The state holds the claims of the validated ID Token, also after a refresh
+and after restoring saved state. Bind accounts to the issuer and subject
+together, because `sub` is unique only within its issuer. OIDC identifiers
+are compared exactly, without Unicode normalization, but Swift `String`
+equality treats canonically equivalent strings as equal, so compare and hash
+their UTF-8 bytes:
+
+```swift
+struct AccountKey: Hashable {
+    // The exact UTF-8 bytes of iss and sub.
+    let issuer: [UInt8]
+    let subject: [UInt8]
+}
+
+/// nil when the state has no ID Token (an authorization without `openid`).
+func accountKey(for state: FfiAuthenticationState) async -> AccountKey? {
+    guard let claims = await state.idTokenClaims() else { return nil }
+    // claims.exp, claims.iat, claims.authTime, claims.acr, claims.amr,
+    // claims.azp, and claims.additionalClaims (JSON text) are also available.
+    return AccountKey(issuer: Array(claims.iss.utf8), subject: Array(claims.sub.utf8))
+}
+```
+
+If the app calls the UserInfo endpoint, it must check that the UserInfo `sub`
+equals `claims.sub` exactly, again by bytes rather than with `==`:
+
+```swift
+guard userinfoSubject.utf8.elementsEqual(claims.sub.utf8) else {
+    // The UserInfo response is for a different user: do not use it.
+    return
+}
+```
+
+See [Identify the signed-in user](user-guide.md#identify-the-signed-in-user).
+
 ## Secure state persistence
 
 Serialize the complete state and persist it in host-managed secure storage:

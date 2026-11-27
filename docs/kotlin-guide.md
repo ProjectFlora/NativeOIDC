@@ -281,6 +281,22 @@ val expired: Boolean? = state.isExpiredAt((System.currentTimeMillis() / 1000).to
 A `null` expiry means "unknown", not "valid forever". The library does not
 refresh tokens automatically.
 
+The state also holds the claims of the validated ID Token, after a refresh
+and after restoring saved state. Bind accounts to the issuer and subject
+together, because `sub` is unique only within its issuer:
+
+```kotlin
+// null when the state has no ID Token (an authorization without openid).
+// claims.exp, iat, authTime, acr, amr, azp, and additionalClaims (JSON text)
+// are also available.
+val claims = state.idTokenClaims()
+val accountKey: Pair<String, String>? = claims?.let { it.iss to it.sub }
+```
+
+If the app calls the UserInfo endpoint, it must check that the UserInfo `sub`
+equals `claims.sub`. See
+[Identify the signed-in user](user-guide.md#identify-the-signed-in-user).
+
 ## 4. Secure persistence and restoration
 
 `toJson()` serializes the complete state (tokens, absolute expiry, and OIDC

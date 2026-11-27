@@ -602,6 +602,13 @@ public protocol FfiAuthenticationStateProtocol: AnyObject, Sendable {
     func expiresAt() async  -> UInt64?
     
     /**
+     * Returns the claims of the validated ID Token, or `None` when the
+     * state has no readable ID Token. Available after code exchange, after
+     * refresh, and after restoring saved state.
+     */
+    func idTokenClaims() async  -> FfiIdTokenClaims?
+    
+    /**
      * Returns whether the access token has expired at the supplied Unix time.
      */
     func isExpiredAt(unixTimeSeconds: UInt64) async  -> Bool?
@@ -705,6 +712,28 @@ open func expiresAt()async  -> UInt64?  {
             completeFunc: ffi_native_oidc_rust_future_complete_rust_buffer,
             freeFunc: ffi_native_oidc_rust_future_free_rust_buffer,
             liftFunc: FfiConverterOptionUInt64.lift,
+            errorHandler: nil
+            
+        )
+}
+    
+    /**
+     * Returns the claims of the validated ID Token, or `None` when the
+     * state has no readable ID Token. Available after code exchange, after
+     * refresh, and after restoring saved state.
+     */
+open func idTokenClaims()async  -> FfiIdTokenClaims?  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_native_oidc_fn_method_ffiauthenticationstate_id_token_claims(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_native_oidc_rust_future_poll_rust_buffer,
+            completeFunc: ffi_native_oidc_rust_future_complete_rust_buffer,
+            freeFunc: ffi_native_oidc_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeFfiIdTokenClaims.lift,
             errorHandler: nil
             
         )
@@ -2604,6 +2633,160 @@ public func FfiConverterTypeFfiHttpResponse_lower(_ value: FfiHttpResponse) -> R
 
 
 /**
+ * Claims of the ID Token that the library validated, kept in
+ * authentication state.
+ *
+ * Identify the end user by `iss` and `sub` together: `sub` is unique only
+ * within its issuer. A host that calls the UserInfo endpoint must check that
+ * the UserInfo `sub` equals this `sub`.
+ */
+public struct FfiIdTokenClaims: Equatable, Hashable {
+    /**
+     * Issuer identifier, compared exactly with the configured issuer.
+     */
+    public var iss: String
+    /**
+     * Subject identifier, unique within `iss`.
+     */
+    public var sub: String
+    /**
+     * Audiences, sorted and de-duplicated.
+     */
+    public var aud: [String]
+    /**
+     * Expiration time of the ID Token as Unix time.
+     */
+    public var exp: UInt64
+    /**
+     * Time the ID Token was issued as Unix time.
+     */
+    public var iat: UInt64
+    /**
+     * Time of the end-user authentication as Unix time.
+     */
+    public var authTime: UInt64?
+    /**
+     * Authentication Context Class Reference.
+     */
+    public var acr: String?
+    /**
+     * Authentication Methods References.
+     */
+    public var amr: [String]?
+    /**
+     * Authorized party, the client ID when present.
+     */
+    public var azp: String?
+    /**
+     * Every other claim of the ID Token, serialized as JSON text.
+     */
+    public var additionalClaims: [FfiJsonParameter]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Issuer identifier, compared exactly with the configured issuer.
+         */iss: String, 
+        /**
+         * Subject identifier, unique within `iss`.
+         */sub: String, 
+        /**
+         * Audiences, sorted and de-duplicated.
+         */aud: [String], 
+        /**
+         * Expiration time of the ID Token as Unix time.
+         */exp: UInt64, 
+        /**
+         * Time the ID Token was issued as Unix time.
+         */iat: UInt64, 
+        /**
+         * Time of the end-user authentication as Unix time.
+         */authTime: UInt64? = nil, 
+        /**
+         * Authentication Context Class Reference.
+         */acr: String? = nil, 
+        /**
+         * Authentication Methods References.
+         */amr: [String]? = nil, 
+        /**
+         * Authorized party, the client ID when present.
+         */azp: String? = nil, 
+        /**
+         * Every other claim of the ID Token, serialized as JSON text.
+         */additionalClaims: [FfiJsonParameter] = []) {
+        self.iss = iss
+        self.sub = sub
+        self.aud = aud
+        self.exp = exp
+        self.iat = iat
+        self.authTime = authTime
+        self.acr = acr
+        self.amr = amr
+        self.azp = azp
+        self.additionalClaims = additionalClaims
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiIdTokenClaims: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiIdTokenClaims: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiIdTokenClaims {
+        return
+            try FfiIdTokenClaims(
+                iss: FfiConverterString.read(from: &buf), 
+                sub: FfiConverterString.read(from: &buf), 
+                aud: FfiConverterSequenceString.read(from: &buf), 
+                exp: FfiConverterUInt64.read(from: &buf), 
+                iat: FfiConverterUInt64.read(from: &buf), 
+                authTime: FfiConverterOptionUInt64.read(from: &buf), 
+                acr: FfiConverterOptionString.read(from: &buf), 
+                amr: FfiConverterOptionSequenceString.read(from: &buf), 
+                azp: FfiConverterOptionString.read(from: &buf), 
+                additionalClaims: FfiConverterSequenceTypeFfiJsonParameter.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiIdTokenClaims, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.iss, into: &buf)
+        FfiConverterString.write(value.sub, into: &buf)
+        FfiConverterSequenceString.write(value.aud, into: &buf)
+        FfiConverterUInt64.write(value.exp, into: &buf)
+        FfiConverterUInt64.write(value.iat, into: &buf)
+        FfiConverterOptionUInt64.write(value.authTime, into: &buf)
+        FfiConverterOptionString.write(value.acr, into: &buf)
+        FfiConverterOptionSequenceString.write(value.amr, into: &buf)
+        FfiConverterOptionString.write(value.azp, into: &buf)
+        FfiConverterSequenceTypeFfiJsonParameter.write(value.additionalClaims, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiIdTokenClaims_lift(_ buf: RustBuffer) throws -> FfiIdTokenClaims {
+    return try FfiConverterTypeFfiIdTokenClaims.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiIdTokenClaims_lower(_ value: FfiIdTokenClaims) -> RustBuffer {
+    return FfiConverterTypeFfiIdTokenClaims.lower(value)
+}
+
+
+/**
  * A JSON-valued token response parameter.
  */
 public struct FfiJsonParameter: Equatable, Hashable {
@@ -3227,6 +3410,54 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeFfiIdTokenClaims: FfiConverterRustBuffer {
+    typealias SwiftType = FfiIdTokenClaims?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFfiIdTokenClaims.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFfiIdTokenClaims.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -3552,6 +3783,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_native_oidc_checksum_method_ffiauthenticationstate_expires_at() != 7090) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_native_oidc_checksum_method_ffiauthenticationstate_id_token_claims() != 42224) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_native_oidc_checksum_method_ffiauthenticationstate_is_expired_at() != 45140) {

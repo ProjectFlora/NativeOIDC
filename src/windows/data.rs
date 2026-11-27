@@ -215,6 +215,8 @@ mod tests {
             "iss": "https://issuer.example/",
             "sub": "user-123",
             "aud": "client",
+            "exp": 2000,
+            "iat": 1000,
             "auth_time": 1000,
         });
         let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
@@ -231,6 +233,8 @@ mod tests {
             "iss": "https://issuer.example/",
             "sub": "user-123",
             "aud": ["client"],
+            "exp": 2000,
+            "iat": 1000,
             "auth_time": 1000,
         });
         let serialized = serde_json::to_value(&request.state).unwrap();

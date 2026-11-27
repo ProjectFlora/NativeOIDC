@@ -123,6 +123,12 @@ class GuideExamplesTest {
         assertEquals(false, authState.isExpiredAt(before.toULong()))
         assertEquals(true, authState.isExpiredAt(expiresAt))
 
+        // Guide section 3: the signed-in user. This OAuth-only exchange
+        // returns no ID Token, so there are no claims.
+        val claims = authState.idTokenClaims()
+        val accountKey: Pair<String, String>? = claims?.let { it.iss to it.sub }
+        assertNull(accountKey)
+
         val exchange = transport.requests.single()
         assertEquals("POST", exchange.method)
         assertEquals(TOKEN, exchange.url)

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fmt,
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -14,10 +15,10 @@ use jsonwebtoken::{
     Algorithm, DecodingKey, Validation,
 };
 use serde::{
-    de::{self, IgnoredAny, MapAccess},
+    de::{self, DeserializeOwned, IgnoredAny, MapAccess},
     Deserialize, Deserializer, Serialize,
 };
-use serde_json::Value;
+use serde_json::{value::RawValue, Value};
 use url::Url;
 
 use crate::{AuthError, CancellationHandle, HttpRequest, HttpTransport, Result};
@@ -80,7 +81,7 @@ impl JwksCache {
 }
 
 #[derive(Deserialize)]
-struct IdTokenClaims {
+struct JwtClaims {
     iss: String,
     sub: String,
     aud: Audience,
@@ -90,20 +91,80 @@ struct IdTokenClaims {
     nonce: Option<String>,
     azp: Option<String>,
     auth_time: Option<u64>,
+    // A present acr must be a string and a present amr an array of strings
+    // (OIDC Core §2), so an explicit null is rejected rather than read as
+    // absent.
+    #[serde(default, deserialize_with = "present")]
+    acr: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    amr: Option<Vec<String>>,
 }
 
-/// Identity claims of an ID Token, kept in authentication state so that a
-/// refreshed ID Token can be compared with the original one.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ValidatedIdTokenClaims {
-    pub(crate) iss: String,
-    pub(crate) sub: String,
-    /// Sorted and de-duplicated, so `"x"` and `["x"]` compare equal.
-    pub(crate) aud: Vec<String>,
+/// Deserializes a member that, when present, must hold a `T`. Absence is
+/// handled by `#[serde(default)]`; an explicit JSON null is an error.
+fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+/// Claims that [`IdTokenClaims`] keeps in named fields rather than in
+/// [`IdTokenClaims::additional_claims`].
+const NAMED_CLAIMS: [&str; 9] = [
+    "iss",
+    "sub",
+    "aud",
+    "exp",
+    "iat",
+    "auth_time",
+    "acr",
+    "amr",
+    "azp",
+];
+
+/// Claims of the ID Token that this library validated, kept in
+/// [`AuthenticationState`](crate::AuthenticationState).
+///
+/// The end user is identified by `iss` and `sub` together: `sub` is unique
+/// only within its issuer (OpenID Connect Core §2). A host that calls the
+/// UserInfo endpoint must check that the UserInfo `sub` equals this `sub`
+/// (Core §5.3.2).
+///
+/// After a refresh that returns an ID Token, `exp`, `iat`, and
+/// `additional_claims` come from the new ID Token. `auth_time` stays the
+/// original value, and `acr`, `amr`, and `azp` keep the original values when
+/// the new ID Token omits them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct IdTokenClaims {
+    /// Issuer identifier, compared exactly with the configured issuer.
+    pub iss: String,
+    /// Subject identifier, unique within `iss`.
+    pub sub: String,
+    /// Audiences, sorted and de-duplicated, so `"x"` and `["x"]` compare equal.
+    pub aud: Vec<String>,
+    /// Expiration time of the ID Token, in seconds since the Unix epoch.
+    pub exp: u64,
+    /// Time the ID Token was issued, in seconds since the Unix epoch.
+    pub iat: u64,
+    /// Time of the end-user authentication, in seconds since the Unix epoch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) azp: Option<String>,
+    pub auth_time: Option<u64>,
+    /// Authentication Context Class Reference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) auth_time: Option<u64>,
+    pub acr: Option<String>,
+    /// Authentication Methods References.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amr: Option<Vec<String>>,
+    /// Authorized party, the client ID when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub azp: Option<String>,
+    /// Every other claim of the ID Token, such as `nonce`, `email`, or
+    /// provider-specific claims, as JSON values.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub additional_claims: BTreeMap<String, Value>,
 }
 
 #[derive(Deserialize)]
@@ -111,22 +172,30 @@ struct StoredIdTokenClaims {
     iss: String,
     sub: String,
     aud: Audience,
+    exp: u64,
+    iat: u64,
     azp: Option<String>,
 }
 
-/// The `auth_time` claim of a stored ID Token, read separately from
-/// [`StoredIdTokenClaims`]. Versions up to 0.9.0 did not check `auth_time`,
-/// so a stored ID Token may carry a value that is not a non-negative integer,
-/// or the claim more than once. Either is read as absent instead of
-/// discarding the other claims.
-struct StoredAuthTime(Option<u64>);
+/// The `auth_time`, `acr`, and `amr` claims of a stored ID Token, read
+/// separately from [`StoredIdTokenClaims`]. Versions up to 0.9.0 did not check
+/// these claims, so a stored ID Token may carry a value of another type, a
+/// value nested too deeply to read as a [`Value`], or the claim more than
+/// once. Each claim is read from its raw JSON on its own, and any of these is
+/// read as absent instead of discarding the other claims.
+#[derive(Default)]
+struct StoredAuthenticationClaims {
+    auth_time: Option<u64>,
+    acr: Option<String>,
+    amr: Option<Vec<String>>,
+}
 
-impl<'de> Deserialize<'de> for StoredAuthTime {
+impl<'de> Deserialize<'de> for StoredAuthenticationClaims {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
         struct Visitor;
 
         impl<'de> de::Visitor<'de> for Visitor {
-            type Value = StoredAuthTime;
+            type Value = StoredAuthenticationClaims;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a JSON object")
@@ -135,19 +204,25 @@ impl<'de> Deserialize<'de> for StoredAuthTime {
             fn visit_map<A: MapAccess<'de>>(
                 self,
                 mut map: A,
-            ) -> std::result::Result<StoredAuthTime, A::Error> {
-                let mut values = Vec::new();
+            ) -> std::result::Result<StoredAuthenticationClaims, A::Error> {
+                let mut auth_time = Vec::new();
+                let mut acr = Vec::new();
+                let mut amr = Vec::new();
                 while let Some(key) = map.next_key::<String>()? {
-                    if key == "auth_time" {
-                        values.push(map.next_value::<Value>()?);
-                    } else {
-                        map.next_value::<IgnoredAny>()?;
+                    match key.as_str() {
+                        "auth_time" => auth_time.push(map.next_value::<Box<RawValue>>()?),
+                        "acr" => acr.push(map.next_value::<Box<RawValue>>()?),
+                        "amr" => amr.push(map.next_value::<Box<RawValue>>()?),
+                        _ => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
                     }
                 }
-                Ok(StoredAuthTime(match values.as_slice() {
-                    [value] => value.as_u64(),
-                    _ => None,
-                }))
+                Ok(StoredAuthenticationClaims {
+                    auth_time: single_value(auth_time),
+                    acr: single_value(acr),
+                    amr: single_value(amr),
+                })
             }
         }
 
@@ -155,50 +230,110 @@ impl<'de> Deserialize<'de> for StoredAuthTime {
     }
 }
 
-impl ValidatedIdTokenClaims {
-    fn new(
-        iss: String,
-        sub: String,
-        aud: Audience,
-        azp: Option<String>,
-        auth_time: Option<u64>,
-    ) -> Self {
-        let mut aud = match aud {
-            Audience::Single(audience) => vec![audience],
-            Audience::Multiple(audiences) => audiences,
-        };
-        aud.sort();
-        aud.dedup();
-        Self {
-            iss,
-            sub,
-            aud,
-            azp,
-            auth_time,
-        }
+/// Reads a claim that appeared exactly once as `T`, or `None` when it
+/// appeared more than once or its value cannot be read as `T`.
+fn single_value<T: DeserializeOwned>(values: Vec<Box<RawValue>>) -> Option<T> {
+    match values.as_slice() {
+        [value] => serde_json::from_str(value.get()).ok(),
+        _ => None,
     }
+}
 
+/// Decodes the payload segment of a compact JWT.
+fn jwt_payload(token: &str) -> Option<Vec<u8>> {
+    let mut segments = token.split('.');
+    let (Some(_), Some(payload), Some(_), None) = (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) else {
+        return None;
+    };
+    URL_SAFE_NO_PAD.decode(payload).ok()
+}
+
+/// Returns the claims of a JWT payload other than [`NAMED_CLAIMS`].
+///
+/// Each claim is read on its own, so that a claim whose value cannot be read
+/// as a [`Value`] does not hide the others: its entry is `None`. serde_json
+/// skips any well-formed value, but reads one into a [`Value`] only when it
+/// is nested at most 127 levels deep and holds no number out of range.
+fn additional_claims(payload: &[u8]) -> Option<BTreeMap<String, Option<Value>>> {
+    let claims: BTreeMap<String, Box<RawValue>> = serde_json::from_slice(payload).ok()?;
+    Some(
+        claims
+            .into_iter()
+            .filter(|(name, _)| !NAMED_CLAIMS.contains(&name.as_str()))
+            .map(|(name, value)| (name, serde_json::from_str(value.get()).ok()))
+            .collect(),
+    )
+}
+
+/// The most arrays and objects nested in one additional claim value.
+///
+/// serde_json reads at most 127 nested arrays and objects. Saved
+/// [`AuthenticationState`](crate::AuthenticationState) holds each additional
+/// claim three levels deep (the state, `id_token_claims`, and
+/// `additional_claims`), two levels deeper than the ID Token payload does, so
+/// a claim that the payload can hold may make the saved state unreadable.
+/// Claims nested deeper than this are not accepted.
+pub(crate) const MAX_ADDITIONAL_CLAIM_DEPTH: usize = 124;
+
+/// Whether an additional claim stays readable in saved state.
+fn claim_fits_saved_state(value: &Value) -> bool {
+    json_depth(value) <= MAX_ADDITIONAL_CLAIM_DEPTH
+}
+
+/// The number of arrays and objects nested in `value`, 0 for a scalar. The
+/// recursion is bounded because serde_json limits the nesting it reads.
+fn json_depth(value: &Value) -> usize {
+    match value {
+        Value::Array(values) => 1 + values.iter().map(json_depth).max().unwrap_or(0),
+        Value::Object(members) => 1 + members.values().map(json_depth).max().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn audiences(aud: Audience) -> Vec<String> {
+    let mut aud = match aud {
+        Audience::Single(audience) => vec![audience],
+        Audience::Multiple(audiences) => audiences,
+    };
+    aud.sort();
+    aud.dedup();
+    aud
+}
+
+impl IdTokenClaims {
     /// Reads the claims of an ID Token that this library already validated,
     /// such as the one kept in authentication state. The signature is not
     /// checked again. Returns `None` when the value is not a readable JWT.
+    ///
+    /// Earlier versions accepted additional claims nested too deeply to keep
+    /// in saved state (see [`MAX_ADDITIONAL_CLAIM_DEPTH`]), or even to read
+    /// as a [`Value`]. Such claims are left out, so that the identity and
+    /// authentication claims, which refresh compares, are still kept.
     pub(crate) fn read_stored(token: &str) -> Option<Self> {
-        let mut segments = token.split('.');
-        let (Some(_), Some(payload), Some(_), None) = (
-            segments.next(),
-            segments.next(),
-            segments.next(),
-            segments.next(),
-        ) else {
-            return None;
-        };
-        let payload = URL_SAFE_NO_PAD.decode(payload).ok()?;
+        let payload = jwt_payload(token)?;
         let claims: StoredIdTokenClaims = serde_json::from_slice(&payload).ok()?;
-        let auth_time = serde_json::from_slice::<StoredAuthTime>(&payload)
-            .ok()
-            .and_then(|auth_time| auth_time.0);
-        Some(Self::new(
-            claims.iss, claims.sub, claims.aud, claims.azp, auth_time,
-        ))
+        let authentication =
+            serde_json::from_slice::<StoredAuthenticationClaims>(&payload).unwrap_or_default();
+        Some(Self {
+            iss: claims.iss,
+            sub: claims.sub,
+            aud: audiences(claims.aud),
+            exp: claims.exp,
+            iat: claims.iat,
+            auth_time: authentication.auth_time,
+            acr: authentication.acr,
+            amr: authentication.amr,
+            azp: claims.azp,
+            additional_claims: additional_claims(&payload)?
+                .into_iter()
+                .filter_map(|(name, value)| Some((name, value.filter(claim_fits_saved_state)?)))
+                .collect(),
+        })
     }
 }
 
@@ -227,7 +362,7 @@ pub(crate) async fn validate_id_token(
     jwks_cache: &JwksCache,
     transport: &dyn HttpTransport,
     cancellation: CancellationHandle,
-) -> Result<ValidatedIdTokenClaims> {
+) -> Result<IdTokenClaims> {
     validate_id_token_with_clock(validation, jwks_cache, transport, cancellation, || {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -252,7 +387,7 @@ pub(crate) async fn validate_id_token_if_present(
     jwks_cache: &JwksCache,
     transport: &dyn HttpTransport,
     cancellation: CancellationHandle,
-) -> Result<Option<ValidatedIdTokenClaims>> {
+) -> Result<Option<IdTokenClaims>> {
     let Some(id_token) = id_token else {
         return Ok(None);
     };
@@ -287,7 +422,7 @@ async fn validate_id_token_with_clock(
     transport: &dyn HttpTransport,
     cancellation: CancellationHandle,
     clock: impl FnOnce() -> Result<u64>,
-) -> Result<ValidatedIdTokenClaims> {
+) -> Result<IdTokenClaims> {
     let IdTokenValidation {
         token,
         issuer,
@@ -362,7 +497,7 @@ async fn validate_id_token_with_clock(
     // still verifies the signature, algorithm, issuer, audience and required claims.
     validation.validate_exp = false;
     validation.validate_nbf = false;
-    let claims = decode::<IdTokenClaims>(token, &decoding_key, &validation)
+    let claims = decode::<JwtClaims>(token, &decoding_key, &validation)
         .map_err(|_| AuthError::InvalidIdToken("signature or required claims are invalid"))?
         .claims;
 
@@ -414,13 +549,35 @@ async fn validate_id_token_with_clock(
     {
         return Err(AuthError::InvalidIdToken("ID Token is not yet valid"));
     }
-    Ok(ValidatedIdTokenClaims::new(
-        claims.iss,
-        claims.sub,
-        claims.aud,
-        claims.azp,
-        claims.auth_time,
-    ))
+    let additional_claims = jwt_payload(token)
+        .as_deref()
+        .and_then(additional_claims)
+        .and_then(|claims| {
+            claims
+                .into_iter()
+                .map(|(name, value)| Some((name, value?)))
+                .collect::<Option<BTreeMap<_, _>>>()
+        })
+        .ok_or(AuthError::InvalidIdToken(
+            "signature or required claims are invalid",
+        ))?;
+    if !additional_claims.values().all(claim_fits_saved_state) {
+        return Err(AuthError::InvalidIdToken(
+            "ID Token claims are nested too deeply",
+        ));
+    }
+    Ok(IdTokenClaims {
+        iss: claims.iss,
+        sub: claims.sub,
+        aud: audiences(claims.aud),
+        exp: claims.exp,
+        iat: claims.iat,
+        auth_time: claims.auth_time,
+        acr: claims.acr,
+        amr: claims.amr,
+        azp: claims.azp,
+        additional_claims,
+    })
 }
 
 async fn load_jwks(
@@ -969,6 +1126,128 @@ pub(crate) mod tests {
             }
             assert_eq!(transport.request_count(), 1);
         }
+    }
+
+    #[tokio::test]
+    async fn returns_the_validated_claims_and_rejects_malformed_acr_and_amr() {
+        let now = 1_000_000;
+        let key = TestKey::es256("claims-key");
+        let cache = JwksCache::default();
+        let transport = TestTransport::new([jwks(&[&key])]);
+        async fn validate_claims(
+            claims: Value,
+            key: &TestKey,
+            cache: &JwksCache,
+            transport: &TestTransport,
+            now: u64,
+        ) -> Result<IdTokenClaims> {
+            let token = key.sign(claims);
+            let jwks_uri = jwks_uri();
+            validate_id_token_with_clock(
+                IdTokenValidation {
+                    token: &token,
+                    issuer: ISSUER,
+                    jwks_uri: &jwks_uri,
+                    client_id: "native-client",
+                    expected_nonce: Some("expected-nonce"),
+                    require_nonce: true,
+                },
+                cache,
+                transport,
+                CancellationHandle::new(),
+                || Ok(now),
+            )
+            .await
+        }
+
+        let mut claims = claims_at(now);
+        claims["aud"] = json!(["second", "native-client"]);
+        claims["azp"] = json!("native-client");
+        claims["auth_time"] = json!(now - 10);
+        claims["acr"] = json!("urn:example:loa:2");
+        claims["amr"] = json!(["pwd", "otp"]);
+        claims["email"] = json!("user@example.com");
+        claims["nbf"] = json!(now - 1);
+        let validated = validate_claims(claims, &key, &cache, &transport, now)
+            .await
+            .unwrap();
+        assert_eq!(
+            validated,
+            IdTokenClaims {
+                iss: ISSUER.to_owned(),
+                sub: "user-123".to_owned(),
+                aud: vec!["native-client".to_owned(), "second".to_owned()],
+                exp: now + 300,
+                iat: now,
+                auth_time: Some(now - 10),
+                acr: Some("urn:example:loa:2".to_owned()),
+                amr: Some(vec!["pwd".to_owned(), "otp".to_owned()]),
+                azp: Some("native-client".to_owned()),
+                additional_claims: BTreeMap::from([
+                    ("email".to_owned(), json!("user@example.com")),
+                    ("nbf".to_owned(), json!(now - 1)),
+                    ("nonce".to_owned(), json!("expected-nonce")),
+                ]),
+            }
+        );
+
+        for (claim, value) in [
+            ("acr", json!(1)),
+            ("acr", json!(null)),
+            ("acr", json!(["urn:example:loa:2"])),
+            ("amr", json!(null)),
+            ("amr", json!("pwd")),
+            ("amr", json!([1])),
+            ("amr", json!({})),
+        ] {
+            let mut claims = claims_at(now);
+            claims[claim] = value;
+            assert!(
+                matches!(
+                    validate_claims(claims, &key, &cache, &transport, now).await,
+                    Err(AuthError::InvalidIdToken(_))
+                ),
+                "accepted malformed {claim}"
+            );
+        }
+    }
+
+    #[test]
+    fn stored_id_tokens_with_unreadable_authentication_claims_keep_the_other_claims() {
+        // Versions up to 0.9.0 accepted ID Tokens without checking these claims.
+        let key = TestKey::rs256();
+        let mut claims = claims_at(1_000);
+        claims["acr"] = json!(1);
+        claims["amr"] = json!("pwd");
+        claims["auth_time"] = json!("not-a-number");
+        let stored = IdTokenClaims::read_stored(&key.sign(claims)).unwrap();
+        assert_eq!(stored.sub, "user-123");
+        assert_eq!(
+            (stored.auth_time, stored.acr, stored.amr),
+            (None, None, None)
+        );
+        assert_eq!(
+            stored.additional_claims,
+            BTreeMap::from([("nonce".to_owned(), json!("expected-nonce"))])
+        );
+
+        let payload = serde_json::to_string(&claims_at(1_000)).unwrap();
+        let duplicated = format!(
+            "{},\"acr\":\"a\",\"acr\":\"b\",\"amr\":[\"pwd\"]}}",
+            payload.strip_suffix('}').unwrap()
+        );
+        let stored = IdTokenClaims::read_stored(&key.sign_payload(duplicated.as_bytes())).unwrap();
+        assert_eq!(stored.acr, None);
+        assert_eq!(stored.amr, Some(vec!["pwd".to_owned()]));
+
+        let mut claims = claims_at(1_000);
+        claims["acr"] = json!(null);
+        claims["amr"] = json!(null);
+        let stored = IdTokenClaims::read_stored(&key.sign(claims)).unwrap();
+        assert_eq!(stored.sub, "user-123");
+        assert_eq!((stored.acr, stored.amr), (None, None));
+
+        assert_eq!(IdTokenClaims::read_stored("not.a.jwt"), None);
     }
 
     #[tokio::test]

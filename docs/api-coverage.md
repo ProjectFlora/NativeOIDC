@@ -51,7 +51,7 @@ languages](user-guide.md#supported-application-languages).
 | HTTP transport | `HttpTransport::execute`, `ReqwestTransport::new` | `NativeHttpTransport::execute`; supplied native implementations | Internal | Internal |
 | Error handling | `AuthError`, `Result` | `FfiError` and adapter errors | Result status/value/free | Exceptions from wrapper |
 | Local sign-out | Host | Host | Host | Host |
-| Validated ID Token claims (issuer, subject) | Not exposed; raw `TokenResponse::id_token` only ([#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)) | Not exposed; raw `FfiTokenResponse` ID Token only | Not exposed; raw ID Token in state JSON | Not exposed |
+| Validated ID Token claims (issuer, subject) | `AuthenticationState::id_token_claims`, `IdTokenClaims` | `FfiAuthenticationState::id_token_claims`, `FfiIdTokenClaims` | `native_oidc_windows_id_token_claims` with state JSON | `GetIdTokenClaims` |
 
 ## Public data and support types
 
@@ -61,6 +61,11 @@ and UniFFI facade. These records and enums form their input/output contracts:
 - Core `TokenResponse`: access token, type, optional lifetime/refresh token/
   scope/ID Token, and additional JSON-valued parameters. `RevocationTokenType`:
   `AccessToken` or `RefreshToken`. `AuthenticationState` implements Serde.
+- Core `IdTokenClaims` and UniFFI `FfiIdTokenClaims`: `iss`, `sub`, `aud`,
+  `exp`, `iat`, optional `auth_time`/`acr`/`amr`/`azp`, and the other claims
+  as JSON values (`FfiJsonParameter` in UniFFI). Bind accounts to `iss` and
+  `sub` together and compare a UserInfo `sub` with this `sub`; see
+  [Identify the signed-in user](user-guide.md#identify-the-signed-in-user).
 - Core `HttpRequest` and `HttpResponse`: method/URL or status, headers and body;
   `HttpTransport` and `ReqwestTransport` define execution. `CancellationHandle`
   is cloneable and has a default constructor.
@@ -84,8 +89,8 @@ and UniFFI facade. These records and enums form their input/output contracts:
   [Android source](../native/android/src/main/kotlin/net/projectflora/nativeoidc/AndroidAuthorizationAdapter.kt)
   and [internal redirect selection implementation](../native/android/src/main/kotlin/net/projectflora/nativeoidc/AndroidRedirectSelector.kt)
   (the selector is not public API).
-- All Windows handles, aliases, status constants, ten exported functions and
-  four wrapper methods are listed in the [Windows reference](windows-api.md).
+- All Windows handles, aliases, status constants, eleven exported functions
+  and five wrapper methods are listed in the [Windows reference](windows-api.md).
 
 ## Swift UniFFI Operation and Error Coverage
 
@@ -99,10 +104,10 @@ The test IDs below live in `SwiftTests/NativeOIDCTests/NativeOIDCTests.swift` an
 | Revocation (R) | R1–R7 | `NativeOIDC.revoke` |
 | Registration (G) | G1–G7 | `NativeOIDC.registerPublicClient` |
 | End session (E) | E1–E5 | `NativeOIDC.beginEndSession`, `FfiEndSessionSession.parseRedirect` |
-| State JSON (S) | S1–S2 | `FfiAuthenticationState.fromJson`, `FfiAuthenticationState.toJson` |
+| State JSON (S) | S1–S3 | `FfiAuthenticationState.fromJson`, `FfiAuthenticationState.toJson`, `FfiAuthenticationState.idTokenClaims` |
 | Cancellation (C) | C1–C5 | in-flight `FfiCancellationHandle` cancellation of `discover`, `revoke`, `registerPublicClient`, and `refresh` |
 
-Success paths: D1, R1, R2, G1, E1, and S1 assert the returned values (discovery endpoints, request method/URL/body, `client_id`, end-session state and additional parameters, and the `toJson`/`fromJson` round trip).
+Success paths: D1, R1, R2, G1, E1, S1, and S3 assert the returned values (discovery endpoints, request method/URL/body, `client_id`, end-session state and additional parameters, the `toJson`/`fromJson` round trip, and the ID Token claims of saved state).
 
 ### `FfiError` variants
 
@@ -145,10 +150,10 @@ so the JVM unit tests cannot load it.
 | Revocation (R) | R1–R7 | `revoke` |
 | Registration (G) | G1–G7 | `registerPublicClient` |
 | End session (E) | E1–E5 | `beginEndSession`, `FfiEndSessionSession.parseRedirect` |
-| State JSON (S) | S1–S2 | `FfiAuthenticationState.fromJson`, `FfiAuthenticationState.toJson` |
+| State JSON (S) | S1–S3 | `FfiAuthenticationState.fromJson`, `FfiAuthenticationState.toJson`, `FfiAuthenticationState.idTokenClaims` |
 | Cancellation (C) | C1–C5 | in-flight `FfiCancellationHandle` cancellation of `discover`, `revoke`, `registerPublicClient`, and `refresh` |
 
-Success paths: D1, R1, R2, G1, E1, and S1 assert the returned values (discovery endpoints, request method/URL/body, `client_id`, end-session state and additional parameters, and the `toJson`/`fromJson` round trip).
+Success paths: D1, R1, R2, G1, E1, S1, and S3 assert the returned values (discovery endpoints, request method/URL/body, `client_id`, end-session state and additional parameters, the `toJson`/`fromJson` round trip, and the ID Token claims of saved state).
 
 ### `FfiException` variants
 
@@ -181,6 +186,7 @@ Run the affected commands and record the commit/run URL when updating a guide.
 
 | Operation group | Explanation / existing example | Verification source | Language guides |
 | --- | --- | --- | --- |
+| Signed-in user (validated ID Token claims) | [Identify the signed-in user](user-guide.md#identify-the-signed-in-user) | Core/FFI state, refresh, and Windows ABI unit tests; Swift and Kotlin S3; Windows consumer fixtures (C++ and .NET read the claims of saved state) | Swift: [guide](swift-guide.md#signed-in-user); Kotlin: [guide](kotlin-guide.md#3-authorization-tokens-and-expiry); C++: [guide](windows-cpp-guide.md#signed-in-user); .NET: [guide](windows-dotnet-guide.md#signed-in-user) |
 | Configuration, authorize, callback, exchange, nonce | [Shared guide](user-guide.md), [Rust example](../examples/manual_authorization.rs), [native notes](../README.md#native-bindings) | [Protocol integration](../tests/protocol_integration.rs), core/FFI unit tests, native flow scripts below | Swift: [configuration](swift-guide.md#configuration-transport-and-callbacks), [authorization](swift-guide.md#authorization), [tokens](swift-guide.md#token-access-and-expiry); Kotlin: [guide](kotlin-guide.md#3-authorization-tokens-and-expiry); C++: [guide](windows-cpp-guide.md#3-authorization-tokens-and-expiry); .NET: [guide](windows-dotnet-guide.md#3-authorization-tokens-and-expiry) |
 | Tokens, expiry, save/restore, refresh | [State lifecycle](user-guide.md#save-restore-and-refresh), [Windows JSON example](../native/windows/README.md#token-refresh) | Core/FFI state and refresh unit tests; Windows consumer fixtures (C++ and .NET refresh success against a local mock provider) | Swift: [persistence](swift-guide.md#secure-state-persistence), [refresh](swift-guide.md#refresh); Kotlin: [guide](kotlin-guide.md#4-secure-persistence-and-restoration); C++: [guide](windows-cpp-guide.md#4-secure-persistence-and-restoration); .NET: [guide](windows-dotnet-guide.md#4-secure-persistence-and-restoration) |
 | End-session, revoke, local deletion | [Logout policy](user-guide.md#logout-revocation-and-local-deletion), [Windows examples](../native/windows/README.md#end-session) | Core/FFI and Windows unit tests; Windows consumer fixtures (C++ and .NET revoke success against a local mock provider; end-session error paths only) | Swift: [guide](swift-guide.md#end-session-and-revocation); Kotlin: [guide](kotlin-guide.md#6-end-session-revocation-and-local-sign-out); C++: [guide](windows-cpp-guide.md#6-end-session-revocation-and-local-sign-out); .NET: [guide](windows-dotnet-guide.md#6-end-session-revocation-and-local-sign-out) |

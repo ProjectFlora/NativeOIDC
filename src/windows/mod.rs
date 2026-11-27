@@ -17,7 +17,8 @@ pub use abi::{
     native_oidc_windows_authorization_result_value, native_oidc_windows_authorize,
     native_oidc_windows_cancellation_cancel, native_oidc_windows_cancellation_free,
     native_oidc_windows_cancellation_new, native_oidc_windows_end_session,
-    native_oidc_windows_refresh, native_oidc_windows_revoke, NativeOidcWindowsAuthorizationResult,
-    NativeOidcWindowsCancellationHandle, NativeOidcWindowsEndSessionResult,
+    native_oidc_windows_id_token_claims, native_oidc_windows_refresh, native_oidc_windows_revoke,
+    NativeOidcWindowsAuthorizationResult, NativeOidcWindowsCancellationHandle,
+    NativeOidcWindowsEndSessionResult, NativeOidcWindowsIdTokenClaimsResult,
     NativeOidcWindowsRefreshResult, NativeOidcWindowsRevocationResult,
 };

@@ -343,6 +343,14 @@ pub(super) async fn revoke_with_windows_request(
     Ok(())
 }
 
+/// Reads the validated ID Token claims of serialized authentication state as
+/// JSON: an object, or `null` when the state has no readable ID Token. State
+/// saved by earlier versions takes the claims from its stored ID Token.
+pub(super) fn id_token_claims_json(state_json: &str) -> serde_json::Result<String> {
+    let state: AuthenticationState = serde_json::from_str(state_json)?;
+    serde_json::to_string(&state.id_token_claims())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -864,6 +872,69 @@ mod tests {
                 assert_eq!(serde_json::to_string(&state).unwrap(), before);
             }
         }
+    }
+
+    #[test]
+    fn id_token_claims_json_reads_current_and_earlier_saved_state() {
+        use crate::id_token::tests::TestKey;
+
+        let key = TestKey::rs256();
+        let id_token = key.sign(serde_json::json!({
+            "iss": "https://idp.example",
+            "sub": "user-123",
+            "aud": "windows-client",
+            "exp": 2_000,
+            "iat": 1_000,
+            "acr": "urn:example:loa:2",
+            "email": "user@example.com",
+        }));
+        let expected = serde_json::json!({
+            "iss": "https://idp.example",
+            "sub": "user-123",
+            "aud": ["windows-client"],
+            "exp": 2_000,
+            "iat": 1_000,
+            "acr": "urn:example:loa:2",
+            "additional_claims": {"email": "user@example.com"},
+        });
+
+        // State saved before the claims were recorded.
+        let earlier = serde_json::json!({
+            "token_response": {
+                "access_token": "access",
+                "token_type": "Bearer",
+                "id_token": id_token,
+            },
+            "expires_at": null,
+        });
+        let claims = id_token_claims_json(&earlier.to_string()).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&claims).unwrap(),
+            expected
+        );
+
+        // State returned by authorize or refresh carries the claims.
+        let current: AuthenticationState = serde_json::from_value(earlier).unwrap();
+        let current = serde_json::to_string(&current).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&current).unwrap()["id_token_claims"],
+            expected
+        );
+        let claims = id_token_claims_json(&current).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&claims).unwrap(),
+            expected
+        );
+
+        let without_id_token = serde_json::json!({
+            "token_response": {"access_token": "access", "token_type": "Bearer"},
+            "expires_at": null,
+        });
+        assert_eq!(
+            id_token_claims_json(&without_id_token.to_string()).unwrap(),
+            "null"
+        );
+        assert!(id_token_claims_json("{}").is_err());
     }
 
     #[tokio::test]
