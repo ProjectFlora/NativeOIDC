@@ -271,7 +271,7 @@ impl FfiServiceConfiguration {
         transport: Arc<dyn NativeHttpTransport>,
         cancellation: Arc<FfiCancellationHandle>,
     ) -> std::result::Result<Arc<Self>, FfiError> {
-        let issuer = parse_url(&issuer, "issuer")?;
+        parse_url(&issuer, "issuer")?;
         let transport = NativeTransport { inner: transport };
         let inner =
             ServiceConfiguration::discover(issuer, &transport, cancellation.inner.clone()).await?;
@@ -284,7 +284,7 @@ impl FfiServiceConfiguration {
         issuer: String,
         jwks_uri: String,
     ) -> std::result::Result<Arc<Self>, FfiError> {
-        let issuer = parse_url(&issuer, "issuer")?;
+        parse_url(&issuer, "issuer")?;
         let jwks_uri = parse_url(&jwks_uri, "JWKS endpoint")?;
         let inner = self
             .inner
@@ -338,9 +338,9 @@ impl FfiServiceConfiguration {
         self.inner.revocation_endpoint().map(ToString::to_string)
     }
 
-    /// Returns the configured issuer URL, if any.
+    /// Returns the configured issuer identifier, if any, exactly as given.
     pub fn issuer(&self) -> Option<String> {
-        self.inner.issuer().map(ToString::to_string)
+        self.inner.issuer().map(ToOwned::to_owned)
     }
 
     /// Returns the configured JWKS URL, if any.
@@ -1285,6 +1285,188 @@ mod tests {
         drop(held);
         assert_eq!(state.to_json().await.unwrap(), before);
         assert!(transport.request.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn issuer_identifier_is_kept_exactly() {
+        for issuer in [
+            "https://idp.example",
+            "https://idp.example/",
+            "https://idp.example/tenant",
+        ] {
+            let configuration = FfiServiceConfiguration::new(
+                "https://idp.example/authorize".into(),
+                "https://idp.example/token".into(),
+            )
+            .unwrap()
+            .with_oidc_validation_endpoints(issuer.into(), "https://idp.example/keys".into())
+            .unwrap();
+            assert_eq!(configuration.issuer().as_deref(), Some(issuer));
+
+            for (metadata_issuer, accepted) in [
+                (issuer.to_owned(), true),
+                (
+                    issuer
+                        .strip_suffix('/')
+                        .map_or_else(|| format!("{issuer}/"), ToOwned::to_owned),
+                    false,
+                ),
+            ] {
+                let transport = Arc::new(RecordingTransport {
+                    request: Mutex::new(None),
+                    response: Ok(FfiHttpResponse {
+                        status: 200,
+                        headers: vec![],
+                        body: serde_json::to_vec(&serde_json::json!({
+                            "issuer": metadata_issuer,
+                            "authorization_endpoint": "https://idp.example/authorize",
+                            "token_endpoint": "https://idp.example/token",
+                        }))
+                        .unwrap(),
+                    }),
+                });
+                let result = FfiServiceConfiguration::discover(
+                    issuer.into(),
+                    transport.clone(),
+                    FfiCancellationHandle::new(),
+                )
+                .await;
+                let expected_url = if issuer.contains("/tenant") {
+                    "https://idp.example/tenant/.well-known/openid-configuration"
+                } else {
+                    "https://idp.example/.well-known/openid-configuration"
+                };
+                assert_eq!(
+                    transport.request.lock().unwrap().as_ref().unwrap().url,
+                    expected_url
+                );
+                if accepted {
+                    assert_eq!(result.unwrap().issuer().as_deref(), Some(issuer));
+                } else {
+                    assert!(result.is_err(), "{issuer} accepted {metadata_issuer}");
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_issuer_identifier_is_used_for_code_exchange_and_refresh() {
+        use crate::id_token::tests::{jwks, TestKey};
+
+        const ISSUER: &str = "https://idp.example";
+        let key = TestKey::rs256();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let id_token = |iss: &str, nonce: Option<&str>| {
+            let mut claims = serde_json::json!({
+                "iss": iss,
+                "sub": "user-123",
+                "aud": "native-client",
+                "exp": now + 300,
+                "iat": now,
+            });
+            if let Some(nonce) = nonce {
+                claims["nonce"] = nonce.into();
+            }
+            key.sign(claims)
+        };
+        let token_response = |id_token: String| {
+            serde_json::json!({
+                "access_token": "access",
+                "token_type": "Bearer",
+                "refresh_token": "refresh",
+                "id_token": id_token,
+            })
+        };
+        let transport = |bodies: Vec<serde_json::Value>| {
+            Arc::new(QueuedTransport {
+                bodies: Mutex::new(
+                    bodies
+                        .iter()
+                        .map(|body| serde_json::to_vec(body).unwrap())
+                        .collect(),
+                ),
+            })
+        };
+        let configuration = FfiServiceConfiguration::new(
+            "https://idp.example/authorize".into(),
+            "https://idp.example/token".into(),
+        )
+        .unwrap()
+        .with_oidc_validation_endpoints(ISSUER.into(), "https://idp.example/keys".into())
+        .unwrap();
+
+        let mut accepted_state = None;
+        for (iss, accepted) in [(ISSUER, true), ("https://idp.example/", false)] {
+            let mut options = authorization_options();
+            options.scopes = vec!["openid".into()];
+            let session_transport = transport(vec![]);
+            let session =
+                begin_authorization(configuration.clone(), options, session_transport.clone())
+                    .unwrap();
+            // The ID Token carries the nonce, which is only known once the
+            // session exists.
+            let nonce = session.nonce().unwrap();
+            session_transport.bodies.lock().unwrap().extend(
+                [token_response(id_token(iss, Some(&nonce))), jwks(&[&key])]
+                    .iter()
+                    .map(|body| serde_json::to_vec(body).unwrap()),
+            );
+            let url = Url::parse(&session.authorization_url()).unwrap();
+            let state = url
+                .query_pairs()
+                .find(|(name, _)| name == "state")
+                .unwrap()
+                .1
+                .into_owned();
+            let response = session
+                .parse_redirect(format!("com.example.app:/callback?code=code&state={state}"))
+                .unwrap();
+            let result = session
+                .exchange_code(response, FfiCancellationHandle::new())
+                .await;
+            if accepted {
+                accepted_state = Some(result.unwrap());
+            } else {
+                assert!(
+                    matches!(
+                        result,
+                        Err(FfiError::InvalidResponse(message))
+                            if message == "signature or required claims are invalid"
+                    ),
+                    "code exchange accepted iss {iss} for issuer {ISSUER}"
+                );
+            }
+        }
+
+        let state = accepted_state.unwrap();
+        for (iss, accepted) in [(ISSUER, true), ("https://idp.example/", false)] {
+            let before = state.to_json().await.unwrap();
+            let result = state
+                .refresh(
+                    configuration.clone(),
+                    "native-client".into(),
+                    vec![],
+                    transport(vec![token_response(id_token(iss, None)), jwks(&[&key])]),
+                    FfiCancellationHandle::new(),
+                )
+                .await;
+            if accepted {
+                result.unwrap();
+            } else {
+                assert!(
+                    matches!(
+                        result,
+                        Err(FfiError::InvalidResponse(message))
+                            if message == "signature or required claims are invalid"
+                    ),
+                    "refresh accepted iss {iss} for issuer {ISSUER}"
+                );
+                assert_eq!(state.to_json().await.unwrap(), before);
+            }
+        }
     }
 
     #[tokio::test]

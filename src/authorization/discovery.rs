@@ -3,7 +3,7 @@ use serde::Deserialize;
 use url::Url;
 
 use super::{
-    validation::{validate_endpoint, validate_issuer},
+    validation::{parse_issuer, validate_endpoint},
     ServiceConfiguration,
 };
 use crate::{
@@ -17,13 +17,20 @@ impl ServiceConfiguration {
     ///
     /// The transport must not follow redirects. Discovery is required when the
     /// issuer and JWKS endpoint are needed for ID Token validation.
+    ///
+    /// The issuer identifier is kept exactly as given: the metadata `issuer`
+    /// and later ID Token `iss` claims must be identical to it, so
+    /// `https://issuer.example` and `https://issuer.example/` are different
+    /// issuers. Both load `/.well-known/openid-configuration` from the same
+    /// URL. Passing a [`Url`] uses its serialization, which always has a path;
+    /// pass a string for an issuer without a path.
     pub async fn discover(
-        issuer: Url,
+        issuer: impl AsRef<str>,
         transport: &dyn HttpTransport,
         cancellation: CancellationHandle,
     ) -> Result<Self> {
-        validate_issuer(&issuer)?;
-        let discovery_url = oidc_discovery_url(&issuer)?;
+        let issuer = issuer.as_ref();
+        let discovery_url = oidc_discovery_url(&parse_issuer(issuer)?)?;
         let mut headers = HeaderMap::new();
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
         let request = HttpRequest {
@@ -43,7 +50,7 @@ impl ServiceConfiguration {
 
         let metadata: DiscoveryMetadata = serde_json::from_slice(&response.body)
             .map_err(|_| AuthError::InvalidDiscoveryMetadata("response is not valid JSON"))?;
-        if metadata.issuer != issuer.as_str() {
+        if metadata.issuer != issuer {
             return Err(AuthError::InvalidDiscoveryMetadata(
                 "issuer does not match the requested issuer",
             ));
@@ -78,7 +85,7 @@ impl ServiceConfiguration {
             revocation_endpoint,
             end_session_endpoint,
             registration_endpoint,
-            issuer: Some(issuer),
+            issuer: Some(issuer.to_owned()),
             jwks_uri,
             jwks_cache: JwksCache::default(),
         })
@@ -247,6 +254,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn discovery_compares_issuer_identifiers_as_exact_strings() {
+        for (requested, metadata_issuer, accepted) in [
+            ("https://issuer.example", "https://issuer.example", true),
+            ("https://issuer.example", "https://issuer.example/", false),
+            ("https://issuer.example/", "https://issuer.example/", true),
+            ("https://issuer.example/", "https://issuer.example", false),
+            (
+                "https://issuer.example/tenant",
+                "https://issuer.example/tenant",
+                true,
+            ),
+            (
+                "https://issuer.example/tenant",
+                "https://issuer.example/tenant/",
+                false,
+            ),
+            (
+                "https://issuer.example/tenant/",
+                "https://issuer.example/tenant/",
+                true,
+            ),
+            (
+                "https://issuer.example/tenant/",
+                "https://issuer.example/tenant",
+                false,
+            ),
+        ] {
+            let mut metadata = minimal_metadata();
+            metadata["issuer"] = Value::String(metadata_issuer.to_owned());
+            let transport = discovery_transport(&serde_json::to_vec(&metadata).unwrap());
+            let result =
+                ServiceConfiguration::discover(requested, &transport, CancellationHandle::new())
+                    .await;
+            let expected_path = if requested.contains("/tenant") {
+                "https://issuer.example/tenant/.well-known/openid-configuration"
+            } else {
+                "https://issuer.example/.well-known/openid-configuration"
+            };
+            assert_eq!(
+                transport
+                    .request
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .url
+                    .as_str(),
+                expected_path
+            );
+            if accepted {
+                assert_eq!(
+                    result.unwrap().issuer(),
+                    Some(requested),
+                    "{requested} vs {metadata_issuer}"
+                );
+            } else {
+                assert!(
+                    matches!(
+                        result,
+                        Err(AuthError::InvalidDiscoveryMetadata(
+                            "issuer does not match the requested issuer"
+                        ))
+                    ),
+                    "{requested} vs {metadata_issuer} must be rejected"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn discovery_allows_extensions_and_optional_endpoint_absence_for_oauth() {
         let mut metadata = minimal_metadata();
         metadata["provider_extension"] = serde_json::json!({"nested": [1, true, null]});
@@ -381,8 +458,8 @@ mod tests {
             "https://issuer.example/tenant/register"
         );
         assert_eq!(
-            configuration.issuer().unwrap().as_str(),
-            "https://issuer.example/tenant"
+            configuration.issuer(),
+            Some("https://issuer.example/tenant")
         );
         assert_eq!(
             configuration.jwks_uri().unwrap().as_str(),

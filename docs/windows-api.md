@@ -55,7 +55,10 @@ their operation endpoint with explicit configuration; a supplied operation
 endpoint overrides the discovered one. Endpoint URLs use HTTPS. Explicit
 authorization, token and revocation endpoints may also use loopback HTTP
 (`127.0.0.0/8`, `::1`, `localhost`); the issuer, discovered endpoints,
-end-session and JWKS endpoints require HTTPS.
+end-session and JWKS endpoints require HTTPS. The `issuer` string is used
+exactly as given and must match the provider's discovery `issuer` and the ID
+Token `iss` claim character for character; no trailing slash is added or
+removed.
 
 | Operation | Required operation fields | Optional fields |
 | --- | --- | --- |

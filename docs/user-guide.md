@@ -280,6 +280,16 @@ validation configuration; returned ID Tokens are verified before exposure.
 Optional end-session, revocation, and registration endpoints must be supported
 by the provider and discovered or explicitly configured before use.
 
+Pass the issuer identifier exactly as the provider publishes it, for example
+`https://accounts.google.com` (no path) or `https://idp.example/tenant/`. The
+identifier is kept as given and compared by simple string comparison with the
+discovery document's `issuer` and the ID Token `iss` claim (OpenID Connect
+Discovery §4.3, Core §3.1.3.7). No trailing slash is added or removed, so
+`https://idp.example` and `https://idp.example/` are different issuers, and
+`issuer()` returns the identifier as given. In Rust, `discover` and
+`with_oidc_validation_endpoints` take any `AsRef<str>`: pass a string for an
+issuer without a path, because a `Url` always serializes with one.
+
 Explicitly configured authorization, token, and revocation endpoints may also
 use loopback HTTP (`127.0.0.0/8`, `::1`, `localhost`). The issuer, JWKS,
 end-session, and registration endpoints, and every discovered endpoint,

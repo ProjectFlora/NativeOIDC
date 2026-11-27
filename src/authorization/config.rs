@@ -1,7 +1,7 @@
 use url::Url;
 
 use super::validation::{
-    validate_endpoint, validate_issuer, validate_logout_endpoint, validate_oidc_endpoint,
+    parse_issuer, validate_endpoint, validate_logout_endpoint, validate_oidc_endpoint,
     validate_registration_endpoint, validate_revocation_endpoint,
 };
 use crate::{id_token::JwksCache, Result};
@@ -14,7 +14,7 @@ pub struct ServiceConfiguration {
     pub(super) revocation_endpoint: Option<Url>,
     pub(super) end_session_endpoint: Option<Url>,
     pub(super) registration_endpoint: Option<Url>,
-    pub(super) issuer: Option<Url>,
+    pub(super) issuer: Option<String>,
     pub(super) jwks_uri: Option<Url>,
     pub(super) jwks_cache: JwksCache,
 }
@@ -60,10 +60,24 @@ impl ServiceConfiguration {
     }
 
     /// Configures the issuer and JWKS endpoint used to validate ID Tokens.
-    pub fn with_oidc_validation_endpoints(mut self, issuer: Url, jwks_uri: Url) -> Result<Self> {
-        validate_issuer(&issuer)?;
+    ///
+    /// The issuer identifier is kept exactly as given and compared with the ID
+    /// Token `iss` claim by simple string comparison, as OpenID Connect Core
+    /// requires. No trailing slash is added or removed, so
+    /// `https://issuer.example` and `https://issuer.example/` are different
+    /// issuers. Passing a [`Url`] uses its serialization, which always has a
+    /// path; pass a string for an issuer without a path. The issuer must be an
+    /// HTTPS URL without user info, query, fragment, whitespace, or control
+    /// characters.
+    pub fn with_oidc_validation_endpoints(
+        mut self,
+        issuer: impl AsRef<str>,
+        jwks_uri: Url,
+    ) -> Result<Self> {
+        let issuer = issuer.as_ref();
+        parse_issuer(issuer)?;
         validate_oidc_endpoint(&jwks_uri)?;
-        self.issuer = Some(issuer);
+        self.issuer = Some(issuer.to_owned());
         self.jwks_uri = Some(jwks_uri);
         self.jwks_cache = JwksCache::default();
         Ok(self)
@@ -94,9 +108,10 @@ impl ServiceConfiguration {
         self.registration_endpoint.as_ref()
     }
 
-    /// Returns the configured OIDC issuer, if any.
-    pub fn issuer(&self) -> Option<&Url> {
-        self.issuer.as_ref()
+    /// Returns the configured OIDC issuer identifier, if any, exactly as it is
+    /// compared with the ID Token `iss` claim.
+    pub fn issuer(&self) -> Option<&str> {
+        self.issuer.as_deref()
     }
 
     /// Returns the configured JWKS endpoint, if any.

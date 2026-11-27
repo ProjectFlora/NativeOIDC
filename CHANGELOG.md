@@ -16,6 +16,16 @@ interoperability testing and support policies are still evolving. Each release r
   Windows ABI
   ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)).
 
+### Fixed
+
+- The OIDC issuer identifier is kept exactly as the caller or the discovery
+  document gives it, and compared with the discovery `issuer` and the ID Token
+  `iss` claim by simple string comparison (OpenID Connect Discovery §4.3,
+  Core §3.1.3.7). Issuers without a path, such as `https://accounts.google.com`,
+  could not be used before, because the issuer was parsed as a URL whose
+  serialization always adds a trailing slash. A trailing-slash difference is
+  still rejected ([#261](https://github.com/ProjectFlora/NativeOIDC/issues/261)).
+
 ### Changed
 
 - Authentication-state JSON has a new optional `id_token_claims` object
@@ -25,6 +35,16 @@ interoperability testing and support policies are still evolving. Each release r
   this version. ID Token validation now rejects an `auth_time` claim that is
   not a non-negative integer, as it already did for `exp` and `iat`
   ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)).
+- Compatibility: `FfiServiceConfiguration.issuer()` (Swift, Kotlin) and Rust
+  `ServiceConfiguration::issuer()` return the identifier as given, so
+  `https://idp.example` is no longer returned as `https://idp.example/`.
+  Swift, Kotlin, and Windows JSON callers that passed `https://idp.example`
+  for a provider whose issuer is `https://idp.example/` must pass the
+  provider's exact identifier. In Rust, `ServiceConfiguration::discover` and
+  `with_oidc_validation_endpoints` take `impl AsRef<str>` for the issuer
+  (existing `Url` arguments still compile and behave as before), and
+  `ServiceConfiguration::issuer()` returns `Option<&str>` instead of
+  `Option<&Url>` ([#261](https://github.com/ProjectFlora/NativeOIDC/issues/261)).
 
 ### Documentation
 

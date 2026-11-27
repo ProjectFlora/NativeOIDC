@@ -19,8 +19,8 @@ final class NativeOIDCTests: XCTestCase {
             issuer: "https://idp.example",
             jwksUri: "https://idp.example/.well-known/jwks.json"
         )
-        // The issuer is normalized with a trailing slash.
-        XCTAssertEqual(withValidation.issuer(), "https://idp.example/")
+        // The issuer identifier is kept exactly; no trailing slash is added.
+        XCTAssertEqual(withValidation.issuer(), "https://idp.example")
         XCTAssertEqual(withValidation.jwksUri(), "https://idp.example/.well-known/jwks.json")
     }
 
