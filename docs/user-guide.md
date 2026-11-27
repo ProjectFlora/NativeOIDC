@@ -389,8 +389,9 @@ is kept. Otherwise refresh fails as for any invalid ID Token, and the state
 is unchanged. State saved by v0.9.0 or earlier has no `id_token_claims`; it
 takes them from its stored ID Token when it is restored, so no
 reauthentication is needed. State saved with the earlier form of
-`id_token_claims`, without `exp` and `iat`, also takes them from its stored
-ID Token. A stored `auth_time` that is not a non-negative integer, an `acr`
+`id_token_claims`, without `exp` and `iat`, keeps its `iss`, `sub`, `aud`,
+`azp`, and `auth_time`, and takes the other claims from its stored ID Token.
+A stored `auth_time` that is not a non-negative integer, an `acr`
 that is not a string, or an `amr` that is not an array of strings, or any of
 them appearing more than once, is treated as absent there; the other claims
 are still kept. If that

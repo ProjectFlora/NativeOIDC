@@ -91,8 +91,23 @@ struct JwtClaims {
     nonce: Option<String>,
     azp: Option<String>,
     auth_time: Option<u64>,
+    // A present acr must be a string and a present amr an array of strings
+    // (OIDC Core §2), so an explicit null is rejected rather than read as
+    // absent.
+    #[serde(default, deserialize_with = "present")]
     acr: Option<String>,
+    #[serde(default, deserialize_with = "present")]
     amr: Option<Vec<String>>,
+}
+
+/// Deserializes a member that, when present, must hold a `T`. Absence is
+/// handled by `#[serde(default)]`; an explicit JSON null is an error.
+fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 /// Claims that [`IdTokenClaims`] keeps in named fields rather than in
@@ -1124,7 +1139,9 @@ pub(crate) mod tests {
 
         for (claim, value) in [
             ("acr", json!(1)),
+            ("acr", json!(null)),
             ("acr", json!(["urn:example:loa:2"])),
+            ("amr", json!(null)),
             ("amr", json!("pwd")),
             ("amr", json!([1])),
             ("amr", json!({})),
@@ -1168,6 +1185,13 @@ pub(crate) mod tests {
         let stored = IdTokenClaims::read_stored(&key.sign_payload(duplicated.as_bytes())).unwrap();
         assert_eq!(stored.acr, None);
         assert_eq!(stored.amr, Some(vec!["pwd".to_owned()]));
+
+        let mut claims = claims_at(1_000);
+        claims["acr"] = json!(null);
+        claims["amr"] = json!(null);
+        let stored = IdTokenClaims::read_stored(&key.sign(claims)).unwrap();
+        assert_eq!(stored.sub, "user-123");
+        assert_eq!((stored.acr, stored.amr), (None, None));
 
         assert_eq!(IdTokenClaims::read_stored("not.a.jwt"), None);
     }

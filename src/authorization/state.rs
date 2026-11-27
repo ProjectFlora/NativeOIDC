@@ -40,8 +40,10 @@ pub struct TokenResponse {
 /// The state keeps the claims of its validated ID Token
 /// ([`IdTokenClaims`], read with [`Self::id_token_claims`]) so that refresh
 /// can reject a returned ID Token for a different identity. State saved
-/// without these claims, or with claims in an older form, takes them from its
-/// stored ID Token when it is deserialized.
+/// without these claims takes them from its stored ID Token when it is
+/// deserialized. State saved with claims in an earlier form keeps their
+/// identity and `auth_time`, and takes the other claims from its stored ID
+/// Token.
 #[derive(Serialize, Deserialize)]
 #[serde(from = "SerializedAuthenticationState")]
 pub struct AuthenticationState {
@@ -61,29 +63,70 @@ struct SerializedAuthenticationState {
     expires_at: Option<u64>,
     #[serde(default)]
     oidc_nonce: Option<String>,
-    /// Read as JSON first, so that claims in a form this version cannot
-    /// read fall back to the stored ID Token instead of failing.
+    /// Read as JSON first, so that claims in the earlier form can be
+    /// migrated, and claims in a form this version cannot read fall back to
+    /// the stored ID Token instead of failing.
     #[serde(default)]
     id_token_claims: Option<Value>,
 }
 
 impl From<SerializedAuthenticationState> for AuthenticationState {
     fn from(serialized: SerializedAuthenticationState) -> Self {
-        // State saved before the claims were recorded, or with claims in an
-        // older form (without `exp` and `iat`), takes its baseline from the
-        // ID Token it stores, which this library validated when it was
-        // returned. Without a readable stored ID Token, the next ID Token
-        // validated on refresh becomes the baseline.
-        let id_token_claims = serialized
-            .id_token_claims
-            .and_then(|claims| serde_json::from_value(claims).ok())
-            .or_else(|| stored_id_token_claims(&serialized.token_response));
+        let id_token_claims =
+            restored_id_token_claims(serialized.id_token_claims, &serialized.token_response);
         Self {
             token_response: serialized.token_response,
             expires_at: serialized.expires_at,
             oidc_nonce: serialized.oidc_nonce,
             id_token_claims,
         }
+    }
+}
+
+/// The identity record saved by the first version that recorded ID Token
+/// claims, before `exp`, `iat`, `acr`, `amr`, and the additional claims were
+/// added.
+#[derive(Deserialize)]
+struct EarlierIdTokenClaims {
+    iss: String,
+    sub: String,
+    aud: Vec<String>,
+    #[serde(default)]
+    azp: Option<String>,
+    #[serde(default)]
+    auth_time: Option<u64>,
+}
+
+/// Returns the claims of restored state.
+///
+/// Claims saved in the current form are used as they are. Claims saved in
+/// the earlier form keep their identity and `auth_time` baseline, which may
+/// come from an ID Token that a later refresh replaced, and take the other
+/// claims from the stored ID Token. State saved before the claims were
+/// recorded takes them from its stored ID Token, which this library
+/// validated when it was returned. Without a readable stored ID Token, the
+/// next ID Token validated on refresh becomes the baseline.
+fn restored_id_token_claims(
+    saved: Option<Value>,
+    token_response: &TokenResponse,
+) -> Option<IdTokenClaims> {
+    let Some(saved) = saved else {
+        return stored_id_token_claims(token_response);
+    };
+    if let Ok(claims) = IdTokenClaims::deserialize(&saved) {
+        return Some(claims);
+    }
+    let stored = stored_id_token_claims(token_response);
+    match (EarlierIdTokenClaims::deserialize(&saved), stored) {
+        (Ok(earlier), Some(stored)) => Some(IdTokenClaims {
+            iss: earlier.iss,
+            sub: earlier.sub,
+            aud: earlier.aud,
+            azp: earlier.azp,
+            auth_time: earlier.auth_time,
+            ..stored
+        }),
+        (_, stored) => stored,
     }
 }
 
@@ -630,6 +673,64 @@ mod tests {
                 "refreshed ID Token subject does not match the original"
             ))
         ));
+    }
+
+    #[tokio::test]
+    async fn state_saved_with_earlier_claims_keeps_their_auth_time_and_azp_baseline() {
+        // After a refresh, the stored ID Token can omit auth_time and azp
+        // while the earlier record still holds the original values.
+        let key = TestKey::rs256();
+        let auth_time = unix_now() - 10;
+        let mut stored_claims = id_token_claims("user-123", None);
+        stored_claims["acr"] = serde_json::json!("urn:example:loa:2");
+        stored_claims["email"] = serde_json::json!("user@example.com");
+        let state = oidc_state(Some(key.sign(stored_claims.clone())));
+        let mut serialized = serde_json::to_value(&state).unwrap();
+        serialized["id_token_claims"] = serde_json::json!({
+            "iss": "https://issuer.example/",
+            "sub": "user-123",
+            "aud": ["native-client"],
+            "azp": "native-client",
+            "auth_time": auth_time,
+        });
+
+        let mut restored: AuthenticationState = serde_json::from_value(serialized).unwrap();
+        assert_eq!(
+            serde_json::to_value(&restored).unwrap()["id_token_claims"],
+            serde_json::json!({
+                "iss": "https://issuer.example/",
+                "sub": "user-123",
+                "aud": ["native-client"],
+                "exp": stored_claims["exp"],
+                "iat": stored_claims["iat"],
+                "auth_time": auth_time,
+                "acr": "urn:example:loa:2",
+                "azp": "native-client",
+                "additional_claims": {"email": "user@example.com"},
+            })
+        );
+
+        let other_auth_time = key.sign(id_token_claims("user-123", Some(auth_time + 1)));
+        let transport = refresh_transport(Some(&other_auth_time), &key);
+        assert!(matches!(
+            refresh_with(&mut restored, "https://issuer.example/", &transport).await,
+            Err(AuthError::InvalidIdToken(
+                "refreshed ID Token auth_time does not match the original"
+            ))
+        ));
+
+        let refreshed_claims = id_token_claims("user-123", None);
+        let refreshed = key.sign(refreshed_claims.clone());
+        let transport = refresh_transport(Some(&refreshed), &key);
+        refresh_with(&mut restored, "https://issuer.example/", &transport)
+            .await
+            .unwrap();
+        let claims = restored.id_token_claims().unwrap();
+        assert_eq!(claims.auth_time, Some(auth_time));
+        assert_eq!(claims.azp.as_deref(), Some("native-client"));
+        assert_eq!(claims.acr.as_deref(), Some("urn:example:loa:2"));
+        assert_eq!(claims.exp, refreshed_claims["exp"].as_u64().unwrap());
+        assert!(claims.additional_claims.is_empty());
     }
 
     #[tokio::test]
