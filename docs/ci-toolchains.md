@@ -66,9 +66,8 @@ never change a `rust-cache` key.
 | Version | Where it lives | Intent |
 |---|---|---|
 | `26.6` (the action's `version` default) | every Apple job of `release.yml` and `release-consumer.yml` calls the action without a `version` input | App Store Connect requires apps built with Xcode 26 or later (Issue #135), so the archive is built and validated with a stable Xcode 26.x — the one the `macos-26` image ships as its default, so no extra download |
-| `16` | the `macos-15` lane of `ci.yml` `apple_adapters` | the newest installed 16-series Xcode (16.4) on the oldest Apple host image; the lane validates the iOS 18 minimum and the macOS 15 host (Issue #284) |
 | `26` | the 26-series lane of `ci.yml` `apple_adapters` (on `macos-latest`) | the stable 26-series Xcode (26.6 today). A bare major resolves to the newest installed stable of that series, and the step fails when the series is absent from the runner image — the tripwire that re-selects the lane's runner when, e.g., `macos-latest` moves to a 27-series host image (Issue #284) |
-| `27` | the 27-series lane of `ci.yml` `apple_adapters` (on the `xcode-27` image) | the stable 27-series Xcode (27.2 today); the image is generally available (2026-10-15) and the lane validates the latest generation, because Xcode 27's runtime catalog no longer offers the iOS 18.x runtimes (Issue #284) |
+| `27` | the 27-series lane of `ci.yml` `apple_adapters` (on the `xcode-27` image) | the stable 27-series Xcode (27.2 today); the image is generally available (2026-10-15) and the lane validates the latest generation in CI, because Xcode 27's `-downloadPlatform` CLI finds no runtime older than iOS 26 (a known issue; the GUI installs them, but CI runs headless), so the iOS 18 minimum is validated by the 26-series lane instead (Issue #284) |
 
 The `version` input is a semver version or range (maxim-lobanov
 setup-xcode): an exact version matches itself, a bare major the newest

@@ -122,7 +122,8 @@ for a required check. A skip is therefore safe only when it was intended,
 which the workflow checks in two places:
 
 - **`Apple adapters validation`** (required) collects all of its matrix
-  configurations (the Apple job runs them as one job). It passes when all
+  configurations (each configuration runs as its own `apple_adapters`
+  job; the required check aggregates their results). It passes when all
   pass, or when the job was skipped because the selection set `apple` to
   `false`.
 - **`CI result`** collects every job. It passes only when each job either

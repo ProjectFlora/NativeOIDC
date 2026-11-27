@@ -3,7 +3,7 @@ description: |-
   Selects the Xcode a job builds with, via maxim-lobanov/setup-xcode. The
   `version` input is a semver version or range: an exact version (the
   release pipeline's 26.6 pin) or a bare major (the ci.yml Apple lanes pass
-  their series — 16, 26, 27 — to select the newest installed stable of that
+  their series — 26, 27 — to select the newest installed stable of that
   series, #284). The step fails when no installed Xcode matches; nothing is
   downloaded. Where the pins live and how to change them:
   docs/ci-toolchains.md.

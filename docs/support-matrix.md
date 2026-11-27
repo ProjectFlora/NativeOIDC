@@ -34,8 +34,8 @@ Completing #60 does not satisfy those remaining 1.0.0 readiness gates.
 
 | Platform | Settled minimum / policy | Release targets and package | CI validation and limits |
 | --- | --- | --- | --- |
-| iOS / iPadOS | 18; recheck Apple's security-update generations before 1.0.0 | `aarch64-apple-ios` device and `aarch64-apple-ios-sim` simulator; XCFramework; deployment target 18.0 | Build both targets and type-check adapters. Regular CI runs four configurations (#284): the stable 26-series Xcode (currently 26.6) on `macos-latest` (currently the macOS 26 Arm64 image) with an installed iOS 18.6 runtime and with the latest 26.x runtime; the stable 27-series Xcode (currently 27.2) on the `xcode-27` image (macOS 27) with the latest 27.x runtime; and the 16-series Xcode (16.4) on `macos-15` with the oldest bundled iOS 18.x runtime, which also validates the macOS 15 host. Each lane selects its stable Xcode major explicitly, and a missing series fails the job. Xcode 27's simulator runtime catalog no longer offers the iOS 18.x runtimes for download (probed 2026-11-28 on Xcode 27.2), so the 27-series lane validates the latest generation only; iOS 18 is validated by the 26- and 16-series lanes. Release builds use Xcode 26.6 on `macos-26` and run the iOS flow on an iOS 18.6 runtime the release workflow installs, because that image ships no iOS 18 runtime; the release and published-release consumer checks use the same Xcode. Missing requested runtimes fail; actual runtimes are logged. Latest means the newest available runtime on the hosted image, which can lag Apple's release. Package consumer links an iOS simulator library and runs on macOS, not on iOS. No exact 18.0, iPad, or physical-device execution claim. |
-| macOS | 15; recheck Apple's security-update generations before 1.0.0 | `aarch64-apple-darwin` and `x86_64-apple-darwin`; universal XCFramework slice; deployment target 15.0 | `macos-15` host in regular CI (the 26- and 27-series Apple lanes additionally run the host checks on their macOS 26/27 hosts, #284; release builds and consumer checks run on a `macos-26` host); build both architectures, run mock loopback flow and package consumer on the host architecture. Building the other architecture does not verify execution on it; real system-browser flow is not automated and is checked by the manual [real system-browser verification](real-browser-verification.md). |
+| iOS / iPadOS | 18; recheck Apple's security-update generations before 1.0.0 | `aarch64-apple-ios` device and `aarch64-apple-ios-sim` simulator; XCFramework; deployment target 18.0 | Build both targets and type-check adapters. Regular CI runs three configurations (#284): the stable 26-series Xcode (currently 26.6) on `macos-latest` (currently the macOS 26 Arm64 image) with an installed iOS 18.6 runtime and with the latest 26.x runtime; and the stable 27-series Xcode (currently 27.2) on the `xcode-27` image (macOS 27) with the latest 27.x runtime. Each lane selects its stable Xcode major explicitly, and a missing series fails the job. Xcode 27's `xcodebuild -downloadPlatform` CLI finds no runtime older than iOS 26 (a known issue, reported on Apple's developer forums and reproduced on Xcode 27.2 on 2026-11-28; the same runtimes are installable from Xcode's Settings > Components GUI, but CI runs headless), so the 27-series lane validates the latest generation only in CI; the iOS 18 minimum is validated by the 26-series lane, whose CLI installs 18.6. The legacy 16-series lane was removed from regular CI with this change: the validation targets only the 26- and 27-series Xcode, and the macOS 15 host check is not required (#284 scope correction, 2026-11-28). Release builds use Xcode 26.6 on `macos-26` and run the iOS flow on an iOS 18.6 runtime the release workflow installs, because that image ships no iOS 18 runtime; the release and published-release consumer checks use the same Xcode. Missing requested runtimes fail; actual runtimes are logged. Latest means the newest available runtime on the hosted image, which can lag Apple's release. Package consumer links an iOS simulator library and runs on macOS, not on iOS. No exact 18.0, iPad, or physical-device execution claim. |
+| macOS | 15; recheck Apple's security-update generations before 1.0.0 | `aarch64-apple-darwin` and `x86_64-apple-darwin`; universal XCFramework slice; deployment target 15.0 | Apple lanes in regular CI run on the macOS 26/27 hosts their images provide (#284; the `macos-15` host is no longer used in regular CI); release builds and consumer checks run on a `macos-26` host. Build both architectures, run mock loopback flow and package consumer on the host architecture (macOS 26/27 in regular CI). Building the other architecture does not verify execution on it; real system-browser flow is not automated and is checked by the manual [real system-browser verification](real-browser-verification.md). |
 | Android | API 28 (Android 9); device-reach decision, not a security-patch guarantee; reassess reach, security bulletin, and dependencies before 1.0.0 | `aarch64-linux-android` / `arm64-v8a` and `x86_64-linux-android` / `x86_64`; AAR; Gradle minSdk and NDK API level 28 | Ubuntu host; regular CI runs the adapter and package-consumer tests on two x86_64 `google_apis_playstore` emulators, API 28 (minSdk) and API 35 (compileSdk and consumer targetSdk), one after the other in the `Android adapters validation` job. Release workflows run the consumer test on API 28 only. Verify both native libraries in AAR. arm64 device execution is unverified. compileSdk 35 is a build requirement, not the runtime minimum. |
 | Windows | Microsoft-supported client versions, reviewed each release; concrete edition/version list in README's dated policy | `x86_64-pc-windows-msvc`; DLL, import library, C header, and .NET wrapper ZIP | `windows-latest` Server runner builds/tests and runs C++/.NET consumers. Regular CI also transfers the same package to `windows-11-arm` and runs x64 C++/.NET consumers under emulation, verifying a Windows 11 client host and logging OS/build/image. This adds neither a native ARM64 distribution target nor native x64 client-hardware coverage. Browser callbacks remain simulated in CI; real system-browser flow is checked by the manual [real system-browser verification](real-browser-verification.md). |
 
@@ -56,17 +56,17 @@ Configuration evidence:
   (the `macos-latest` label currently supplies it, checked 2026-11-28; when
   GitHub moves the label to a 27-series host image, re-select the runner the
   26-series lane uses — its explicit 26 selection fails first, so the
-  re-selection is visible), and [macOS 15 image](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md).
-  The Apple lanes select their stable Xcode major explicitly
-  ([`setup-xcode`](../.github/actions/setup-xcode/action.yml),
+  re-selection is visible). The Apple lanes select their stable Xcode major
+  explicitly ([`setup-xcode`](../.github/actions/setup-xcode/action.yml),
   [CI toolchains](ci-toolchains.md#xcode-setup-xcode)), and the iOS 18
   runtime is installed with
   [`install-ios-simulator-runtime.sh`](../scripts/install-ios-simulator-runtime.sh)
   where the image ships none.
-  Xcode 27's simulator runtime catalog no longer offers the iOS 18.x runtimes
-  (probed on Xcode 27.2 on 2026-11-28: `xcodebuild -downloadPlatform iOS
-  -buildVersion 18.x` reports "not available for download"), so the 27-series
-  lane validates the latest generation only. Apple's
+  Xcode 27's `xcodebuild -downloadPlatform` CLI finds no runtime older than
+  iOS 26 (reproduced on Xcode 27.2 on 2026-11-28: `-buildVersion 18.6`
+  reports "not available for download"; a known issue — the same runtimes
+  are installable from the Settings > Components GUI, but CI runs headless),
+  so the 27-series lane validates the latest generation only in CI. Apple's
   [Xcode system requirements](https://developer.apple.com/xcode/system-requirements)
   table is the compatibility source (checked 2026-11-28: Simulator iOS 17 or
   later for Xcode 27.x, iOS 15 or later for Xcode 26.x).
@@ -75,16 +75,17 @@ Configuration evidence:
   workflows selects it.
 - Apple lane verification record (#284):
   [PR CI run 46056641141](https://github.com/ProjectFlora/NativeOIDC/actions/runs/46056641141)
-  at `924e7c5`, validated 2026-11-28. All four configurations passed, and each
-  lane asserted the effective Xcode major before any build:
+  at `924e7c5`, validated 2026-11-28. Each lane asserted the effective
+  Xcode major before any build:
   - 26-series (`macos-latest`): image `macos-26-arm64-20261123.0526`,
     macOS 26.7.2 (25G332), Xcode 26.6 (17F113); the iOS 18.6 (installed) and
     iOS 26.5 flows.
   - 27-series (`xcode-27`): image `xcode-27-arm64-20261123.0387`,
     macOS 27.0.1 (26A434), Xcode 27.2 (27B52); the iOS 27.2 flow.
-  - 16-series (`macos-15`): image `macos-15-arm64-20261123.0558`,
-    macOS 15.8.2 (24H232), Xcode 16.4 (16F6); the oldest bundled 18.x (18.5)
-    flow.
+
+  (The 16-series configuration also passed in that run; its lane was removed
+  from the matrix by the scope correction, and this record is re-pointed at
+  the first run of the final matrix.)
 - Apple targets and deployment settings:
   [target builds, XCFramework packaging and slice assertions](../scripts/package-apple-xcframework.sh),
   [simulator selection](../scripts/check-ios-authorization-flow.sh).

@@ -142,18 +142,15 @@ jobs:
             ios_simulator: latest
           # The 27-series lane (#284): the GA xcode-27 image (macOS 27)
           # ships the 27.x Xcodes and iOS 27.x runtimes only. Xcode 27's
-          # runtime catalog no longer offers the iOS 18.x runtimes for
-          # download (probed on Xcode 27.2 on 2026-11-28), so the 27 series
-          # validates the latest generation only; the minimum (iOS 18)
-          # stays with the 26- and 16-series lanes.
+          # -downloadPlatform CLI finds no runtime older than iOS 26 (a
+          # known issue, Apple developer forums thread 847134; the Settings
+          # > Components GUI installs them, but this lane runs headless),
+          # so the 27 series validates the latest generation only; the
+          # minimum (iOS 18) is validated by the 26-series lane, whose CLI
+          # installs 18.6.
           - xcode: '27'
             runner: xcode-27
             ios_simulator: latest
-          # The 16-series lane on the `macos-15` host (#284): the oldest
-          # bundled iOS 18.x runtime and the macOS 15 host, as before.
-          - xcode: '16'
-            runner: macos-15
-            ios_simulator: '18'
     env:
       IOS_SIMULATOR_MAJOR_VERSION: ${{ matrix.ios_simulator }}
     steps:
@@ -180,8 +177,7 @@ jobs:
           fi
       # The 26-series image ships no iOS 18 runtime (its runtimes are 26.x
       # only), so the 18 configuration installs one, as the release
-      # workflow does on `macos-26`. The 16-series image bundles the 18.x
-      # runtimes, and the 27 series has no 18 configuration.
+      # workflow does on `macos-26`. The 27 series has no 18 configuration.
       - name: Install the iOS 18 simulator runtime
         if: matrix.xcode == '26' && matrix.ios_simulator == '18'
         run: scripts/install-ios-simulator-runtime.sh 18.6
@@ -241,7 +237,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Require both iOS configurations to pass, or an intended skip
+      - name: Require all matrix configurations to pass, or an intended skip
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 scripts/select_ci_jobs.py verify
