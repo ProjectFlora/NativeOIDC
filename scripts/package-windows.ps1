@@ -2,7 +2,8 @@
 # the header, the .NET wrapper, LICENSE and the license notices at the zip
 # root. Run scripts/generate-third-party-licenses.sh first (from bash, with
 # the same Rust toolchain); the package takes its notices from
-# target/licenses/.
+# target/licenses/. Fails when the DLL's version resource does not name
+# NativeOIDC at the crate version.
 param(
     [Parameter(Mandatory = $true)]
     [string]$Package
@@ -22,10 +23,42 @@ try {
 
     cargo build --locked --release --lib --target x86_64-pc-windows-msvc
     if ($LASTEXITCODE -ne 0) { throw "Windows release build failed: $LASTEXITCODE" }
+    $target = "target/x86_64-pc-windows-msvc/release"
+
+    # The version resource that build.rs links into the DLL (Issue #258):
+    # SignPath enforces the product name and version of signed binaries, so
+    # a DLL without them, or with another crate version, is not packaged.
+    $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed: $LASTEXITCODE" }
+    $crateVersion = ($metadata.packages | Where-Object { $_.name -eq "native-oidc" }).version
+    if (-not $crateVersion) { throw "cargo metadata has no native-oidc package." }
+    $numericVersion = ($crateVersion -split "[-+]")[0] + ".0"
+    $dll = (Resolve-Path "$target/native_oidc.dll").Path
+    $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($dll)
+    $expected = [ordered]@{
+        ProductName      = "NativeOIDC"
+        ProductVersion   = $crateVersion
+        FileVersion      = $crateVersion
+        CompanyName      = "ProjectFlora"
+        FileDescription  = "NativeOIDC OAuth 2.0 and OpenID Connect client library"
+        OriginalFilename = "native_oidc.dll"
+        InternalName     = "native_oidc"
+        LegalCopyright   = "Copyright ProjectFlora. Licensed under the Apache License, Version 2.0."
+    }
+    foreach ($field in $expected.Keys) {
+        if ($versionInfo.$field -ne $expected[$field]) {
+            throw "native_oidc.dll version resource has $field '$($versionInfo.$field)', expected '$($expected[$field])'."
+        }
+    }
+    $numericFile = "$($versionInfo.FileMajorPart).$($versionInfo.FileMinorPart).$($versionInfo.FileBuildPart).$($versionInfo.FilePrivatePart)"
+    $numericProduct = "$($versionInfo.ProductMajorPart).$($versionInfo.ProductMinorPart).$($versionInfo.ProductBuildPart).$($versionInfo.ProductPrivatePart)"
+    if ($numericFile -ne $numericVersion -or $numericProduct -ne $numericVersion) {
+        throw "native_oidc.dll numeric version is $numericFile (product $numericProduct), expected $numericVersion."
+    }
+    Write-Output "native_oidc.dll version resource: $($versionInfo.ProductName) $($versionInfo.ProductVersion) ($numericFile)"
 
     New-Item -ItemType Directory -Force "$Package/include" | Out-Null
     New-Item -ItemType Directory -Force "$Package/dotnet" | Out-Null
-    $target = "target/x86_64-pc-windows-msvc/release"
     Copy-Item "$target/native_oidc.dll" $Package
     Copy-Item "$target/native_oidc.dll.lib" $Package
     Copy-Item "native/windows/include/native_oidc_windows.h" "$Package/include"

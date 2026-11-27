@@ -61,6 +61,10 @@ class RepresentativeChangeTests(unittest.TestCase):
     def test_cargo_manifest_runs_everything(self):
         self.assertEqual(selected("Cargo.lock"), ALL)
 
+    def test_build_script_runs_everything(self):
+        self.assertEqual(selected("build.rs"), ALL)
+        self.assertEqual(selected("build_support/windows_version_resource.rs"), ALL)
+
 
 class SharedInputTests(unittest.TestCase):
     def test_files_shipped_in_packages_are_not_documentation(self):
@@ -80,6 +84,7 @@ class SharedInputTests(unittest.TestCase):
 
     def test_scripts_also_run_script_unit_tests(self):
         self.assertEqual(selected("scripts/package-windows.ps1"), {"test", "windows"})
+        self.assertEqual(selected("scripts/check-authenticode-signature.ps1"), {"test", "windows"})
         self.assertEqual(selected("scripts/test_select_ios_simulator.py"), {"test"})
         self.assertEqual(selected("scripts/check-macos-real-browser.sh"), {"test"})
         self.assertEqual(selected("native/apple/MacOSRealBrowserCheck.swift"), {"apple", "test"})

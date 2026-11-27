@@ -314,6 +314,22 @@ Use the exact downloaded asset name when verifying another package. GitHub
 Release assets are the persistent distribution channel; the CI validation
 artifacts expire after 14 days.
 
+The release packages are not code signed yet; see the
+[code signing policy](#code-signing-policy).
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)
+
+The Windows `native_oidc.dll` is to be signed through the SignPath Foundation
+program for open-source projects; until the application
+([#258](https://github.com/ProjectFlora/NativeOIDC/issues/258)) is approved,
+releases are unsigned. The [code signing policy](docs/code-signing-policy.md)
+lists what is signed, how releases are built and approved, the team roles,
+and how to verify a signature. The [privacy statement](docs/privacy.md)
+describes what the library sends over the network: only the requests the
+host application asks for, and no telemetry.
+
 ## Third-party licenses
 
 The NativeOIDC libraries are licensed under the Apache License, Version 2.0,

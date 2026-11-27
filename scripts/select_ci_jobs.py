@@ -52,6 +52,8 @@ RULES = (
     (("scripts/select_ci_jobs.py", "scripts/test_select_ci_jobs.py"), ALL, "CI job selector"),
     # Shared build inputs.
     (("Cargo.toml", "Cargo.lock"), ALL, "Cargo manifest or lockfile"),
+    (("build.rs", "build_support/**"), ALL,
+     "Cargo build script (runs for every target; links the Windows version resource)"),
     ((".gitattributes",), ALL, "checkout attributes (line endings of build inputs)"),
     # Rust sources. src/windows is compiled only for Windows and for tests
     # (`#[cfg(any(windows, test))]` in src/lib.rs), so Apple, Android and
@@ -99,7 +101,8 @@ RULES = (
     (("scripts/check-android-targets.sh", "scripts/check-android-release-consumer.sh",
       "scripts/check-android-maven-publication.sh"),
      {"test", "android"}, "Android CI script"),
-    (("scripts/package-windows.ps1", "scripts/check-windows-release-consumer.ps1"),
+    (("scripts/package-windows.ps1", "scripts/check-windows-release-consumer.ps1",
+      "scripts/check-authenticode-signature.ps1"),
      {"test", "windows"}, "Windows CI script"),
     # Used only by the release workflows, which keep their full checks, or
     # by the manual real-browser verification; the Tests job runs their
