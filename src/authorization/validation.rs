@@ -415,9 +415,8 @@ mod tests {
             "https://issuer.example/?tenant=one",
             "https://issuer.example#",
             " https://issuer.example",
-            "https://issuer.example
-",
-            "https://issuer.example/ten	ant",
+            "https://issuer.example\n",
+            "https://issuer.example/ten\tant",
         ] {
             let result = service_configuration().with_oidc_validation_endpoints(
                 issuer,
