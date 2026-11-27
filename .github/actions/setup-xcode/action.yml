@@ -1,54 +1,32 @@
 name: Setup Xcode
 description: |-
-  Selects the Xcode a job builds with. `mode: pinned` (the default) selects
-  the `version` input via maxim-lobanov/setup-xcode; `mode: latest` selects
-  the newest installed stable Xcode (the CI `latest` iOS lane). One source
-  of truth for the release Xcode pin; where it lives and how to change it:
+  Selects the Xcode a job builds with, via maxim-lobanov/setup-xcode. The
+  `version` input is a semver version or range: an exact version (the
+  release pipeline's 26.6 pin) or a bare major (the ci.yml Apple lanes pass
+  their series — 26, 27 — to select the newest installed stable of that
+  series, #284). The step fails when no installed Xcode matches; nothing is
+  downloaded. Where the pins live and how to change them:
   docs/ci-toolchains.md.
 inputs:
-  mode:
-    description: |-
-      `pinned` selects the `version` input (the release pipeline and the
-      release consumer validation). `latest` selects the newest installed
-      stable Xcode on the runner (the `latest` iOS lane of ci.yml, on the
-      `xcode-27` preview runner).
-    default: pinned
   version:
     description: |-
-      The Xcode version for `mode: pinned`. App Store Connect requires apps
-      built with Xcode 26 or later (Issue #135), so the release pipeline
-      builds and validates with a stable Xcode 26.x — the one the macos-26
-      image ships as its default, so no extra download. `release.yml` and
+      The Xcode version to select. App Store Connect requires apps built
+      with Xcode 26 or later (Issue #135), so the release pipeline builds
+      and validates with a stable Xcode 26.x — the one the macos-26 image
+      ships as its default, so no extra download. `release.yml` and
       `release-consumer.yml` use this same default, so the pin lives in
-      this one place.
+      this one place. The ci.yml Apple lanes pass their stable major
+      (#284).
     default: '26.6'
 runs:
   using: composite
   steps:
-    - name: Select the pinned Xcode
-      if: ${{ inputs.mode == 'pinned' }}
+    # The spec resolves with semver: an exact version matches itself, a bare
+    # major the newest installed stable of that series. maxim-lobanov
+    # setup-xcode fails the step when no installed Xcode matches (it never
+    # downloads one), which is the deliberate tripwire for a runner image
+    # that no longer ships the lane's Xcode series.
+    - name: Select the Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
         xcode-version: ${{ inputs.version }}
-    # The newest installed stable Xcode (the step the `latest` iOS lane of
-    # ci.yml ran inline before the setup blocks were consolidated): the
-    # preview runner ships no default selection the lane can rely on, so it
-    # picks the newest versioned installation itself.
-    - name: Select the newest installed stable Xcode
-      if: ${{ inputs.mode == 'latest' }}
-      run: |
-        developer_dir=$(python3 - <<'PY'
-        import glob
-        import re
-        candidates = []
-        for path in glob.glob('/Applications/Xcode*.app'):
-            match = re.fullmatch(r'/Applications/Xcode_(\d+(?:\.\d+)*)\.app', path)
-            if match:
-                candidates.append((tuple(map(int, match[1].split('.'))), path))
-        if not candidates:
-            raise SystemExit('No stable versioned Xcode installation found')
-        print(max(candidates)[1] + '/Contents/Developer')
-        PY
-        )
-        echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
-      shell: bash

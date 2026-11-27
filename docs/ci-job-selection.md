@@ -121,9 +121,11 @@ GitHub reports a job skipped by its `if` condition as successful, including
 for a required check. A skip is therefore safe only when it was intended,
 which the workflow checks in two places:
 
-- **`Apple adapters validation`** (required) collects both iOS
-  configurations. It passes when both pass, or when both were skipped because
-  the selection set `apple` to `false`.
+- **`Apple adapters validation`** (required) collects all of its matrix
+  configurations (each configuration runs as its own `apple_adapters`
+  job; the required check aggregates their results). It passes when all
+  pass, or when the job was skipped because the selection set `apple` to
+  `false`.
 - **`CI result`** collects every job. It passes only when each job either
   passed or was skipped because its group was not selected. It fails, and
   names the job, when a job failed, was cancelled, or was skipped although

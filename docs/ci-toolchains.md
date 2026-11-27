@@ -11,7 +11,7 @@ The jobs that call the actions:
 |---|---|---|---|
 | `setup-rust-toolchain` | `msrv`, `test`, `licenses`, `apple_adapters`, `spm_bindings`, `windows_core`, `android_adapters`, `lint`, `coverage` | `validate_version`, `apple`, `android`, `release_docs`, `windows`, `publish_maven`, `dry_run_maven` | — |
 | `setup-android` | `android_adapters` | `android`, `android_consumer`, `publish_maven`, `dry_run_maven` | `android`, `android_maven` |
-| `setup-xcode` | `apple_adapters` (`latest` lane) | `apple`, `apple_consumer`, `spm_manifest` | `apple`, `spm`, `legacy_spm` |
+| `setup-xcode` | `apple_adapters` (all lanes) | `apple`, `apple_consumer`, `spm_manifest` | `apple`, `spm`, `legacy_spm` |
 | `setup-cargo-tools` | `licenses`, `apple_adapters`, `windows_core`, `android_adapters`, `coverage` | `validate_version`, `apple`, `android`, `windows` | — |
 
 The actions request no secrets and no permissions; they only install tools
@@ -63,14 +63,21 @@ never change a `rust-cache` key.
 
 ## Xcode (`setup-xcode`)
 
-| Mode | Where it lives | Intent |
+| Version | Where it lives | Intent |
 |---|---|---|
-| `pinned` (default), version `26.6` | the action's `version` input (the default); every Apple job of `release.yml` and `release-consumer.yml` calls the action in the default `pinned` mode | App Store Connect requires apps built with Xcode 26 or later (Issue #135), so the archive is built and validated with a stable Xcode 26.x — the one the `macos-26` image ships as its default, so no extra download |
-| `latest` | the `latest` iOS lane of `ci.yml` `apple_adapters` | the `xcode-27` preview runner ships no default selection the lane can rely on, so it selects the newest installed stable Xcode itself |
+| `26.6` (the action's `version` default) | every Apple job of `release.yml` and `release-consumer.yml` calls the action without a `version` input | App Store Connect requires apps built with Xcode 26 or later (Issue #135), so the archive is built and validated with a stable Xcode 26.x — the one the `macos-26` image ships as its default, so no extra download |
+| `26` | the 26-series lane of `ci.yml` `apple_adapters` (on `macos-latest`) | the stable 26-series Xcode (26.6 today). A bare major resolves to the newest installed stable of that series, and the step fails when the series is absent from the runner image — the tripwire that re-selects the lane's runner when, e.g., `macos-latest` moves to a 27-series host image (Issue #284) |
+| `27` | the 27-series lane of `ci.yml` `apple_adapters` (on the `xcode-27` image) | the stable 27-series Xcode (27.2 today); the image is generally available (2026-10-15) and the lane validates the latest generation in CI, because Xcode 27's `-downloadPlatform` CLI finds no runtime older than iOS 26 (a known issue; the GUI installs them, but CI runs headless), so the iOS 18 minimum is validated by the 26-series lane instead (Issue #284) |
+
+The `version` input is a semver version or range (maxim-lobanov
+setup-xcode): an exact version matches itself, a bare major the newest
+installed stable of that series. The step fails when no installed Xcode
+matches; it never downloads one, so a missing series is a visible CI
+failure by design.
 
 **Bumping the release Xcode:** change the `version` input default in
 `.github/actions/setup-xcode/action.yml` — the single source used by every
-pinned-mode call site — and update the runner label together, after checking
+release call site — and update the runner label together, after checking
 the
 [runner-images README](https://github.com/actions/runner-images/tree/main/images/macos)
 for the image's installed Xcode versions and simulator runtimes. A newer

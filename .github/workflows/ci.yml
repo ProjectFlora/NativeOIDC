@@ -119,7 +119,7 @@ jobs:
           retention-days: 14
 
   apple_adapters:
-    name: Apple adapters validation (iOS ${{ matrix.ios_simulator }})
+    name: Apple adapters validation (Xcode ${{ matrix.xcode }}, iOS ${{ matrix.ios_simulator }})
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.apple != 'false') }}
     runs-on: ${{ matrix.runner }}
@@ -128,21 +128,59 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - ios_simulator: '18'
-            runner: macos-15
-          - ios_simulator: latest
+          # The 26-series lane (#284): `macos-latest` currently supplies the
+          # macOS 26 Arm64 image, which ships the 26.x Xcodes and 26.x iOS
+          # runtimes (no iOS 18, so the 18 configuration installs one).
+          # When GitHub moves `macos-latest` to a 27-series host image, the
+          # explicit 26 selection below fails: re-select the runner that
+          # supplies the 26 series.
+          - xcode: '26'
+            runner: macos-latest
+            ios_simulator: '18'
+          - xcode: '26'
+            runner: macos-latest
+            ios_simulator: latest
+          # The 27-series lane (#284): the GA xcode-27 image (macOS 27)
+          # ships the 27.x Xcodes and iOS 27.x runtimes only. Xcode 27's
+          # -downloadPlatform CLI finds no runtime older than iOS 26 (a
+          # known issue, Apple developer forums thread 847134; the Settings
+          # > Components GUI installs them, but this lane runs headless),
+          # so the 27 series validates the latest generation only; the
+          # minimum (iOS 18) is validated by the 26-series lane, whose CLI
+          # installs 18.6.
+          - xcode: '27'
             runner: xcode-27
+            ios_simulator: latest
     env:
       IOS_SIMULATOR_MAJOR_VERSION: ${{ matrix.ios_simulator }}
     steps:
       - uses: actions/checkout@v7
-      # The `latest` iOS lane (the xcode-27 preview runner) selects the
-      # newest installed stable Xcode itself; the `18` lane keeps the runner
-      # image's default selection.
+      # Every lane explicitly selects its stable Xcode major (a bare major:
+      # the newest installed stable of that series, #284). The selection
+      # fails when the major is absent from the runner image instead of
+      # falling back or downloading.
       - uses: $/.github/actions/setup-xcode
-        if: matrix.ios_simulator == 'latest'
         with:
-          mode: latest
+          version: ${{ matrix.xcode }}
+      # The upstream selector switches with `sudo xcode-select -s` without
+      # checking the result, so a failed switch would leave the image
+      # default in effect and the lane could pass under the wrong major.
+      # Assert that the effective Xcode is of the lane's series (#284):
+      # the lanes exist to validate specific Xcode series.
+      - name: Verify the selected Xcode major
+        run: |
+          major=$(xcodebuild -version | awk '/^Xcode /{print $2}' | cut -d. -f1)
+          if [[ "$major" != "${{ matrix.xcode }}" ]]; then
+            echo "Selected Xcode major is $major; the lane expects ${{ matrix.xcode }}" >&2
+            xcodebuild -version >&2
+            exit 1
+          fi
+      # The 26-series image ships no iOS 18 runtime (its runtimes are 26.x
+      # only), so the 18 configuration installs one, as the release
+      # workflow does on `macos-26`. The 27 series has no 18 configuration.
+      - name: Install the iOS 18 simulator runtime
+        if: matrix.xcode == '26' && matrix.ios_simulator == '18'
+        run: scripts/install-ios-simulator-runtime.sh 18.6
       - uses: $/.github/actions/setup-rust-toolchain
       # cargo-about at the version scripts/generate-third-party-licenses.sh requires.
       - uses: $/.github/actions/setup-cargo-tools
@@ -183,15 +221,15 @@ jobs:
         run: scripts/check-spm-package.sh target/apple/release-package/NativeOIDC-Apple-0.0.0-ci.zip
       - uses: actions/upload-artifact@v7
         with:
-          name: apple-xcframework-ios-${{ matrix.ios_simulator }}
+          name: apple-xcframework-xcode-${{ matrix.xcode }}-ios-${{ matrix.ios_simulator }}
           path: target/apple/release-package/NativeOIDC-Apple-0.0.0-ci.zip
           if-no-files-found: error
           retention-days: 14
 
-  # The required "Apple adapters validation" check. It passes when both iOS
-  # configurations pass, or when the selection skipped them because the
-  # change cannot affect Apple; a failure, a cancel, or a skip for any other
-  # reason fails it.
+  # The required "Apple adapters validation" check. It passes when all
+  # matrix configurations pass, or when the selection skipped them because
+  # the change cannot affect Apple; a failure, a cancel, or a skip for any
+  # other reason fails it.
   apple_validation:
     name: Apple adapters validation
     needs: [changes, apple_adapters]
@@ -199,7 +237,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Require both iOS configurations to pass, or an intended skip
+      - name: Require all matrix configurations to pass, or an intended skip
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 scripts/select_ci_jobs.py verify
