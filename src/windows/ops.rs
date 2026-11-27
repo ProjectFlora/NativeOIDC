@@ -6,7 +6,7 @@ use url::Url;
 
 use crate::{
     revoke_token, AuthError, AuthenticationState, AuthorizationRequest, CancellationHandle,
-    EndSessionRequest, ReqwestTransport, RevocationTokenType, ServiceConfiguration,
+    EndSessionRequest, HttpTransport, ReqwestTransport, RevocationTokenType, ServiceConfiguration,
 };
 
 use super::data::{
@@ -29,7 +29,7 @@ type ResolvedConfiguration = (ServiceConfiguration, ConfigurationSource);
 async fn build_service_configuration(
     kind: ConfigurationKind,
     endpoints: EndpointSelection<'_>,
-    transport: &ReqwestTransport,
+    transport: &dyn HttpTransport,
     cancellation: &CancellationHandle,
 ) -> std::result::Result<ResolvedConfiguration, WindowsAuthorizationError> {
     let EndpointSelection {
@@ -126,7 +126,7 @@ fn parse_endpoint(endpoint: &str) -> std::result::Result<Url, WindowsAuthorizati
 async fn build_configuration(
     kind: ConfigurationKind,
     endpoints: EndpointSelection<'_>,
-    transport: &ReqwestTransport,
+    transport: &dyn HttpTransport,
     cancellation: &CancellationHandle,
 ) -> std::result::Result<ServiceConfiguration, WindowsAuthorizationError> {
     let (configuration, source) =
@@ -696,6 +696,173 @@ mod tests {
             )
             .unwrap();
             assert_eq!(configuration.issuer(), Some(issuer));
+        }
+    }
+
+    #[tokio::test]
+    async fn discovered_issuer_identifier_is_kept_exactly_for_token_validation() {
+        use http::{HeaderMap, StatusCode};
+
+        use crate::id_token::tests::{jwks, ScriptedTransport, TestKey};
+        use crate::HttpResponse;
+
+        const ISSUER: &str = "https://idp.example";
+        const SLASH_VARIANT: &str = "https://idp.example/";
+
+        fn ok(body: serde_json::Value) -> crate::Result<HttpResponse> {
+            Ok(HttpResponse {
+                status: StatusCode::OK,
+                headers: HeaderMap::new(),
+                body: serde_json::to_vec(&body).unwrap(),
+            })
+        }
+
+        // Discovery goes through the same configuration path as the Windows
+        // operations, with a controlled transport instead of HTTPS.
+        async fn discover(
+            metadata_issuer: &str,
+        ) -> std::result::Result<ServiceConfiguration, WindowsAuthorizationError> {
+            let transport = ScriptedTransport::new(
+                vec![ok(serde_json::json!({
+                    "issuer": metadata_issuer,
+                    "authorization_endpoint": "https://idp.example/authorize",
+                    "token_endpoint": "https://idp.example/token",
+                    "jwks_uri": "https://idp.example/keys",
+                }))],
+                false,
+            );
+            build_configuration(
+                ConfigurationKind::Oidc,
+                EndpointSelection {
+                    issuer: Some(ISSUER),
+                    authorization_endpoint: None,
+                    token_endpoint: None,
+                    jwks_uri: None,
+                    named_endpoint: None,
+                },
+                &transport,
+                &CancellationHandle::new(),
+            )
+            .await
+        }
+
+        assert!(matches!(
+            discover(SLASH_VARIANT).await,
+            Err(WindowsAuthorizationError::Core(
+                AuthError::InvalidDiscoveryMetadata(_)
+            ))
+        ));
+        let configuration = discover(ISSUER).await.unwrap();
+        assert_eq!(configuration.issuer(), Some(ISSUER));
+
+        let key = TestKey::rs256();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let id_token = |iss: &str, nonce: Option<&str>| {
+            let mut claims = serde_json::json!({
+                "iss": iss,
+                "sub": "user-123",
+                "aud": "windows-client",
+                "exp": now + 300,
+                "iat": now,
+            });
+            if let Some(nonce) = nonce {
+                claims["nonce"] = nonce.into();
+            }
+            key.sign(claims)
+        };
+        let token_response = |id_token: String| {
+            ok(serde_json::json!({
+                "access_token": "access",
+                "token_type": "Bearer",
+                "refresh_token": "refresh",
+                "id_token": id_token,
+            }))
+        };
+
+        // The steps `authorize_with_browser` runs after building the
+        // configuration.
+        let mut accepted_state = None;
+        for (iss, accepted) in [(ISSUER, true), (SLASH_VARIANT, false)] {
+            let session = AuthorizationRequest::new(
+                configuration.clone(),
+                "windows-client",
+                Url::parse("com.example.app:/oauth2redirect").unwrap(),
+                vec!["openid".to_owned()],
+            )
+            .unwrap()
+            .begin()
+            .unwrap();
+            let state = session
+                .authorization_url()
+                .query_pairs()
+                .find_map(|(name, value)| (name == "state").then_some(value.into_owned()))
+                .unwrap();
+            let response = session
+                .parse_redirect(
+                    &Url::parse(&format!(
+                        "com.example.app:/oauth2redirect?code=code&state={state}"
+                    ))
+                    .unwrap(),
+                )
+                .unwrap();
+            let transport = ScriptedTransport::new(
+                vec![
+                    token_response(id_token(iss, session.nonce())),
+                    ok(jwks(&[&key])),
+                ],
+                false,
+            );
+            let result = session
+                .exchange_code(&transport, &response, CancellationHandle::new())
+                .await;
+            if accepted {
+                accepted_state = Some(session.authentication_state(result.unwrap()).unwrap());
+            } else {
+                assert!(
+                    matches!(
+                        result,
+                        Err(AuthError::InvalidIdToken(message))
+                            if message == "signature or required claims are invalid"
+                    ),
+                    "code exchange accepted iss {iss} for issuer {ISSUER}"
+                );
+            }
+        }
+
+        // The refresh `refresh_with_windows_request` runs after building the
+        // configuration.
+        let mut state = accepted_state.unwrap();
+        for (iss, accepted) in [(ISSUER, true), (SLASH_VARIANT, false)] {
+            let before = serde_json::to_string(&state).unwrap();
+            let transport = ScriptedTransport::new(
+                vec![token_response(id_token(iss, None)), ok(jwks(&[&key]))],
+                false,
+            );
+            let result = state
+                .refresh_with_additional_parameters(
+                    &configuration,
+                    "windows-client",
+                    &BTreeMap::new(),
+                    &transport,
+                    CancellationHandle::new(),
+                )
+                .await;
+            if accepted {
+                result.unwrap();
+            } else {
+                assert!(
+                    matches!(
+                        result,
+                        Err(AuthError::InvalidIdToken(message))
+                            if message == "signature or required claims are invalid"
+                    ),
+                    "refresh accepted iss {iss} for issuer {ISSUER}"
+                );
+                assert_eq!(serde_json::to_string(&state).unwrap(), before);
+            }
         }
     }
 
