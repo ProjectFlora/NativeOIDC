@@ -289,13 +289,12 @@ impl AuthenticationState {
             cancellation,
         )
         .await?;
-        let id_token_claims = match (refreshed_claims, &self.id_token_claims) {
-            (Some(refreshed_claims), Some(original)) => Some(merge_refreshed_id_token_claims(
-                original,
-                refreshed_claims,
-            )?),
-            (Some(refreshed_claims), None) => Some(refreshed_claims),
-            (None, original) => original.clone(),
+        let id_token_claims = match refreshed_claims {
+            Some(claims) => Some(match &self.id_token_claims {
+                Some(original) => merge_refreshed_id_token_claims(original, claims)?,
+                None => claims,
+            }),
+            None => self.id_token_claims.clone(),
         };
 
         if refreshed.refresh_token.is_none() {
