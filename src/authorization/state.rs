@@ -611,6 +611,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn state_saved_with_a_malformed_auth_time_keeps_the_other_claims() {
+        // Versions up to 0.9.0 accepted ID Tokens without checking auth_time.
+        let key = TestKey::rs256();
+        let mut legacy = id_token_claims("user-123", None);
+        legacy["auth_time"] = serde_json::json!("not-a-number");
+        let state = oidc_state(Some(key.sign(legacy)));
+        let mut serialized = serde_json::to_value(&state).unwrap();
+        serialized
+            .as_object_mut()
+            .unwrap()
+            .remove("id_token_claims")
+            .unwrap();
+
+        let mut restored: AuthenticationState = serde_json::from_value(serialized).unwrap();
+        let before = serde_json::to_value(&restored).unwrap();
+        assert_eq!(
+            before["id_token_claims"],
+            serde_json::json!({
+                "iss": "https://issuer.example/",
+                "sub": "user-123",
+                "aud": ["native-client"],
+            })
+        );
+        let other_subject = key.sign(id_token_claims("someone-else", None));
+        let transport = refresh_transport(Some(&other_subject), &key);
+        assert!(matches!(
+            refresh_with(&mut restored, "https://issuer.example/", &transport).await,
+            Err(AuthError::InvalidIdToken(
+                "refreshed ID Token subject does not match the original"
+            ))
+        ));
+        assert_eq!(serde_json::to_value(&restored).unwrap(), before);
+    }
+
+    #[tokio::test]
     async fn state_without_a_readable_id_token_records_the_next_validated_one() {
         let key = TestKey::rs256();
         for stored_id_token in [None, Some("old-id".to_owned())] {

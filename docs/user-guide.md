@@ -347,9 +347,10 @@ a refreshed ID Token without `auth_time` is accepted and the original value
 is kept. Otherwise refresh fails as for any invalid ID Token, and the state
 is unchanged. State saved by v0.9.0 or earlier has no `id_token_claims`; it
 takes them from its stored ID Token when it is restored, so no
-reauthentication is needed. If that state has no ID Token, the first ID Token
-validated on a later refresh becomes the one that later refreshes are
-compared with.
+reauthentication is needed. A stored `auth_time` that is not a non-negative
+integer is treated as absent there; the other claims are still kept. If that
+state has no ID Token, the first ID Token validated on a later refresh
+becomes the one that later refreshes are compared with.
 
 On failure or cancellation, the local previous state is unchanged. This does
 not guarantee that the server still accepts its tokens: a refresh may reach

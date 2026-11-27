@@ -108,7 +108,10 @@ struct StoredIdTokenClaims {
     sub: String,
     aud: Audience,
     azp: Option<String>,
-    auth_time: Option<u64>,
+    // Versions up to 0.9.0 did not check `auth_time`, so a stored ID Token
+    // may carry a value that is not a non-negative integer. Such a value is
+    // read as absent instead of discarding the other claims.
+    auth_time: Option<Value>,
 }
 
 impl ValidatedIdTokenClaims {
@@ -154,7 +157,7 @@ impl ValidatedIdTokenClaims {
             claims.sub,
             claims.aud,
             claims.azp,
-            claims.auth_time,
+            claims.auth_time.as_ref().and_then(Value::as_u64),
         ))
     }
 }
