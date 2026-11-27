@@ -825,6 +825,36 @@ final class NativeOIDCTests: XCTestCase {
         XCTAssertEqual(response.refreshToken, "refresh")
     }
 
+    func testS3() async throws {
+        // State saved before the ID Token claims were recorded reads them from
+        // its stored ID Token, whose signature is not checked again. Payload:
+        // {"iss":"https://idp.example","sub":"user-123","aud":"c1","exp":2000,"iat":1000,"acr":"urn:example:loa:2","email":"user@example.com"}
+        let saved = #"{"token_response":{"access_token":"old","token_type":"Bearer","id_token":"eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lkcC5leGFtcGxlIiwic3ViIjoidXNlci0xMjMiLCJhdWQiOiJjMSIsImV4cCI6MjAwMCwiaWF0IjoxMDAwLCJhY3IiOiJ1cm46ZXhhbXBsZTpsb2E6MiIsImVtYWlsIjoidXNlckBleGFtcGxlLmNvbSJ9.c2ln"},"expires_at":null}"#
+        let state = try FfiAuthenticationState.fromJson(serialized: saved)
+        let read = await state.idTokenClaims()
+        let claims = try XCTUnwrap(read)
+        XCTAssertEqual(claims.iss, "https://idp.example")
+        XCTAssertEqual(claims.sub, "user-123")
+        XCTAssertEqual(claims.aud, ["c1"])
+        XCTAssertEqual(claims.exp, 2000)
+        XCTAssertEqual(claims.iat, 1000)
+        XCTAssertNil(claims.authTime)
+        XCTAssertEqual(claims.acr, "urn:example:loa:2")
+        XCTAssertNil(claims.amr)
+        XCTAssertNil(claims.azp)
+        XCTAssertEqual(claims.additionalClaims.map(\.name), ["email"])
+        XCTAssertEqual(claims.additionalClaims.map(\.valueJson), [#""user@example.com""#])
+
+        // The claims are saved with the state and restored from it.
+        let restored = try FfiAuthenticationState.fromJson(serialized: try await state.toJson())
+        let restoredClaims = await restored.idTokenClaims()
+        XCTAssertEqual(restoredClaims?.sub, "user-123")
+
+        let withoutIdToken = try FfiAuthenticationState.fromJson(serialized: stateJson)
+        let none = await withoutIdToken.idTokenClaims()
+        XCTAssertNil(none)
+    }
+
     func testS2() async throws {
         do {
             _ = try FfiAuthenticationState.fromJson(serialized: "{")

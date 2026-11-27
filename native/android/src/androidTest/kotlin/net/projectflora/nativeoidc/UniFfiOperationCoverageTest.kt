@@ -10,6 +10,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -1040,6 +1041,46 @@ class UniFfiOperationCoverageTest {
     }
 
     @Test
+    fun testS3() = runBlocking {
+        // State saved before the ID Token claims were recorded reads them from
+        // its stored ID Token, whose signature is not checked again. Payload:
+        // {"iss":"https://idp.example","sub":"user-123","aud":"c1","exp":2000,"iat":1000,"acr":"urn:example:loa:2","email":"user@example.com"}
+        val state = FfiAuthenticationState.fromJson(SAVED_STATE_WITH_ID_TOKEN_JSON)
+        try {
+            val claims = state.idTokenClaims()
+            assertNotNull("S3: expected ID Token claims", claims)
+            claims!!
+            assertEquals("https://idp.example", claims.iss)
+            assertEquals("user-123", claims.sub)
+            assertEquals(listOf("c1"), claims.aud)
+            assertEquals(2000UL, claims.exp)
+            assertEquals(1000UL, claims.iat)
+            assertNull(claims.authTime)
+            assertEquals("urn:example:loa:2", claims.acr)
+            assertNull(claims.amr)
+            assertNull(claims.azp)
+            assertEquals(listOf("email"), claims.additionalClaims.map { it.name })
+            assertEquals(listOf("\"user@example.com\""), claims.additionalClaims.map { it.valueJson })
+
+            // The claims are saved with the state and restored from it.
+            val restored = FfiAuthenticationState.fromJson(state.toJson())
+            try {
+                assertEquals("user-123", restored.idTokenClaims()?.sub)
+            } finally {
+                restored.close()
+            }
+        } finally {
+            state.close()
+        }
+        val withoutIdToken = FfiAuthenticationState.fromJson(STATE_JSON)
+        try {
+            assertNull(withoutIdToken.idTokenClaims())
+        } finally {
+            withoutIdToken.close()
+        }
+    }
+
+    @Test
     fun testS2() {
         val error = expectFfiException { FfiAuthenticationState.fromJson("{") }
         assertTrue(
@@ -1270,6 +1311,13 @@ class UniFfiOperationCoverageTest {
  */
 private const val STATE_JSON =
     """{"token_response":{"access_token":"old","token_type":"Bearer","refresh_token":"refresh"}}"""
+
+/**
+ * Token state JSON saved before the ID Token claims were recorded, with an ID
+ * Token whose payload is shown in `testS3`.
+ */
+private const val SAVED_STATE_WITH_ID_TOKEN_JSON =
+    """{"token_response":{"access_token":"old","token_type":"Bearer","id_token":"eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lkcC5leGFtcGxlIiwic3ViIjoidXNlci0xMjMiLCJhdWQiOiJjMSIsImV4cCI6MjAwMCwiaWF0IjoxMDAwLCJhY3IiOiJ1cm46ZXhhbXBsZTpsb2E6MiIsImVtYWlsIjoidXNlckBleGFtcGxlLmNvbSJ9.c2ln"},"expires_at":null}"""
 
 /**
  * Discovery document for `https://idp.example/` with every required and
