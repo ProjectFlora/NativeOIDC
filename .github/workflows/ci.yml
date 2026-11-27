@@ -353,8 +353,14 @@ jobs:
           keyid=$(GNUPGHOME="$gnupg" gpg --batch --list-secret-keys --with-colons | awk -F: '/^sec/{print $5; exit}')
           GNUPGHOME="$gnupg" gpg --batch --pinentry-mode loopback --passphrase ci-ci-ci \
             --yes --armor --export-secret-keys "$keyid" > "$gnupg/ci-key.pgp"
+          # The armored key spans lines, so it needs the multiline $GITHUB_ENV
+          # form: its continuation lines are invalid "name=value" entries, and
+          # the runner fails the step with "Invalid format" before the check
+          # runs.
           {
-            echo "ORG_GRADLE_PROJECT_signingInMemoryKey=$(cat "$gnupg/ci-key.pgp")"
+            echo "ORG_GRADLE_PROJECT_signingInMemoryKey<<PGP_KEY_EOF"
+            cat "$gnupg/ci-key.pgp"
+            echo "PGP_KEY_EOF"
             echo "ORG_GRADLE_PROJECT_signingInMemoryKeyPassword=ci-ci-ci"
           } >> "$GITHUB_ENV"
           rm -rf "$gnupg"
