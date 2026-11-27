@@ -12,7 +12,7 @@ use jsonwebtoken::{
     },
     Algorithm, DecodingKey, Validation,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
 
@@ -85,6 +85,78 @@ struct IdTokenClaims {
     nbf: Option<u64>,
     nonce: Option<String>,
     azp: Option<String>,
+    auth_time: Option<u64>,
+}
+
+/// Identity claims of an ID Token, kept in authentication state so that a
+/// refreshed ID Token can be compared with the original one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ValidatedIdTokenClaims {
+    pub(crate) iss: String,
+    pub(crate) sub: String,
+    /// Sorted and de-duplicated, so `"x"` and `["x"]` compare equal.
+    pub(crate) aud: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) azp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auth_time: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct StoredIdTokenClaims {
+    iss: String,
+    sub: String,
+    aud: Audience,
+    azp: Option<String>,
+    auth_time: Option<u64>,
+}
+
+impl ValidatedIdTokenClaims {
+    fn new(
+        iss: String,
+        sub: String,
+        aud: Audience,
+        azp: Option<String>,
+        auth_time: Option<u64>,
+    ) -> Self {
+        let mut aud = match aud {
+            Audience::Single(audience) => vec![audience],
+            Audience::Multiple(audiences) => audiences,
+        };
+        aud.sort();
+        aud.dedup();
+        Self {
+            iss,
+            sub,
+            aud,
+            azp,
+            auth_time,
+        }
+    }
+
+    /// Reads the claims of an ID Token that this library already validated,
+    /// such as the one kept in authentication state. The signature is not
+    /// checked again. Returns `None` when the value is not a readable JWT.
+    pub(crate) fn read_stored(token: &str) -> Option<Self> {
+        let mut segments = token.split('.');
+        let (Some(_), Some(payload), Some(_), None) = (
+            segments.next(),
+            segments.next(),
+            segments.next(),
+            segments.next(),
+        ) else {
+            return None;
+        };
+        let payload = URL_SAFE_NO_PAD.decode(payload).ok()?;
+        let claims: StoredIdTokenClaims = serde_json::from_slice(&payload).ok()?;
+        Some(Self::new(
+            claims.iss,
+            claims.sub,
+            claims.aud,
+            claims.azp,
+            claims.auth_time,
+        ))
+    }
 }
 
 #[derive(Deserialize)]
@@ -112,7 +184,7 @@ pub(crate) async fn validate_id_token(
     jwks_cache: &JwksCache,
     transport: &dyn HttpTransport,
     cancellation: CancellationHandle,
-) -> Result<()> {
+) -> Result<ValidatedIdTokenClaims> {
     validate_id_token_with_clock(validation, jwks_cache, transport, cancellation, || {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -122,7 +194,8 @@ pub(crate) async fn validate_id_token(
     .await
 }
 
-/// Validates `id_token` when the token response contains one.
+/// Validates `id_token` when the token response contains one, and returns its
+/// claims.
 ///
 /// A present ID Token requires both the OIDC issuer and the JWKS endpoint.
 #[allow(clippy::too_many_arguments)]
@@ -136,9 +209,9 @@ pub(crate) async fn validate_id_token_if_present(
     jwks_cache: &JwksCache,
     transport: &dyn HttpTransport,
     cancellation: CancellationHandle,
-) -> Result<()> {
+) -> Result<Option<ValidatedIdTokenClaims>> {
     let Some(id_token) = id_token else {
-        return Ok(());
+        return Ok(None);
     };
     let issuer = issuer.ok_or(AuthError::InvalidConfiguration(
         "OIDC issuer is required to validate ID Tokens",
@@ -160,6 +233,7 @@ pub(crate) async fn validate_id_token_if_present(
         cancellation,
     )
     .await
+    .map(Some)
 }
 
 // Read the clock after signature verification and any JWKS fetch. Keeping the
@@ -170,7 +244,7 @@ async fn validate_id_token_with_clock(
     transport: &dyn HttpTransport,
     cancellation: CancellationHandle,
     clock: impl FnOnce() -> Result<u64>,
-) -> Result<()> {
+) -> Result<ValidatedIdTokenClaims> {
     let IdTokenValidation {
         token,
         issuer,
@@ -297,7 +371,13 @@ async fn validate_id_token_with_clock(
     {
         return Err(AuthError::InvalidIdToken("ID Token is not yet valid"));
     }
-    Ok(())
+    Ok(ValidatedIdTokenClaims::new(
+        claims.iss,
+        claims.sub,
+        claims.aud,
+        claims.azp,
+        claims.auth_time,
+    ))
 }
 
 async fn load_jwks(
@@ -484,7 +564,7 @@ fn find_jwk<'a>(jwks: &'a JwkSet, kid: Option<&str>, algorithm: Algorithm) -> Op
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::{
         collections::VecDeque,
         sync::atomic::{AtomicUsize, Ordering},
@@ -513,7 +593,7 @@ mod tests {
         Ec(EcdsaKeyPair),
     }
 
-    struct TestKey {
+    pub(crate) struct TestKey {
         kid: &'static str,
         algorithm: &'static str,
         jwk: Value,
@@ -521,7 +601,7 @@ mod tests {
     }
 
     impl TestKey {
-        fn rs256() -> Self {
+        pub(crate) fn rs256() -> Self {
             Self::rs256_with_bits(2048)
         }
 
@@ -568,7 +648,7 @@ mod tests {
             }
         }
 
-        fn sign(&self, claims: Value) -> String {
+        pub(crate) fn sign(&self, claims: Value) -> String {
             let protected = URL_SAFE_NO_PAD.encode(
                 serde_json::to_vec(&json!({"alg": self.algorithm, "kid": self.kid})).unwrap(),
             );
@@ -633,7 +713,7 @@ mod tests {
         }
     }
 
-    struct ScriptedTransport {
+    pub(crate) struct ScriptedTransport {
         responses: Mutex<VecDeque<Result<HttpResponse>>>,
         requests: AtomicUsize,
         started: tokio::sync::Notify,
@@ -641,7 +721,7 @@ mod tests {
     }
 
     impl ScriptedTransport {
-        fn new(responses: Vec<Result<HttpResponse>>, blocked: bool) -> Self {
+        pub(crate) fn new(responses: Vec<Result<HttpResponse>>, blocked: bool) -> Self {
             let permits = if blocked { 0 } else { responses.len() };
             Self {
                 responses: Mutex::new(responses.into()),
@@ -717,7 +797,7 @@ mod tests {
         claims
     }
 
-    fn jwks(keys: &[&TestKey]) -> Value {
+    pub(crate) fn jwks(keys: &[&TestKey]) -> Value {
         json!({"keys": keys.iter().map(|key| key.jwk.clone()).collect::<Vec<_>>()})
     }
 
@@ -750,6 +830,7 @@ mod tests {
             CancellationHandle::new(),
         )
         .await
+        .map(|_| ())
     }
 
     async fn validate_at(
@@ -774,6 +855,7 @@ mod tests {
             || Ok(now),
         )
         .await
+        .map(|_| ())
     }
 
     fn claims_at(now: u64) -> Value {
