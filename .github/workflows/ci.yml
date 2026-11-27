@@ -245,12 +245,26 @@ jobs:
         shell: pwsh
         run: |
           $unsigned = "target/windows-audit-package/native_oidc.dll"
-          $rejected = $false
-          try { scripts/check-authenticode-signature.ps1 -Path $unsigned } catch { $rejected = $true; Write-Output "Rejected as expected: $_" }
-          if (-not $rejected) { throw "The unsigned $unsigned passed the Authenticode check." }
-          $rejected = $false
-          try { scripts/check-windows-release-consumer.ps1 -Package target/windows-audit-package.zip -RequireAuthenticodeSignature } catch { $rejected = $true; Write-Output "Rejected as expected: $_" }
-          if (-not $rejected) { throw "The consumer check accepted the unsigned package with -RequireAuthenticodeSignature." }
+          # The check must fail, and only with the expected Authenticode
+          # rejection of an unsigned file. A failure for any other reason
+          # (a missing file, a script fault, or a later build or consumer
+          # failure) is not the expected rejection, so it is rethrown instead
+          # of being treated as a pass.
+          function Assert-AuthenticodeRejection {
+            param([string]$What, [scriptblock]$Check)
+            $rejected = $false
+            $message = ""
+            try { & $Check } catch { $rejected = $true; $message = $_.ToString() }
+            if (-not $rejected) {
+              throw "The ${What} passed the Authenticode check; it was supposed to be rejected as unsigned."
+            }
+            if ($message -notlike "*Authenticode check failed*" -or $message -notlike "*NotSigned*") {
+              throw "The ${What} Authenticode check failed for an unexpected reason, not the expected unsigned rejection: ${message}"
+            }
+            Write-Output "The ${What} was rejected as expected: ${message}"
+          }
+          Assert-AuthenticodeRejection -What "unsigned DLL $unsigned" { scripts/check-authenticode-signature.ps1 -Path $unsigned }
+          Assert-AuthenticodeRejection -What "packaged DLL" { scripts/check-windows-release-consumer.ps1 -Package target/windows-audit-package.zip -RequireAuthenticodeSignature }
           scripts/check-authenticode-signature.ps1 -Path (Join-Path $PSHOME "pwsh.exe") -ExpectedSigner "Microsoft Corporation"
       - uses: actions/upload-artifact@v7
         with:
