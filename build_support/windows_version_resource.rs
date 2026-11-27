@@ -10,9 +10,10 @@
 //! 32-bit boundary. A `.res` file starts with an empty resource entry,
 //! followed by one 32-byte header and the data for each resource.
 //!
-//! SignPath enforces the product name and product version of every signed
-//! binary (Issue #258), so the strings come from `native_oidc_strings`, and
-//! the version from the crate version.
+//! The DLL is to be Authenticode signed (Issue #258), and code signing
+//! services check the product name and version of signed binaries, so the
+//! strings come from `native_oidc_strings`, and the version from the crate
+//! version.
 
 /// `RT_VERSION`, the resource type of a version resource.
 pub const RT_VERSION: u16 = 16;
