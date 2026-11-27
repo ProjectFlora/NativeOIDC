@@ -336,8 +336,48 @@ jobs:
           aar=native/android/build/outputs/aar/native-oidc-android-release.aar
           unzip -Z1 "$aar" | grep -Fx jni/arm64-v8a/libnative_oidc.so
           unzip -Z1 "$aar" | grep -Fx jni/x86_64/libnative_oidc.so
+      # The publication check signs with a throwaway key, so the armor header
+      # cleanup and the signature checks it enforces (Issue #169) run in PR CI
+      # instead of only at release dispatch. It publishes to the file
+      # repository the BUNDLE_OUT path uses: that layout writes the .md5 and
+      # .sha1 checksums the check validates, and the non-snapshot version
+      # keeps the plain file names the check reads (-SNAPSHOT versions deploy
+      # with Maven's timestamped names, which the check does not).
+      - name: Generate a throwaway signing key
+        run: |
+          gnupg=$(mktemp -d)
+          # Seeds the trust database; without it the first batch gpg run
+          # stops on a prompt it cannot show.
+          GNUPGHOME="$gnupg" gpg --batch --list-keys >/dev/null
+          GNUPGHOME="$gnupg" gpg --batch --pinentry-mode loopback --passphrase ci-ci-ci \
+            --quick-generate-key "NativeOIDC CI <ci@example.invalid>" ed25519 sign never
+          keyid=$(GNUPGHOME="$gnupg" gpg --batch --list-secret-keys --with-colons | awk -F: '/^sec/{print $5; exit}')
+          GNUPGHOME="$gnupg" gpg --batch --pinentry-mode loopback --passphrase ci-ci-ci \
+            --yes --armor --export-secret-keys "$keyid" > "$gnupg/ci-key.pgp"
+          # The armored key spans lines, so it needs the multiline $GITHUB_ENV
+          # form: its continuation lines are invalid "name=value" entries, and
+          # the runner fails the step with "Invalid format" before the check
+          # runs.
+          {
+            echo "ORG_GRADLE_PROJECT_signingInMemoryKey<<PGP_KEY_EOF"
+            cat "$gnupg/ci-key.pgp"
+            echo "PGP_KEY_EOF"
+            echo "ORG_GRADLE_PROJECT_signingInMemoryKeyPassword=ci-ci-ci"
+          } >> "$GITHUB_ENV"
+          rm -rf "$gnupg"
       - name: Verify Maven Central publication contents
-        run: scripts/check-android-maven-publication.sh 0.0.0-SNAPSHOT
+        env:
+          BUNDLE_OUT: ${{ runner.temp }}/central-bundle.zip
+        run: scripts/check-android-maven-publication.sh 0.0.0
+      - name: Show the signed Central bundle
+        run: |
+          {
+            echo "### Central bundle (checked, not uploaded)"
+            echo
+            echo '```'
+            unzip -Z1 "${{ runner.temp }}/central-bundle.zip"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
           name: android-aar

@@ -1,3 +1,5 @@
+import org.gradle.plugins.signing.Sign
+
 plugins {
     id("com.android.library") version "8.11.1"
     id("org.jetbrains.kotlin.android") version "2.2.20"
@@ -216,6 +218,51 @@ mavenPublishing {
             url.set("https://github.com/ProjectFlora/NativeOIDC")
             connection.set("scm:git:https://github.com/ProjectFlora/NativeOIDC.git")
             developerConnection.set("scm:git:ssh://git@github.com/ProjectFlora/NativeOIDC.git")
+        }
+    }
+}
+
+// Gradle's signing plugin signs with the bcpg jar in the Gradle
+// distribution, whose armor "Version:" header still carries Bouncy
+// Castle's unreplaced release-name placeholder ("Version: BCPG
+// v@RELEASE_NAME@", Issue #169). Armor headers are comments outside the
+// signed data, so the build drops the header from every generated
+// signature: the published .asc then never carries a build-system
+// leftover, whatever the Gradle or bcpg version. The publish tasks deploy
+// the .asc files after the sign tasks and compute their checksums from the
+// cleaned bytes, so no checksum adjustment is needed. Files without a
+// "Version:" header are left byte-identical.
+fun File.dropArmorVersionHeader() {
+    val text = readText()
+    val newline = if (text.contains("\r\n")) "\r\n" else "\n"
+    var inHeader = false
+    var changed = false
+    val lines = text.split('\n').map { line ->
+        val content = line.trimEnd('\r')
+        if (content.startsWith("-----BEGIN PGP")) {
+            inHeader = true
+        } else if (inHeader && content.isEmpty()) {
+            inHeader = false
+        }
+        if (inHeader && content.startsWith("Version:")) {
+            changed = true
+            null
+        } else {
+            content
+        }
+    }.filterNotNull()
+    if (changed) {
+        writeText(lines.joinToString(newline))
+    }
+}
+
+tasks.withType(Sign::class.java).configureEach {
+    doLast {
+        signatures.forEach { signature ->
+            val asc = signature.file
+            if (asc.exists()) {
+                asc.dropArmorVersionHeader()
+            }
         }
     }
 }

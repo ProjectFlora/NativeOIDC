@@ -2,7 +2,11 @@
 # Publishes the Android library to a throwaway local Maven repository and
 # checks the files Maven Central requires: the AAR with both Rust ABIs, a POM
 # with complete metadata and the transitive dependencies, and the sources and
-# javadoc jars. Signatures are checked when signing is configured.
+# javadoc jars. When signing is configured, every signature must exist, carry
+# no armor "Version:" header and no unreplaced "@" placeholder (the bcpg jar
+# Gradle ships writes the header with an unreplaced Bouncy Castle
+# release-name token, Issue #169), and verify with the signing key; with
+# BUNDLE_OUT, each signature's .md5/.sha1 must match its content.
 #
 # Optional environment, used by the release workflow's Maven publication
 # (Issue #180):
@@ -103,6 +107,44 @@ fi
 if [[ -n "${ORG_GRADLE_PROJECT_signingInMemoryKey:-}" ]]; then
     for file in "${files[@]}"; do
         test -s "$file.asc" || { echo "missing signature $file.asc" >&2; exit 1; }
+        # The bcpg jar Gradle's signing plugin uses writes the armor "Version:"
+        # header from Bouncy Castle's default version string, which is still an
+        # unreplaced release-name placeholder in the published artifact (Issue
+        # 169). The build drops the header after signing, so it must not be
+        # here, and an unreplaced "@...@" token cannot survive anywhere else:
+        # neither the base64 alphabet nor the armor delimiters use "@".
+        if grep -q -- '^Version:' "$file.asc"; then
+            echo "signature $file.asc carries a Version: armor header; the sign task must drop it (Issue #169)" >&2
+            exit 1
+        fi
+        if LC_ALL=C grep -q '@' "$file.asc"; then
+            echo "signature $file.asc contains an unreplaced '@' placeholder (Issue #169)" >&2
+            exit 1
+        fi
+    done
+    # The signatures must verify with the key that wrote them. The key material
+    # is turned back into an armored block (check-gpg-keyserver.sh accepts the
+    # same two forms: an armored block, or a single raw base64 key), imported
+    # into a throwaway keyring, and every file is verified against it.
+    command -v gpg >/dev/null 2>&1 || { echo "gpg is required to verify the signatures (Issue #169)" >&2; exit 1; }
+    keyring=$(mktemp -d)
+    trap 'rm -rf "$local_repo" "$keyring"' EXIT
+    key_file="$keyring/signing-key.pgp"
+    if grep -q -- '^-----BEGIN PGP' <<<"${ORG_GRADLE_PROJECT_signingInMemoryKey}"; then
+        printf '%s\n' "${ORG_GRADLE_PROJECT_signingInMemoryKey}" > "$key_file"
+    else
+        {
+            printf -- '-----BEGIN PGP PRIVATE KEY BLOCK-----\n'
+            printf '%s\n' "${ORG_GRADLE_PROJECT_signingInMemoryKey}"
+            printf -- '-----END PGP PRIVATE KEY BLOCK-----\n'
+        } > "$key_file"
+    fi
+    GNUPGHOME="$keyring" gpg --batch --import < "$key_file" >/dev/null
+    for file in "${files[@]}"; do
+        if ! GNUPGHOME="$keyring" gpg --batch --no-verbose --verify "$file.asc" "$file" >/dev/null; then
+            echo "signature $file.asc does not verify for $file" >&2
+            exit 1
+        fi
     done
 fi
 
@@ -112,6 +154,43 @@ if [[ -n "${BUNDLE_OUT:-}" ]]; then
             test -s "$file.$checksum" || { echo "missing checksum $file.$checksum" >&2; exit 1; }
         done
     done
+    if [[ -n "${ORG_GRADLE_PROJECT_signingInMemoryKey:-}" ]]; then
+        for file in "${files[@]}"; do
+            for checksum in md5 sha1; do
+                test -s "$file.asc.$checksum" || { echo "missing checksum $file.asc.$checksum" >&2; exit 1; }
+            done
+        done
+        # The .asc checksums must describe the signature files as the publish
+        # task saw them (header already dropped, Issue 169); a mismatch means
+        # the armor changed after the checksums were written.
+        python3 - "$base" <<'EOF'
+import hashlib
+import os
+import sys
+
+base = sys.argv[1]
+suffixes = (".aar", ".pom", ".module", "-sources.jar", "-javadoc.jar")
+
+def digest(path, algorithm):
+    handle = hashlib.new(algorithm)
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1 << 20), b""):
+            handle.update(chunk)
+    return handle.hexdigest()
+
+mismatch = False
+for suffix in suffixes:
+    asc = base + suffix + ".asc"
+    for algorithm, extension in (("md5", ".md5"), ("sha1", ".sha1")):
+        with open(asc + extension, encoding="utf-8") as file:
+            expected = file.read().split()[0]
+        actual = digest(asc, algorithm)
+        if actual != expected:
+            print(f"{os.path.basename(asc)}{extension} has {algorithm} {actual}, expected {expected}", file=sys.stderr)
+            mismatch = True
+sys.exit(1 if mismatch else 0)
+EOF
+    fi
     bundle_out=$(cd -- "$(dirname -- "$BUNDLE_OUT")" && pwd)/$(basename -- "$BUNDLE_OUT")
     rm -f "$bundle_out"
     (cd "$local_repo" && find . -type f ! -name 'maven-metadata*' | sed 's|^\./||' | LC_ALL=C sort |
