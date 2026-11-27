@@ -914,11 +914,12 @@ mod tests {
         assert_eq!(restored.id_token_claims().cloned(), before);
     }
 
+    fn nested(depth: usize) -> Value {
+        (0..depth).fold(serde_json::json!(0), |value, _| serde_json::json!([value]))
+    }
+
     #[tokio::test]
     async fn claims_nested_up_to_the_saved_state_limit_restore_and_deeper_ones_are_rejected() {
-        fn nested(depth: usize) -> Value {
-            (0..depth).fold(serde_json::json!(0), |value, _| serde_json::json!([value]))
-        }
         let key = TestKey::rs256();
         let auth_time = unix_now() - 10;
         let original = key.sign(id_token_claims("user-123", Some(auth_time)));
@@ -949,7 +950,7 @@ mod tests {
         assert!(serde_json::from_slice::<AuthenticationState>(&deeper_state).is_err());
 
         // An ID Token with a deeper claim is rejected and leaves the state
-        // as it was. Stored with the state, it gives no claims.
+        // as it was.
         let mut too_deep = id_token_claims("user-123", Some(auth_time));
         too_deep["nested"] = nested(MAX_ADDITIONAL_CLAIM_DEPTH + 1);
         let too_deep = key.sign(too_deep);
@@ -966,7 +967,82 @@ mod tests {
             "{result:?}"
         );
         assert_eq!(serde_json::to_value(&state).unwrap(), before);
-        assert_eq!(oidc_state(Some(too_deep)).id_token_claims(), None);
+    }
+
+    #[tokio::test]
+    async fn state_whose_stored_id_token_has_a_claim_too_deep_to_save_keeps_its_baseline() {
+        // Earlier versions accepted and stored an ID Token with a claim
+        // nested deeper than saved state can hold.
+        let key = TestKey::rs256();
+        let auth_time = unix_now() - 10;
+        let mut stored_claims = id_token_claims("user-123", None);
+        stored_claims["email"] = serde_json::json!("user@example.com");
+        stored_claims["nested"] = nested(MAX_ADDITIONAL_CLAIM_DEPTH + 1);
+        let state = oidc_state(Some(key.sign(stored_claims.clone())));
+        let mut without_claims = serde_json::to_value(&state).unwrap();
+        without_claims
+            .as_object_mut()
+            .unwrap()
+            .remove("id_token_claims");
+        let mut earlier_claims = without_claims.clone();
+        earlier_claims["id_token_claims"] = serde_json::json!({
+            "iss": "https://issuer.example/",
+            "sub": "user-123",
+            "aud": ["native-client"],
+            "auth_time": auth_time,
+        });
+
+        for (case, saved, expected_auth_time) in [
+            ("none", without_claims, None),
+            ("earlier", earlier_claims, Some(auth_time)),
+        ] {
+            // The claim that cannot be saved is left out; the identity, the
+            // authentication baseline, and the other claims are kept, and
+            // the state can be saved and read back.
+            let mut restored: AuthenticationState = serde_json::from_value(saved).unwrap();
+            let claims = restored.id_token_claims().unwrap();
+            assert_eq!(claims.sub, "user-123", "{case}");
+            assert_eq!(claims.auth_time, expected_auth_time, "{case}");
+            assert_eq!(claims.exp, stored_claims["exp"].as_u64().unwrap(), "{case}");
+            assert_eq!(
+                claims.additional_claims,
+                BTreeMap::from([("email".to_owned(), serde_json::json!("user@example.com"))]),
+                "{case}"
+            );
+            let saved = serde_json::to_vec(&restored).unwrap();
+            let reread: AuthenticationState = serde_json::from_slice(&saved).unwrap();
+            assert_eq!(
+                reread.id_token_claims(),
+                restored.id_token_claims(),
+                "{case}"
+            );
+
+            // Refresh still compares against the kept baseline.
+            let other_subject = key.sign(id_token_claims("user-456", None));
+            let transport = refresh_transport(Some(&other_subject), &key);
+            assert!(
+                matches!(
+                    refresh_with(&mut restored, "https://issuer.example/", &transport).await,
+                    Err(AuthError::InvalidIdToken(
+                        "refreshed ID Token subject does not match the original"
+                    ))
+                ),
+                "{case}"
+            );
+            if let Some(auth_time) = expected_auth_time {
+                let other_auth_time = key.sign(id_token_claims("user-123", Some(auth_time + 1)));
+                let transport = refresh_transport(Some(&other_auth_time), &key);
+                assert!(
+                    matches!(
+                        refresh_with(&mut restored, "https://issuer.example/", &transport).await,
+                        Err(AuthError::InvalidIdToken(
+                            "refreshed ID Token auth_time does not match the original"
+                        ))
+                    ),
+                    "{case}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -51,7 +51,9 @@ interoperability testing and support policies are still evolving. Each release r
   non-negative integer, as it already did for `exp` and `iat`, an `acr` that
   is not a string, an `amr` that is not an array of strings, and a claim
   nested more than 124 arrays and objects deep, because saved state holding
-  it could not be read back
+  it could not be read back. State restored from an ID Token that an earlier
+  version accepted with such a claim leaves that claim out of
+  `additional_claims` and keeps the others
   ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260),
   [#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)).
 - Compatibility: `FfiServiceConfiguration.issuer()` (Swift, Kotlin) and Rust
