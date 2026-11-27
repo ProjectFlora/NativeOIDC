@@ -374,7 +374,7 @@ jobs:
           {
             echo "### Central bundle (checked, not uploaded)"
             echo
-            '```'
+            echo '```'
             unzip -Z1 "${{ runner.temp }}/central-bundle.zip"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
