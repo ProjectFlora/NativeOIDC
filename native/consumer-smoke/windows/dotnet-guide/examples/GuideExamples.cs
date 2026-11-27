@@ -13,6 +13,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MyApp;
@@ -38,6 +39,7 @@ try
 {
     CheckStorage();
     CheckRequests();
+    CheckDeepClaims();
     using (var client = new AuthClient(MockConfig(), store))
     {
         await CheckRefreshAsync(client);
@@ -166,6 +168,41 @@ void CheckRequests()
     var tokens = Tokens.Read(StoredStateJson("net-guide-refresh-1", 1));
     Check(!tokens.ToString().Contains("net-guide-", StringComparison.Ordinal), "Tokens.ToString does not print the tokens");
 }
+
+// The library accepts additional claims nested more deeply than the 64
+// levels that System.Text.Json reads by default. The guide's readers must
+// still read such state and claims, and pass the state on to refresh.
+void CheckDeepClaims()
+{
+    const int depth = 70;
+    var deep = new string('[', depth) + new string(']', depth);
+    // An unsigned ID Token stands in for one the library validated earlier:
+    // state saved without claims takes them from its stored ID Token, whose
+    // signature is not checked again.
+    var payload = $$"""{"iss":"https://issuer.example","sub":"deep-user","aud":"net-guide-client","exp":2000,"iat":1000,"deep":{{deep}}}""";
+    var idToken = $"eyJhbGciOiJSUzI1NiJ9.{Base64Url(payload)}.c2ln";
+    var tokenResponse = $$"""{"access_token":"net-guide-access-deep","token_type":"Bearer","id_token":"{{idToken}}"}""";
+    var claimsJson = NativeOidcWindows.GetIdTokenClaims($$"""{"token_response":{{tokenResponse}},"expires_at":1}""");
+    Check(claimsJson is not null && claimsJson.Contains($"\"deep\":{deep}", StringComparison.Ordinal),
+        "the library returns a claim nested more deeply than 64 levels");
+    if (claimsJson is null)
+    {
+        return;
+    }
+
+    // State as the library saves it, with the claims recorded.
+    var state = $$"""{"token_response":{{tokenResponse}},"expires_at":1,"id_token_claims":{{claimsJson}}}""";
+    Check(Caught(() => JsonDocument.Parse(state).Dispose()) is JsonException,
+        "the deep state is deeper than System.Text.Json reads by default");
+    Check(SignedInUser.Read(state) == new SignedInUser("https://issuer.example", "deep-user"),
+        "SignedInUser.Read reads the account from state with a deep claim");
+    Check(Tokens.Read(state).AccessToken == "net-guide-access-deep", "Tokens.Read reads state with a deep claim");
+    Check(Requests.Refresh(MockConfig(), state).Contains($"\"deep\":{deep}", StringComparison.Ordinal),
+        "the refresh request passes state with a deep claim through");
+}
+
+static string Base64Url(string text) =>
+    Convert.ToBase64String(Encoding.UTF8.GetBytes(text)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
 async Task CheckRefreshAsync(AuthClient client)
 {

@@ -217,9 +217,21 @@ discovery call and no way to inspect the resolved endpoints.
 Every request is a JSON object in a .NET `string`. The wrapper marshals it
 as UTF-8, so the host passes ordinary strings and never converts encodings.
 Build requests with `System.Text.Json.Nodes` instead of concatenating
-strings, so that values are escaped correctly:
+strings, so that values are escaped correctly.
+
+State and ID Token claims can be nested more deeply than the 64 levels that
+`System.Text.Json` reads by default: the library accepts additional claims
+nested up to 124 levels, which the state holds three levels deep. Pass
+`SdkJson.Options` whenever you parse JSON that the library returned:
 
 ```csharp
+public static class SdkJson
+{
+    // Covers the deepest state and claims JSON the library returns (127
+    // levels).
+    public static readonly JsonDocumentOptions Options = new() { MaxDepth = 128 };
+}
+
 public static class Requests
 {
     public static string Authorization(ProviderConfig config)
@@ -245,7 +257,7 @@ public static class Requests
     {
         var request = ConfigurationFields(config);
         SetOptional(request, "jwks_uri", config.JwksUri);
-        request["state"] = JsonNode.Parse(stateJson);
+        request["state"] = JsonNode.Parse(stateJson, documentOptions: SdkJson.Options);
         return request.ToJsonString();
     }
 
@@ -508,7 +520,7 @@ public sealed record Tokens(
     // when the JSON is not a valid state.
     public static Tokens Read(string stateJson)
     {
-        using var document = JsonDocument.Parse(stateJson);
+        using var document = JsonDocument.Parse(stateJson, SdkJson.Options);
         var state = document.RootElement;
         var response = state.GetProperty("token_response");
         return new Tokens(
@@ -565,7 +577,7 @@ public sealed record SignedInUser(string Issuer, string Subject)
         {
             return null;
         }
-        using var claims = JsonDocument.Parse(claimsJson);
+        using var claims = JsonDocument.Parse(claimsJson, SdkJson.Options);
         return new SignedInUser(
             claims.RootElement.GetProperty("iss").GetString() ?? throw new JsonException("iss is null"),
             claims.RootElement.GetProperty("sub").GetString() ?? throw new JsonException("sub is null"));
