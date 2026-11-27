@@ -11,7 +11,7 @@ use super::{
     ServiceConfiguration,
 };
 use crate::{
-    id_token::{validate_id_token_if_present, ValidatedIdTokenClaims},
+    id_token::{validate_id_token_if_present, IdTokenClaims},
     AuthError, CancellationHandle, HttpTransport, Result,
 };
 
@@ -37,10 +37,11 @@ pub struct TokenResponse {
 
 /// Serializable token state. The host application remains responsible for secure storage.
 ///
-/// The state keeps the identity claims (`iss`, `sub`, `aud`, `azp`, and
-/// `auth_time`) of its ID Token so that refresh can reject a returned ID Token
-/// for a different identity. State saved without these claims takes them from
-/// its stored ID Token when it is deserialized.
+/// The state keeps the claims of its validated ID Token
+/// ([`IdTokenClaims`], read with [`Self::id_token_claims`]) so that refresh
+/// can reject a returned ID Token for a different identity. State saved
+/// without these claims, or with claims in an older form, takes them from its
+/// stored ID Token when it is deserialized.
 #[derive(Serialize, Deserialize)]
 #[serde(from = "SerializedAuthenticationState")]
 pub struct AuthenticationState {
@@ -49,7 +50,7 @@ pub struct AuthenticationState {
     #[serde(default)]
     oidc_nonce: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    id_token_claims: Option<ValidatedIdTokenClaims>,
+    id_token_claims: Option<IdTokenClaims>,
 }
 
 /// The serialized form of [`AuthenticationState`], including state saved by
@@ -60,18 +61,22 @@ struct SerializedAuthenticationState {
     expires_at: Option<u64>,
     #[serde(default)]
     oidc_nonce: Option<String>,
+    /// Read as JSON first, so that claims in a form this version cannot
+    /// read fall back to the stored ID Token instead of failing.
     #[serde(default)]
-    id_token_claims: Option<ValidatedIdTokenClaims>,
+    id_token_claims: Option<Value>,
 }
 
 impl From<SerializedAuthenticationState> for AuthenticationState {
     fn from(serialized: SerializedAuthenticationState) -> Self {
-        // State saved before the claims were recorded takes its baseline from
-        // the ID Token it stores, which this library validated when it was
+        // State saved before the claims were recorded, or with claims in an
+        // older form (without `exp` and `iat`), takes its baseline from the
+        // ID Token it stores, which this library validated when it was
         // returned. Without a readable stored ID Token, the next ID Token
         // validated on refresh becomes the baseline.
         let id_token_claims = serialized
             .id_token_claims
+            .and_then(|claims| serde_json::from_value(claims).ok())
             .or_else(|| stored_id_token_claims(&serialized.token_response));
         Self {
             token_response: serialized.token_response,
@@ -82,11 +87,11 @@ impl From<SerializedAuthenticationState> for AuthenticationState {
     }
 }
 
-fn stored_id_token_claims(token_response: &TokenResponse) -> Option<ValidatedIdTokenClaims> {
+fn stored_id_token_claims(token_response: &TokenResponse) -> Option<IdTokenClaims> {
     token_response
         .id_token
         .as_deref()
-        .and_then(ValidatedIdTokenClaims::read_stored)
+        .and_then(IdTokenClaims::read_stored)
 }
 
 /// Checks a refreshed ID Token against the original one (OIDC Core 12.2) and
@@ -95,11 +100,13 @@ fn stored_id_token_claims(token_response: &TokenResponse) -> Option<ValidatedIdT
 /// `iss`, `sub`, and `aud` must be the same. A present `auth_time` must equal
 /// the original one; a refreshed ID Token without `auth_time` keeps the
 /// original value. `azp` is checked against the client ID during validation
-/// and need not be present in both tokens.
+/// and need not be present in both tokens. `azp`, `acr`, and `amr` keep the
+/// original values when the refreshed ID Token omits them; `exp`, `iat`, and
+/// the additional claims come from the refreshed ID Token.
 fn merge_refreshed_id_token_claims(
-    original: &ValidatedIdTokenClaims,
-    refreshed: ValidatedIdTokenClaims,
-) -> Result<ValidatedIdTokenClaims> {
+    original: &IdTokenClaims,
+    refreshed: IdTokenClaims,
+) -> Result<IdTokenClaims> {
     if refreshed.iss != original.iss {
         return Err(AuthError::InvalidIdToken(
             "refreshed ID Token issuer does not match the original",
@@ -124,12 +131,12 @@ fn merge_refreshed_id_token_claims(
             ));
         }
     }
-    Ok(ValidatedIdTokenClaims {
-        iss: refreshed.iss,
-        sub: refreshed.sub,
-        aud: refreshed.aud,
-        azp: refreshed.azp.or_else(|| original.azp.clone()),
+    Ok(IdTokenClaims {
         auth_time: original.auth_time.or(refreshed.auth_time),
+        acr: refreshed.acr.or_else(|| original.acr.clone()),
+        amr: refreshed.amr.or_else(|| original.amr.clone()),
+        azp: refreshed.azp.or_else(|| original.azp.clone()),
+        ..refreshed
     })
 }
 
@@ -197,6 +204,19 @@ impl AuthenticationState {
     /// Returns the current token response.
     pub fn token_response(&self) -> &TokenResponse {
         &self.token_response
+    }
+
+    /// Returns the claims of the ID Token that this library validated on code
+    /// exchange or refresh, or `None` when the state has no readable ID Token.
+    ///
+    /// Bind accounts to `iss` and `sub` together. State created with
+    /// [`Self::new`] from a token response that did not come from
+    /// [`AuthorizationSession::exchange_code`] or a refresh reports the claims
+    /// of whatever ID Token that response contains, without validating it.
+    ///
+    /// [`AuthorizationSession::exchange_code`]: super::AuthorizationSession::exchange_code
+    pub fn id_token_claims(&self) -> Option<&IdTokenClaims> {
+        self.id_token_claims.as_ref()
     }
 
     /// Returns the access-token expiration as seconds since the Unix epoch.
@@ -520,10 +540,10 @@ mod tests {
         let original = key.sign(id_token_claims("user-123", Some(auth_time)));
 
         // Same claims, audience as a one-element array, and no auth_time.
-        let mut without_auth_time = id_token_claims("user-123", None);
-        without_auth_time["aud"] = serde_json::json!(["native-client"]);
-        without_auth_time["azp"] = serde_json::json!("native-client");
-        let without_auth_time = key.sign(without_auth_time);
+        let mut refreshed_claims = id_token_claims("user-123", None);
+        refreshed_claims["aud"] = serde_json::json!(["native-client"]);
+        refreshed_claims["azp"] = serde_json::json!("native-client");
+        let without_auth_time = key.sign(refreshed_claims.clone());
         let mut state = oidc_state(Some(original));
         let transport = refresh_transport(Some(&without_auth_time), &key);
         refresh_with(&mut state, "https://issuer.example/", &transport)
@@ -539,6 +559,8 @@ mod tests {
                 "iss": "https://issuer.example/",
                 "sub": "user-123",
                 "aud": ["native-client"],
+                "exp": refreshed_claims["exp"],
+                "iat": refreshed_claims["iat"],
                 "azp": "native-client",
                 "auth_time": auth_time,
             })
@@ -614,17 +636,21 @@ mod tests {
     async fn state_saved_with_an_unreadable_auth_time_keeps_the_other_claims() {
         // Versions up to 0.9.0 accepted ID Tokens without checking auth_time.
         let key = TestKey::rs256();
-        let mut malformed = id_token_claims("user-123", None);
-        malformed["auth_time"] = serde_json::json!("not-a-number");
-        let malformed = key.sign(malformed);
-        let duplicated = serde_json::to_string(&id_token_claims("user-123", Some(1_000))).unwrap();
+        let mut malformed_claims = id_token_claims("user-123", None);
+        malformed_claims["auth_time"] = serde_json::json!("not-a-number");
+        let malformed = key.sign(malformed_claims.clone());
+        let duplicated_claims = id_token_claims("user-123", Some(1_000));
+        let duplicated = serde_json::to_string(&duplicated_claims).unwrap();
         let duplicated = format!(
             "{},\"auth_time\":2000}}",
             duplicated.strip_suffix('}').unwrap()
         );
         let duplicated = key.sign_payload(duplicated.as_bytes());
 
-        for (case, legacy) in [("malformed", malformed), ("duplicated", duplicated)] {
+        for (case, legacy, legacy_claims) in [
+            ("malformed", malformed, malformed_claims),
+            ("duplicated", duplicated, duplicated_claims),
+        ] {
             let state = oidc_state(Some(legacy));
             let mut serialized = serde_json::to_value(&state).unwrap();
             serialized
@@ -641,6 +667,8 @@ mod tests {
                     "iss": "https://issuer.example/",
                     "sub": "user-123",
                     "aud": ["native-client"],
+                    "exp": legacy_claims["exp"],
+                    "iat": legacy_claims["iat"],
                 }),
                 "{case} auth_time"
             );
@@ -693,6 +721,114 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn id_token_claims_expose_the_validated_claims_and_follow_refresh() {
+        let key = TestKey::rs256();
+        let auth_time = unix_now() - 10;
+        let mut original_claims = id_token_claims("user-123", Some(auth_time));
+        original_claims["acr"] = serde_json::json!("urn:example:loa:2");
+        original_claims["amr"] = serde_json::json!(["pwd", "otp"]);
+        original_claims["email"] = serde_json::json!("user@example.com");
+        let mut state = oidc_state(Some(key.sign(original_claims.clone())));
+        let claims = state.id_token_claims().unwrap();
+        assert_eq!(claims.iss, "https://issuer.example/");
+        assert_eq!(claims.sub, "user-123");
+        assert_eq!(claims.aud, ["native-client"]);
+        assert_eq!(Some(claims.exp), original_claims["exp"].as_u64());
+        assert_eq!(Some(claims.iat), original_claims["iat"].as_u64());
+        assert_eq!(claims.auth_time, Some(auth_time));
+        assert_eq!(claims.acr.as_deref(), Some("urn:example:loa:2"));
+        assert_eq!(claims.amr, Some(vec!["pwd".to_owned(), "otp".to_owned()]));
+        assert_eq!(claims.azp, None);
+        assert_eq!(
+            claims.additional_claims,
+            BTreeMap::from([("email".to_owned(), serde_json::json!("user@example.com"))])
+        );
+
+        // A refreshed ID Token without auth_time, acr, and amr keeps the
+        // original values and replaces the rest.
+        let mut refreshed_claims = id_token_claims("user-123", None);
+        refreshed_claims["exp"] = serde_json::json!(unix_now() + 600);
+        refreshed_claims["email"] = serde_json::json!("new@example.com");
+        let transport = refresh_transport(Some(&key.sign(refreshed_claims.clone())), &key);
+        refresh_with(&mut state, "https://issuer.example/", &transport)
+            .await
+            .unwrap();
+        let claims = state.id_token_claims().unwrap();
+        assert_eq!(Some(claims.exp), refreshed_claims["exp"].as_u64());
+        assert_eq!(Some(claims.iat), refreshed_claims["iat"].as_u64());
+        assert_eq!(claims.auth_time, Some(auth_time));
+        assert_eq!(claims.acr.as_deref(), Some("urn:example:loa:2"));
+        assert_eq!(claims.amr, Some(vec!["pwd".to_owned(), "otp".to_owned()]));
+        assert_eq!(
+            claims.additional_claims,
+            BTreeMap::from([("email".to_owned(), serde_json::json!("new@example.com"))])
+        );
+
+        // Values the refreshed ID Token does carry replace the original ones.
+        let mut refreshed_claims = id_token_claims("user-123", Some(auth_time));
+        refreshed_claims["acr"] = serde_json::json!("urn:example:loa:3");
+        refreshed_claims["amr"] = serde_json::json!(["hwk"]);
+        let transport = refresh_transport(Some(&key.sign(refreshed_claims)), &key);
+        refresh_with(&mut state, "https://issuer.example/", &transport)
+            .await
+            .unwrap();
+        let claims = state.id_token_claims().unwrap();
+        assert_eq!(claims.acr.as_deref(), Some("urn:example:loa:3"));
+        assert_eq!(claims.amr, Some(vec!["hwk".to_owned()]));
+        assert!(claims.additional_claims.is_empty());
+
+        // A refresh without an ID Token keeps the record, and the record
+        // survives serialization.
+        let before = state.id_token_claims().cloned();
+        let transport = refresh_transport(None, &key);
+        refresh_with(&mut state, "https://issuer.example/", &transport)
+            .await
+            .unwrap();
+        assert_eq!(state.id_token_claims().cloned(), before);
+        let restored: AuthenticationState =
+            serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+        assert_eq!(restored.id_token_claims().cloned(), before);
+    }
+
+    #[test]
+    fn state_restores_the_claims_from_its_id_token_when_none_or_older_ones_are_saved() {
+        let key = TestKey::rs256();
+        let mut claims = id_token_claims("user-123", Some(1_000));
+        claims["acr"] = serde_json::json!("urn:example:loa:2");
+        claims["email"] = serde_json::json!("user@example.com");
+        let state = oidc_state(Some(key.sign(claims)));
+        let expected = state.id_token_claims().cloned().unwrap();
+        let serialized = serde_json::to_value(&state).unwrap();
+
+        // State saved before #260 has no id_token_claims; state saved by the
+        // first version that recorded them has no exp or iat.
+        let mut without_claims = serialized.clone();
+        without_claims
+            .as_object_mut()
+            .unwrap()
+            .remove("id_token_claims");
+        let mut earlier_claims = serialized.clone();
+        earlier_claims["id_token_claims"] = serde_json::json!({
+            "iss": "https://issuer.example/",
+            "sub": "user-123",
+            "aud": ["native-client"],
+            "auth_time": 1_000,
+        });
+        for (case, saved) in [("none", without_claims), ("earlier", earlier_claims)] {
+            let restored: AuthenticationState = serde_json::from_value(saved).unwrap();
+            assert_eq!(restored.id_token_claims(), Some(&expected), "{case}");
+            assert_eq!(
+                serde_json::to_value(&restored).unwrap(),
+                serialized,
+                "{case}"
+            );
+        }
+
+        let without_id_token = oidc_state(None);
+        assert_eq!(without_id_token.id_token_claims(), None);
+    }
+
     #[test]
     fn state_json_with_claims_round_trips_and_older_readers_ignore_them() {
         // The fields an older version of this library reads.
@@ -715,7 +851,7 @@ mod tests {
                 expires_in: Some(60),
                 refresh_token: Some("refresh".to_owned()),
                 scope: None,
-                id_token: Some(key.sign(claims)),
+                id_token: Some(key.sign(claims.clone())),
                 additional_parameters: BTreeMap::new(),
             },
             Some("nonce".to_owned()),
@@ -728,6 +864,8 @@ mod tests {
                 "iss": "https://issuer.example/",
                 "sub": "user-123",
                 "aud": ["native-client", "second"],
+                "exp": claims["exp"],
+                "iat": claims["iat"],
                 "azp": "native-client",
                 "auth_time": 1_000,
             })

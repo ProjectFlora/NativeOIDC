@@ -37,4 +37,5 @@ pub use authorization::{
 };
 pub use cancellation::CancellationHandle;
 pub use error::{AuthError, Result};
+pub use id_token::IdTokenClaims;
 pub use transport::{HttpRequest, HttpResponse, HttpTransport, ReqwestTransport};
