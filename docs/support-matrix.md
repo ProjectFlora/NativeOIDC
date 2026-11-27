@@ -73,10 +73,18 @@ Configuration evidence:
   Release builds use a stable Xcode 26.x because App Store Connect requires
   apps built with Xcode 26 or later; the `setup-xcode` action in the release
   workflows selects it.
-- Apple lane verification record (#284): pending this PR's CI run — the
-  per-lane runner image build, host macOS, Xcode build, actual iOS runtimes,
-  validation date, commit, and run URL are recorded here once the run is
-  green.
+- Apple lane verification record (#284):
+  [PR CI run 46056641141](https://github.com/ProjectFlora/NativeOIDC/actions/runs/46056641141)
+  at `924e7c5`, validated 2026-11-28. All four configurations passed, and each
+  lane asserted the effective Xcode major before any build:
+  - 26-series (`macos-latest`): image `macos-26-arm64-20261123.0526`,
+    macOS 26.7.2 (25G332), Xcode 26.6 (17F113); the iOS 18.6 (installed) and
+    iOS 26.5 flows.
+  - 27-series (`xcode-27`): image `xcode-27-arm64-20261123.0387`,
+    macOS 27.0.1 (26A434), Xcode 27.2 (27B52); the iOS 27.2 flow.
+  - 16-series (`macos-15`): image `macos-15-arm64-20261123.0558`,
+    macOS 15.8.2 (24H232), Xcode 16.4 (16F6); the oldest bundled 18.x (18.5)
+    flow.
 - Apple targets and deployment settings:
   [target builds, XCFramework packaging and slice assertions](../scripts/package-apple-xcframework.sh),
   [simulator selection](../scripts/check-ios-authorization-flow.sh).
