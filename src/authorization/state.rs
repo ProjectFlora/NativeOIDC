@@ -972,12 +972,14 @@ mod tests {
     #[tokio::test]
     async fn state_whose_stored_id_token_has_a_claim_too_deep_to_save_keeps_its_baseline() {
         // Earlier versions accepted and stored an ID Token with a claim
-        // nested deeper than saved state can hold.
+        // nested deeper than saved state can hold, and even with one nested
+        // deeper than serde_json reads into a Value (127 levels).
         let key = TestKey::rs256();
         let auth_time = unix_now() - 10;
         let mut stored_claims = id_token_claims("user-123", None);
         stored_claims["email"] = serde_json::json!("user@example.com");
         stored_claims["nested"] = nested(MAX_ADDITIONAL_CLAIM_DEPTH + 1);
+        stored_claims["unreadable"] = nested(200);
         let state = oidc_state(Some(key.sign(stored_claims.clone())));
         let mut without_claims = serde_json::to_value(&state).unwrap();
         without_claims
@@ -996,7 +998,7 @@ mod tests {
             ("none", without_claims, None),
             ("earlier", earlier_claims, Some(auth_time)),
         ] {
-            // The claim that cannot be saved is left out; the identity, the
+            // The claims that cannot be saved are left out; the identity, the
             // authentication baseline, and the other claims are kept, and
             // the state can be saved and read back.
             let mut restored: AuthenticationState = serde_json::from_value(saved).unwrap();

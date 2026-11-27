@@ -18,7 +18,7 @@ use serde::{
     de::{self, IgnoredAny, MapAccess},
     Deserialize, Deserializer, Serialize,
 };
-use serde_json::Value;
+use serde_json::{value::RawValue, Value};
 use url::Url;
 
 use crate::{AuthError, CancellationHandle, HttpRequest, HttpTransport, Result};
@@ -252,12 +252,20 @@ fn jwt_payload(token: &str) -> Option<Vec<u8>> {
 }
 
 /// Returns the claims of a JWT payload other than [`NAMED_CLAIMS`].
-fn additional_claims(payload: &[u8]) -> Option<BTreeMap<String, Value>> {
-    let mut claims: BTreeMap<String, Value> = serde_json::from_slice(payload).ok()?;
-    for name in NAMED_CLAIMS {
-        claims.remove(name);
-    }
-    Some(claims)
+///
+/// Each claim is read on its own, so that a claim whose value cannot be read
+/// as a [`Value`] does not hide the others: its entry is `None`. serde_json
+/// skips any well-formed value, but reads one into a [`Value`] only when it
+/// is nested at most 127 levels deep and holds no number out of range.
+fn additional_claims(payload: &[u8]) -> Option<BTreeMap<String, Option<Value>>> {
+    let claims: BTreeMap<String, Box<RawValue>> = serde_json::from_slice(payload).ok()?;
+    Some(
+        claims
+            .into_iter()
+            .filter(|(name, _)| !NAMED_CLAIMS.contains(&name.as_str()))
+            .map(|(name, value)| (name, serde_json::from_str(value.get()).ok()))
+            .collect(),
+    )
 }
 
 /// The most arrays and objects nested in one additional claim value.
@@ -301,9 +309,9 @@ impl IdTokenClaims {
     /// checked again. Returns `None` when the value is not a readable JWT.
     ///
     /// Earlier versions accepted additional claims nested too deeply to keep
-    /// in saved state (see [`MAX_ADDITIONAL_CLAIM_DEPTH`]). Such claims are
-    /// left out, so that the identity and authentication claims, which
-    /// refresh compares, are still kept.
+    /// in saved state (see [`MAX_ADDITIONAL_CLAIM_DEPTH`]), or even to read
+    /// as a [`Value`]. Such claims are left out, so that the identity and
+    /// authentication claims, which refresh compares, are still kept.
     pub(crate) fn read_stored(token: &str) -> Option<Self> {
         let payload = jwt_payload(token)?;
         let claims: StoredIdTokenClaims = serde_json::from_slice(&payload).ok()?;
@@ -321,7 +329,7 @@ impl IdTokenClaims {
             azp: claims.azp,
             additional_claims: additional_claims(&payload)?
                 .into_iter()
-                .filter(|(_, value)| claim_fits_saved_state(value))
+                .filter_map(|(name, value)| Some((name, value.filter(claim_fits_saved_state)?)))
                 .collect(),
         })
     }
@@ -542,6 +550,12 @@ async fn validate_id_token_with_clock(
     let additional_claims = jwt_payload(token)
         .as_deref()
         .and_then(additional_claims)
+        .and_then(|claims| {
+            claims
+                .into_iter()
+                .map(|(name, value)| Some((name, value?)))
+                .collect::<Option<BTreeMap<_, _>>>()
+        })
         .ok_or(AuthError::InvalidIdToken(
             "signature or required claims are invalid",
         ))?;
