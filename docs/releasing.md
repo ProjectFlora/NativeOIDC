@@ -177,11 +177,11 @@ After the GitHub Release is created, the `publish_maven` job publishes
    checksums. Each signature must additionally verify with the signing
    key and carry no armor `Version:` header and no unreplaced `@`
    placeholder. The build drops the `Version:` header right after
-   signing: the bcpg jar Gradle's signing plugin uses writes it from
-   Bouncy Castle's default version string, which is still an unreplaced
-   release-name token in the published artifact (`Version: BCPG
-   v@RELEASE_NAME@` in v0.7.0, Issue #169). Armor headers are comments
-   outside the signed data, so dropping one leaves the signature valid.
+   signing: it is the armor version string of the bcpg jar in the Gradle
+   distribution, which still carries Bouncy Castle's unreplaced
+   release-name token (`Version: BCPG v@RELEASE_NAME@` in v0.7.0,
+   Issue #169). Armor headers are comments outside the signed data, so
+   dropping one leaves the signature valid.
 4. It uploads the bundle to the Central Portal (`android_maven_central_release.py upload`,
    `publishingType=AUTOMATIC`), records the deployment, and waits until the
    Portal reports it `PUBLISHED` (30 × 60 s). Publishing can still fail

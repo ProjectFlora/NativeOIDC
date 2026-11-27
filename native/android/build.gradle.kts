@@ -222,15 +222,16 @@ mavenPublishing {
     }
 }
 
-// The bcpg jar Gradle's signing plugin uses writes the armor "Version:" header
-// from Bouncy Castle's default version string, which is still an unreplaced
-// release-name placeholder in the published artifact ("Version: BCPG
-// v@RELEASE_NAME@", Issue #169). Armor headers are comments outside the signed
-// data, so the header is dropped from every generated signature: the published
-// .asc then never carries a build-system leftover, whatever the Gradle or bcpg
-// version. The publish tasks deploy the .asc files after the sign tasks and
-// compute their checksums from the cleaned bytes, so no checksum adjustment is
-// needed. Files without a "Version:" header are left byte-identical.
+// Gradle's signing plugin signs with the bcpg jar in the Gradle
+// distribution, whose armor "Version:" header still carries Bouncy
+// Castle's unreplaced release-name placeholder ("Version: BCPG
+// v@RELEASE_NAME@", Issue #169). Armor headers are comments outside the
+// signed data, so the build drops the header from every generated
+// signature: the published .asc then never carries a build-system
+// leftover, whatever the Gradle or bcpg version. The publish tasks deploy
+// the .asc files after the sign tasks and compute their checksums from the
+// cleaned bytes, so no checksum adjustment is needed. Files without a
+// "Version:" header are left byte-identical.
 fun File.dropArmorVersionHeader() {
     val text = readText()
     val newline = if (text.contains("\r\n")) "\r\n" else "\n"
