@@ -338,7 +338,10 @@ jobs:
           unzip -Z1 "$aar" | grep -Fx jni/x86_64/libnative_oidc.so
       # The publication check signs with a throwaway key, so the armor header
       # cleanup and the signature checks it enforces (Issue #169) run in PR CI
-      # instead of only at release dispatch.
+      # instead of only at release dispatch. The check publishes to the local
+      # Maven repository as before: the file repository layout the BUNDLE_OUT
+      # path uses writes timestamped names for -SNAPSHOT versions, and the
+      # check reads the plain ones.
       - name: Generate a throwaway signing key
         run: |
           gnupg=$(mktemp -d)
@@ -356,18 +359,7 @@ jobs:
           } >> "$GITHUB_ENV"
           rm -rf "$gnupg"
       - name: Verify Maven Central publication contents
-        env:
-          BUNDLE_OUT: ${{ runner.temp }}/central-bundle.zip
         run: scripts/check-android-maven-publication.sh 0.0.0-SNAPSHOT
-      - name: Show the signed Central bundle
-        run: |
-          {
-            echo "### Central bundle (checked, not uploaded)"
-            echo
-            '```'
-            unzip -Z1 "${{ runner.temp }}/central-bundle.zip"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
           name: android-aar
