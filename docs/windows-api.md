@@ -73,7 +73,9 @@ End-session callback success returns `state` and `additional_parameters`.
 No redirect means browser launch success, not confirmed provider logout.
 
 Authentication-state JSON contains `token_response`, optional `expires_at`
-(absolute Unix seconds), and optional `oidc_nonce`. Token response contains
+(absolute Unix seconds), optional `oidc_nonce`, and optional
+`id_token_claims` (the ID Token identity that a refreshed ID Token must
+match). Token response contains
 `access_token`, `token_type`, optional `expires_in`, `refresh_token`, `scope`,
 `id_token`, and preserved additional response fields. Persist the complete
 returned JSON unchanged so expiry and nonce survive restoration. The host
