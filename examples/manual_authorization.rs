@@ -18,7 +18,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    let issuer = Url::parse(&arguments[0])?;
+    // Keep the issuer identifier exactly as given; a parsed `Url` would add a
+    // trailing slash to an issuer without a path.
+    let issuer = arguments[0].as_str();
     let client_id = &arguments[1];
     let redirect_uri = Url::parse(&arguments[2])?;
     let transport = ReqwestTransport::new()?;
