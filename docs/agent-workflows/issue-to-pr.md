@@ -93,7 +93,16 @@ Example: Claude takes Urgent and High work and every issue with Very High effort
 
 ### Precheck (scheduled mode)
 
-Set the automation's precheck to `scripts/agent-precheck.sh --phases {phases}`, with the phases the automation handles (for example `--phases plan,implement,pr`). It skips the run when there is clearly no work: no issue to start, no agent PR with failing checks, conflicts, or new activity, and no stalled issue. It does not read Priority, so a run may still start and find nothing for its Priorities; that run ends without doing anything.
+Set the automation's precheck to `scripts/agent-precheck.sh` with the same phases and filters as its prompt. It skips the run when there is clearly no matching work: no issue to start, no agent PR with failing checks, conflicts, or new activity, and no stalled issue, among the issues whose Priority and Effort pass the filters.
+
+| Prompt | Precheck option |
+|---|---|
+| `Phases: plan, pr` | `--phases plan,pr` (omit for all phases) |
+| `Priorities: Medium, Low, none` | `--priorities "Medium,Low,none"` |
+| `Efforts: High, Medium, Low, Very Low, none` | `--efforts "High,Medium,Low,Very Low,none"` |
+| `Implement efforts: High, Medium, none` | `--implement-efforts "High,Medium,none"` |
+
+The precheck applies the filters the way "Priority and Effort filters" describes (a PR uses its linked issue's values; stalled work passes if either Effort filter matches). An option left out accepts every value, so a precheck that is broader than its prompt only starts runs that end without work, while a narrower one would leave work waiting. If the issue fields cannot be read, the precheck lets the run start, so that the run can report the problem.
 
 ### Flows
 
