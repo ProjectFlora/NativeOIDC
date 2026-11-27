@@ -158,7 +158,7 @@ Both run on the macOS CI job.
 | Port substituted into the redirect URI, listener ready before the browser opens | `authorize_with_browser`, `end_session_with_browser` | `authorization_opens_external_url_and_exchanges_validated_callback`, `end_session_with_redirect_validates_callback` | `MacOSAuthorizationAdapter.authorize` | `main` (full flow against `MacOSMockOAuthProvider`) |
 | Header read and size limit | `read_request_headers` (`MAX_REQUEST_SIZE`) | None | `LoopbackHTTPListener.receive`, `received` (`maximumRequestSize`) | None |
 | Unrelated path: `404`, keep waiting | `parse_callback_request` (`Unrelated`), `handle_callback_connection` | `ignores_unrelated_paths_then_accepts_matching_callback` | `LoopbackHTTPListener.received` (`respond(status: 404, ...)`) | `testListenerDeliversCallbackDespiteStalledConnectionAndWrongPath` (`/favicon.ico`) |
-| Matching but malformed: terminal | `parse_callback_request` (`Malformed { matches_path: true }`), `handle_callback_connection` | `matching_callback_with_invalid_host_is_terminal` | `LoopbackHTTPListener.received` (`completeCallback(.failure(...))`) | None |
+| Matching but malformed: terminal | `parse_callback_request` (`Malformed { matches_path: true }`), `handle_callback_connection` | `matching_callback_with_invalid_host_is_terminal` | `LoopbackHTTPListener.received` (`completeCallback(.failure(...))`) | `testMatchingCallbackWithInvalidHostFailsTheWait` |
 | Matching callback: `200`, URL returned | `parse_callback_request` (`Matching`) | `ignores_unrelated_paths_then_accepts_matching_callback` | `LoopbackHTTPListener.received`, `completeCallback`, `resolveCallback` | `testListenerDeliversCallbackDespiteStalledConnectionAndWrongPath` |
 | Core validation of the returned URL | `authorize_with_browser` (`parse_redirect`) | `authorization_opens_external_url_and_exchanges_validated_callback` | `MacOSAuthorizationAdapter.authorize` (`parseRedirect`) | `testStateMismatchIsRejectedAndAdapterCanBeReused` |
 | Slow connection does not block | `wait_for_callback` (`JoinSet`, `CALLBACK_REQUEST_TIMEOUT`) | `stalled_connection_does_not_block_matching_callback` | Independent `NWConnection` per request | `testListenerDeliversCallbackDespiteStalledConnectionAndWrongPath` (stalled socket) |
@@ -174,7 +174,10 @@ direct HTTP client). They do not open the real system browser.
 The two implementations currently differ in the following cases. None of
 them changes the result of a normal browser callback; they matter for
 unusual or hostile local clients and for future changes. Each is a candidate
-for a follow-up issue that aligns the implementations.
+for a follow-up issue that aligns the implementations. Aligning a difference
+that changes the URI acceptance contract, such as the D9 path normalization,
+must be done in a pull request that can verify compatibility and both
+operating systems' behavior.
 
 | # | Case | Windows (Rust) | macOS (Swift) |
 | --- | --- | --- | --- |
@@ -196,8 +199,7 @@ Until they are aligned, use redirect URI templates with the host spelled
 percent-encoding.
 
 Test coverage also differs: the Swift checks do not cover template
-validation, terminal handling of malformed matching requests (such as a
-`Host` mismatch), or the request size limit, and neither implementation has
+validation or the request size limit, and neither implementation has
 a test for the size limit.
 
 ## Mobile redirect matching
