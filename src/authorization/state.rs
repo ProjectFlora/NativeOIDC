@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{value::RawValue, Value};
 
 use super::{
     http::{send_token_request, serialize_token_form},
@@ -63,17 +63,20 @@ struct SerializedAuthenticationState {
     expires_at: Option<u64>,
     #[serde(default)]
     oidc_nonce: Option<String>,
-    /// Read as JSON first, so that claims in the earlier form can be
-    /// migrated, and claims in a form this version cannot read fall back to
-    /// the stored ID Token instead of failing.
+    /// Kept as raw JSON and read on its own, so that claims in the earlier
+    /// form can be migrated, and claims that this version cannot read, in
+    /// another form or nested too deeply for serde_json to read as a
+    /// [`Value`], fall back to the stored ID Token instead of failing.
     #[serde(default)]
-    id_token_claims: Option<Value>,
+    id_token_claims: Option<Box<RawValue>>,
 }
 
 impl From<SerializedAuthenticationState> for AuthenticationState {
     fn from(serialized: SerializedAuthenticationState) -> Self {
-        let id_token_claims =
-            restored_id_token_claims(serialized.id_token_claims, &serialized.token_response);
+        let saved = serialized
+            .id_token_claims
+            .and_then(|saved| serde_json::from_str(saved.get()).ok());
+        let id_token_claims = restored_id_token_claims(saved, &serialized.token_response);
         Self {
             token_response: serialized.token_response,
             expires_at: serialized.expires_at,
@@ -103,8 +106,9 @@ struct EarlierIdTokenClaims {
 /// the earlier form keep their identity and `auth_time` baseline, which may
 /// come from an ID Token that a later refresh replaced, and take the other
 /// claims from the stored ID Token. State saved before the claims were
-/// recorded takes them from its stored ID Token, which this library
-/// validated when it was returned. Without a readable stored ID Token, the
+/// recorded, or with claims that cannot be read as JSON, takes them from its
+/// stored ID Token, which this library validated when it was returned.
+/// Without a readable stored ID Token, the
 /// next ID Token validated on refresh becomes the baseline.
 fn restored_id_token_claims(
     saved: Option<Value>,
@@ -941,13 +945,20 @@ mod tests {
         let restored: AuthenticationState = serde_json::from_slice(&saved).unwrap();
         assert_eq!(restored.id_token_claims(), state.id_token_claims());
 
-        // One more level would make the saved state unreadable, so the limit
-        // is the deepest claim that saved state can hold.
+        // Saved claims nested too deeply for serde_json to read still let
+        // the saved state restore: the claims come from the stored ID Token.
         let mut deeper_state = serde_json::to_value(&state).unwrap();
-        deeper_state["id_token_claims"]["additional_claims"]["nested"] =
-            nested(MAX_ADDITIONAL_CLAIM_DEPTH + 1);
+        deeper_state["id_token_claims"]["additional_claims"]["nested"] = nested(200);
         let deeper_state = serde_json::to_vec(&deeper_state).unwrap();
-        assert!(serde_json::from_slice::<AuthenticationState>(&deeper_state).is_err());
+        assert!(serde_json::from_slice::<Value>(&deeper_state).is_err());
+        let restored: AuthenticationState = serde_json::from_slice(&deeper_state).unwrap();
+        let claims = restored.id_token_claims().unwrap();
+        assert_eq!(claims.sub, "user-123");
+        assert_eq!(claims.auth_time, Some(auth_time));
+        assert_eq!(
+            claims.additional_claims["nested"],
+            nested(MAX_ADDITIONAL_CLAIM_DEPTH)
+        );
 
         // An ID Token with a deeper claim is rejected and leaves the state
         // as it was.
