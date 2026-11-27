@@ -34,7 +34,9 @@ fn align(offset: usize) -> usize {
 
 fn utf16_text(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
         .collect();
     String::from_utf16(&units).unwrap()
