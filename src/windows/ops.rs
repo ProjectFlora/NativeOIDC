@@ -57,8 +57,9 @@ async fn build_service_configuration(
                 return Err(WindowsAuthorizationError::InvalidIssuer);
             }
             let issuer = issuer.ok_or(WindowsAuthorizationError::InvalidIssuer)?;
-            let issuer =
-                Url::parse(issuer).map_err(|_| WindowsAuthorizationError::InvalidIssuer)?;
+            // Core keeps the identifier exactly as given; the parse only keeps
+            // the Windows error for a malformed issuer.
+            Url::parse(issuer).map_err(|_| WindowsAuthorizationError::InvalidIssuer)?;
             let configuration =
                 ServiceConfiguration::discover(issuer, transport, cancellation.clone()).await?;
             Ok((configuration, ConfigurationSource::Discovered))
@@ -92,8 +93,7 @@ fn add_operation_endpoints(
         ConfigurationKind::Oidc => match (source, issuer, jwks_uri) {
             (ConfigurationSource::Discovered, ..) | (_, None, None) => Ok(configuration),
             (_, Some(issuer), Some(jwks_uri)) => {
-                let issuer =
-                    Url::parse(issuer).map_err(|_| WindowsAuthorizationError::InvalidIssuer)?;
+                Url::parse(issuer).map_err(|_| WindowsAuthorizationError::InvalidIssuer)?;
                 let jwks_uri = parse_endpoint(jwks_uri)?;
                 Ok(configuration.with_oidc_validation_endpoints(issuer, jwks_uri)?)
             }
@@ -668,6 +668,35 @@ mod tests {
                 value: "logout-extra".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn explicit_oidc_configuration_keeps_the_exact_issuer_identifier() {
+        for issuer in [
+            "https://issuer.example",
+            "https://issuer.example/",
+            "https://issuer.example/tenant",
+        ] {
+            let configuration = ServiceConfiguration::new(
+                Url::parse("https://issuer.example/authorize").unwrap(),
+                Url::parse("https://issuer.example/token").unwrap(),
+            )
+            .unwrap();
+            let configuration = add_operation_endpoints(
+                ConfigurationKind::Oidc,
+                ConfigurationSource::Explicit,
+                EndpointSelection {
+                    issuer: Some(issuer),
+                    authorization_endpoint: Some("https://issuer.example/authorize"),
+                    token_endpoint: Some("https://issuer.example/token"),
+                    jwks_uri: Some("https://issuer.example/keys"),
+                    named_endpoint: None,
+                },
+                configuration,
+            )
+            .unwrap();
+            assert_eq!(configuration.issuer(), Some(issuer));
+        }
     }
 
     #[tokio::test]

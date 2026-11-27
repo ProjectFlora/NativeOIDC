@@ -271,7 +271,7 @@ impl FfiServiceConfiguration {
         transport: Arc<dyn NativeHttpTransport>,
         cancellation: Arc<FfiCancellationHandle>,
     ) -> std::result::Result<Arc<Self>, FfiError> {
-        let issuer = parse_url(&issuer, "issuer")?;
+        parse_url(&issuer, "issuer")?;
         let transport = NativeTransport { inner: transport };
         let inner =
             ServiceConfiguration::discover(issuer, &transport, cancellation.inner.clone()).await?;
@@ -284,7 +284,7 @@ impl FfiServiceConfiguration {
         issuer: String,
         jwks_uri: String,
     ) -> std::result::Result<Arc<Self>, FfiError> {
-        let issuer = parse_url(&issuer, "issuer")?;
+        parse_url(&issuer, "issuer")?;
         let jwks_uri = parse_url(&jwks_uri, "JWKS endpoint")?;
         let inner = self
             .inner
@@ -338,9 +338,9 @@ impl FfiServiceConfiguration {
         self.inner.revocation_endpoint().map(ToString::to_string)
     }
 
-    /// Returns the configured issuer URL, if any.
+    /// Returns the configured issuer identifier, if any, exactly as given.
     pub fn issuer(&self) -> Option<String> {
-        self.inner.issuer().map(ToString::to_string)
+        self.inner.issuer().map(ToOwned::to_owned)
     }
 
     /// Returns the configured JWKS URL, if any.
@@ -1188,6 +1188,68 @@ mod tests {
         drop(held);
         assert_eq!(state.to_json().await.unwrap(), before);
         assert!(transport.request.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn issuer_identifier_is_kept_exactly() {
+        for issuer in [
+            "https://idp.example",
+            "https://idp.example/",
+            "https://idp.example/tenant",
+        ] {
+            let configuration = FfiServiceConfiguration::new(
+                "https://idp.example/authorize".into(),
+                "https://idp.example/token".into(),
+            )
+            .unwrap()
+            .with_oidc_validation_endpoints(issuer.into(), "https://idp.example/keys".into())
+            .unwrap();
+            assert_eq!(configuration.issuer().as_deref(), Some(issuer));
+
+            for (metadata_issuer, accepted) in [
+                (issuer.to_owned(), true),
+                (
+                    issuer
+                        .strip_suffix('/')
+                        .map_or_else(|| format!("{issuer}/"), ToOwned::to_owned),
+                    false,
+                ),
+            ] {
+                let transport = Arc::new(RecordingTransport {
+                    request: Mutex::new(None),
+                    response: Ok(FfiHttpResponse {
+                        status: 200,
+                        headers: vec![],
+                        body: serde_json::to_vec(&serde_json::json!({
+                            "issuer": metadata_issuer,
+                            "authorization_endpoint": "https://idp.example/authorize",
+                            "token_endpoint": "https://idp.example/token",
+                        }))
+                        .unwrap(),
+                    }),
+                });
+                let result = FfiServiceConfiguration::discover(
+                    issuer.into(),
+                    transport.clone(),
+                    FfiCancellationHandle::new(),
+                )
+                .await;
+                let expected_url = if issuer.contains("/tenant") {
+                    "https://idp.example/tenant/.well-known/openid-configuration"
+                } else {
+                    "https://idp.example/.well-known/openid-configuration"
+                };
+                assert_eq!(
+                    transport.request.lock().unwrap().as_ref().unwrap().url,
+                    expected_url
+                );
+                if accepted {
+                    assert_eq!(result.unwrap().issuer().as_deref(), Some(issuer));
+                } else {
+                    assert!(result.is_err(), "{issuer} accepted {metadata_issuer}");
+                }
+            }
+        }
     }
 
     #[tokio::test]

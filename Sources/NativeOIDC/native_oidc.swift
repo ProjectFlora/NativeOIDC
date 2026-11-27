@@ -1528,7 +1528,7 @@ public protocol FfiServiceConfigurationProtocol: AnyObject, Sendable {
     func authorizationEndpoint()  -> String
     
     /**
-     * Returns the configured issuer URL, if any.
+     * Returns the configured issuer identifier, if any, exactly as given.
      */
     func issuer()  -> String?
     
@@ -1668,7 +1668,7 @@ open func authorizationEndpoint() -> String  {
 }
     
     /**
-     * Returns the configured issuer URL, if any.
+     * Returns the configured issuer identifier, if any, exactly as given.
      */
 open func issuer() -> String?  {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
