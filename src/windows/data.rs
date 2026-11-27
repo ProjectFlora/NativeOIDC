@@ -151,6 +151,7 @@ pub(super) fn ensure_unique_parameter_names(
 mod tests {
     use super::*;
     use crate::TokenResponse;
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use std::collections::BTreeMap;
 
     #[test]
@@ -207,6 +208,38 @@ mod tests {
             Some("refresh-token")
         );
         assert!(request.state.expires_at().is_some());
+
+        // State JSON saved before the ID Token claims were recorded gets them
+        // from its stored ID Token, and the refreshed state JSON keeps them.
+        let payload = serde_json::json!({
+            "iss": "https://issuer.example/",
+            "sub": "user-123",
+            "aud": "client",
+            "auth_time": 1000,
+        });
+        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
+        let mut state_value = state_value;
+        state_value["token_response"]["id_token"] =
+            serde_json::json!(format!("e30.{payload}.c2ln"));
+        let request: WindowsRefreshRequest = serde_json::from_value(serde_json::json!({
+            "token_endpoint": "https://issuer.example/token",
+            "client_id": "client",
+            "state": state_value,
+        }))
+        .unwrap();
+        let claims = serde_json::json!({
+            "iss": "https://issuer.example/",
+            "sub": "user-123",
+            "aud": ["client"],
+            "auth_time": 1000,
+        });
+        let serialized = serde_json::to_value(&request.state).unwrap();
+        assert_eq!(serialized["id_token_claims"], claims);
+        let restored: AuthenticationState = serde_json::from_value(serialized).unwrap();
+        assert_eq!(
+            serde_json::to_value(&restored).unwrap()["id_token_claims"],
+            claims
+        );
 
         let missing_token_response: std::result::Result<WindowsRefreshRequest, _> =
             serde_json::from_value(serde_json::json!({
