@@ -96,6 +96,43 @@ bool refresh_and_revoke(const std::string& base_url) {
     return succeeded;
 }
 
+// Reads the ID Token claims of state saved before the claims were recorded.
+// The ID Token payload is {"iss":"https://issuer.example","sub":"user-123",
+// "aud":"consumer","exp":2000,"iat":1000}; the signature is not checked again.
+bool reads_id_token_claims() {
+    using winrt::Windows::Data::Json::JsonObject;
+
+    const char* saved_state =
+        "{\"token_response\":{\"access_token\":\"access\",\"token_type\":\"Bearer\","
+        "\"id_token\":\"eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoidXNlci0xMjMiLCJhdWQiOiJjb25zdW1lciIsImV4cCI6MjAwMCwiaWF0IjoxMDAwfQ.c2ln\"},\"expires_at\":null}";
+    NativeOidcWindowsIdTokenClaimsResult* claims =
+        native_oidc_windows_id_token_claims(saved_state);
+    if (claims == nullptr) {
+        std::fprintf(stderr, "ID Token claims returned no result\n");
+        return false;
+    }
+    const char* value = native_oidc_windows_authorization_result_value(claims);
+    bool read = false;
+    if (native_oidc_windows_authorization_result_status(claims) ==
+            NATIVE_OIDC_WINDOWS_AUTHORIZATION_SUCCESS &&
+        value != nullptr) {
+        try {
+            JsonObject object{nullptr};
+            read = JsonObject::TryParse(winrt::to_hstring(std::string_view(value)), object) &&
+                   object.GetNamedString(L"iss") == L"https://issuer.example" &&
+                   object.GetNamedString(L"sub") == L"user-123";
+        } catch (const winrt::hresult_error&) {
+            read = false;
+        }
+    }
+    if (!read) {
+        std::fprintf(stderr, "unexpected ID Token claims result: %s\n",
+                     value == nullptr ? "(null)" : value);
+    }
+    native_oidc_windows_authorization_result_free(claims);
+    return read;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -104,6 +141,9 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (!refresh_and_revoke(argv[1])) {
+        return 1;
+    }
+    if (!reads_id_token_claims()) {
         return 1;
     }
 

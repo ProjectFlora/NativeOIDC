@@ -48,6 +48,47 @@ using (var state = JsonDocument.Parse(refreshed))
     }
 }
 
+// The refreshed state has no ID Token, so it has no ID Token claims.
+if (NativeOidcWindows.GetIdTokenClaims(refreshed) is not null)
+{
+    Console.Error.WriteLine($"Unexpected ID Token claims in refreshed state: {refreshed}");
+    return 1;
+}
+
+// State saved before the claims were recorded reads them from its stored ID
+// Token. The payload is {"iss":"https://issuer.example","sub":"user-123",
+// "aud":"consumer","exp":2000,"iat":1000}; the signature is not checked again.
+var savedState = new JsonObject
+{
+    ["token_response"] = new JsonObject
+    {
+        ["access_token"] = "access",
+        ["token_type"] = "Bearer",
+        ["id_token"] = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoidXNlci0xMjMiLCJhdWQiOiJjb25zdW1lciIsImV4cCI6MjAwMCwiaWF0IjoxMDAwfQ.c2ln",
+    },
+    ["expires_at"] = null,
+}.ToJsonString();
+var savedClaims = NativeOidcWindows.GetIdTokenClaims(savedState)
+    ?? throw new InvalidOperationException("Saved state returned no ID Token claims.");
+using (var claims = JsonDocument.Parse(savedClaims))
+{
+    if (claims.RootElement.GetProperty("iss").GetString() != "https://issuer.example"
+        || claims.RootElement.GetProperty("sub").GetString() != "user-123")
+    {
+        Console.Error.WriteLine($"Unexpected ID Token claims: {savedClaims}");
+        return 1;
+    }
+}
+
+try
+{
+    NativeOidcWindows.GetIdTokenClaims("{");
+    return 1;
+}
+catch (InvalidOperationException)
+{
+}
+
 var revokeRequest = new JsonObject
 {
     ["authorization_endpoint"] = $"{baseUrl}/authorize",

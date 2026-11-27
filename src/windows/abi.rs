@@ -10,8 +10,8 @@ use super::data::{
     WindowsEndSessionResponse, WindowsRefreshRequest, WindowsRevocationRequest,
 };
 use super::ops::{
-    authorize_with_browser, end_session_with_browser, refresh_with_windows_request,
-    revoke_with_windows_request,
+    authorize_with_browser, end_session_with_browser, id_token_claims_json,
+    refresh_with_windows_request, revoke_with_windows_request,
 };
 
 const STATUS_SUCCESS: i32 = 0;
@@ -37,6 +37,9 @@ pub type NativeOidcWindowsEndSessionResult = NativeOidcWindowsAuthorizationResul
 
 /// Opaque result returned by [`native_oidc_windows_revoke`].
 pub type NativeOidcWindowsRevocationResult = NativeOidcWindowsAuthorizationResult;
+
+/// Opaque result returned by [`native_oidc_windows_id_token_claims`].
+pub type NativeOidcWindowsIdTokenClaimsResult = NativeOidcWindowsAuthorizationResult;
 
 impl NativeOidcWindowsAuthorizationResult {
     fn new(status: i32, value: impl Into<String>) -> *mut Self {
@@ -212,6 +215,33 @@ unsafe fn copy_utf8_string(value: *const c_char) -> std::result::Result<String, 
         .to_str()
         .map(str::to_owned)
         .map_err(|_| "input string must be valid UTF-8")
+}
+
+/// Reads the validated ID Token claims from serialized authentication state
+/// and returns a result handle.
+///
+/// `state_json_utf8` is the value of a successful authorize or refresh
+/// result, or state saved by an earlier version. The function makes no
+/// network request. On success, the result value is a JSON object with
+/// `iss`, `sub`, `aud`, `exp`, `iat`, and, when present, `auth_time`, `acr`,
+/// `amr`, `azp`, and `additional_claims`, or `null` when the state has no
+/// readable ID Token. Bind accounts to `iss` and `sub` together.
+///
+/// # Safety
+///
+/// `state_json_utf8` must be null or a valid NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn native_oidc_windows_id_token_claims(
+    state_json_utf8: *const c_char,
+) -> *mut NativeOidcWindowsIdTokenClaimsResult {
+    let state_json = match copy_utf8_string(state_json_utf8) {
+        Ok(state_json) => state_json,
+        Err(error) => return result(STATUS_ERROR, error),
+    };
+    match id_token_claims_json(&state_json) {
+        Ok(claims) => result(STATUS_SUCCESS, claims),
+        Err(error) => result(STATUS_ERROR, error.to_string()),
+    }
 }
 
 /// Creates a cancellation handle for [`native_oidc_windows_authorize`].
@@ -533,6 +563,36 @@ mod tests {
             native_oidc_windows_authorization_result_free(result);
             native_oidc_windows_cancellation_free(cancellation);
         }
+    }
+
+    #[test]
+    fn c_abi_reads_id_token_claims_from_state() {
+        let read = |state_json: &CString| unsafe {
+            let result = native_oidc_windows_id_token_claims(state_json.as_ptr());
+            let status = native_oidc_windows_authorization_result_status(result);
+            let value = CStr::from_ptr(native_oidc_windows_authorization_result_value(result))
+                .to_str()
+                .unwrap()
+                .to_owned();
+            native_oidc_windows_authorization_result_free(result);
+            (status, value)
+        };
+
+        let without_id_token = CString::new(
+            r#"{"token_response":{"access_token":"access","token_type":"Bearer"},"expires_at":null}"#,
+        )
+        .unwrap();
+        assert_eq!(read(&without_id_token), (STATUS_SUCCESS, "null".to_owned()));
+
+        let (status, _) = read(&CString::new("not json").unwrap());
+        assert_eq!(status, STATUS_ERROR);
+
+        let result = unsafe { native_oidc_windows_id_token_claims(ptr::null()) };
+        assert_eq!(
+            unsafe { native_oidc_windows_authorization_result_status(result) },
+            STATUS_ERROR
+        );
+        unsafe { native_oidc_windows_authorization_result_free(result) };
     }
 
     #[test]

@@ -19,6 +19,7 @@ typedef struct NativeOidcWindowsAuthorizationResult NativeOidcWindowsAuthorizati
 typedef NativeOidcWindowsAuthorizationResult NativeOidcWindowsRevocationResult;
 typedef NativeOidcWindowsAuthorizationResult NativeOidcWindowsRefreshResult;
 typedef NativeOidcWindowsAuthorizationResult NativeOidcWindowsEndSessionResult;
+typedef NativeOidcWindowsAuthorizationResult NativeOidcWindowsIdTokenClaimsResult;
 
 enum NativeOidcWindowsAuthorizationStatus {
     NATIVE_OIDC_WINDOWS_AUTHORIZATION_SUCCESS = 0,
@@ -83,7 +84,20 @@ native_oidc_windows_revoke(
     const char *request_json_utf8,
     const NativeOidcWindowsCancellationHandle *cancellation);
 
-/* The result accessors also accept refresh and end-session result handles. */
+/*
+ * Reads the validated ID token claims from the state JSON of a successful
+ * authorize or refresh result, including state saved by earlier versions.
+ * Makes no network request. The success value is a JSON object with iss,
+ * sub, aud, exp, iat, and, when present, auth_time, acr, amr, azp, and
+ * additional_claims, or null when the state has no readable ID token.
+ */
+NATIVE_OIDC_WINDOWS_API NativeOidcWindowsIdTokenClaimsResult *
+native_oidc_windows_id_token_claims(const char *state_json_utf8);
+
+/*
+ * The result accessors also accept refresh, end-session, revocation, and
+ * ID token claims result handles.
+ */
 NATIVE_OIDC_WINDOWS_API int32_t
 native_oidc_windows_authorization_result_status(
     const NativeOidcWindowsAuthorizationResult *authorization_result);

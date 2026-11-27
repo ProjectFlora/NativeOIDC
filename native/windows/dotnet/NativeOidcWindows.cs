@@ -183,6 +183,40 @@ public static class NativeOidcWindows
         }, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Returns the validated ID Token claims of serialized authentication
+    /// state as a JSON object with <c>iss</c>, <c>sub</c>, <c>aud</c>,
+    /// <c>exp</c>, <c>iat</c>, and, when present, <c>auth_time</c>,
+    /// <c>acr</c>, <c>amr</c>, <c>azp</c>, and <c>additional_claims</c>, or
+    /// <c>null</c> when the state has no readable ID Token. Accepts state
+    /// returned by <see cref="AuthorizeAsync"/> or <see cref="RefreshAsync"/>
+    /// and state saved by earlier versions. Makes no network request.
+    /// Bind accounts to <c>iss</c> and <c>sub</c> together.
+    /// </summary>
+    public static string? GetIdTokenClaims(string stateJson)
+    {
+        if (stateJson is null)
+        {
+            throw new ArgumentNullException(nameof(stateJson));
+        }
+
+        var resultPointer = NativeMethods.IdTokenClaims(stateJson);
+        if (resultPointer == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("The native ID Token claims call returned no result.");
+        }
+        using var result = new NativeMethods.AuthorizationResultHandle(resultPointer);
+
+        var valuePointer = NativeMethods.ResultValue(result);
+        var value = Marshal.PtrToStringUTF8(valuePointer)
+            ?? throw new InvalidOperationException("The native ID Token claims result is empty.");
+        if (NativeMethods.ResultStatus(result) != 0)
+        {
+            throw new InvalidOperationException(value);
+        }
+        return value == "null" ? null : value;
+    }
+
     private static class NativeMethods
     {
         private const string Library = "native_oidc.dll";
@@ -222,6 +256,11 @@ public static class NativeOidcWindows
         internal static extern IntPtr Revoke(
             [MarshalAs(UnmanagedType.LPUTF8Str)] string requestJson,
             CancellationHandle cancellation);
+
+        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true,
+            EntryPoint = "native_oidc_windows_id_token_claims")]
+        internal static extern IntPtr IdTokenClaims(
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string stateJson);
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true,
             EntryPoint = "native_oidc_windows_authorization_result_status")]
