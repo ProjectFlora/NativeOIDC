@@ -406,6 +406,19 @@ The host owns authorization timeout policy. Cancellation stops active work
 where supported, but cannot undo a request already processed by the provider.
 macOS and Windows cannot dismiss the external browser; Android does not
 promise to close the Custom Tab. iOS cancels its authentication session.
+
+What happens when the user closes the browser from inside is platform
+behavior, not a library action:
+
+- On iOS/iPadOS the operating system delivers a close notification, and the
+  adapter returns it as a cancellation. The host treats that result the
+  same as an explicit cancel.
+- On Android closing the Custom Tab does not notify the application, so the
+  callback wait continues. The host ends the wait with a cancel action that
+  calls `adapter.cancel()`, or with a timeout.
+- On macOS and Windows a closed external browser likewise leaves the
+  loopback wait running until a callback arrives or the host cancels.
+
 Swift Task and Kotlin coroutine cancellation are connected by the supplied
 authorization adapters; direct core/UniFFI operations use their explicit
 handle. Follow each language guide for lifecycle integration.

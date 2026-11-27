@@ -558,6 +558,13 @@ active work where supported; it cannot undo a request the provider already
 processed. Handles are shared signals and the host owns timeout policy. See
 [Cancellation, timeouts, and errors](user-guide.md#cancellation-timeouts-and-errors).
 
+Closing the browser from inside is not a library action, and the result
+differs by platform. On iOS/iPadOS the operating system delivers a close
+notification, and `authorize` returns it as `FfiError.Cancelled`, the same
+result as an explicit `cancel()`. On macOS there is no close notification:
+a closed browser window leaves the loopback wait running, so the host ends
+it with `cancel()` or by cancelling the surrounding task.
+
 Direct UniFFI operations throw the `FfiError` cases:
 
 | Failure | `FfiError` case |

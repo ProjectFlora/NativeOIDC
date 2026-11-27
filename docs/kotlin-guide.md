@@ -604,6 +604,10 @@ Other cancellation rules:
   cancelled, so create a new one per operation.
 - Cancellation does not close the Custom Tab and cannot undo a request the
   provider already processed.
+- Closing the Custom Tab from inside does not notify the application, so
+  the callback wait continues until the host ends it. The usual ways to end
+  it are a cancel button that calls `adapter.cancel()`, or a coroutine
+  timeout such as `withTimeout`.
 
 ### Errors
 
