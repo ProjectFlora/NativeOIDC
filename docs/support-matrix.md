@@ -74,18 +74,15 @@ Configuration evidence:
   apps built with Xcode 26 or later; the `setup-xcode` action in the release
   workflows selects it.
 - Apple lane verification record (#284):
-  [PR CI run 46056641141](https://github.com/ProjectFlora/NativeOIDC/actions/runs/46056641141)
-  at `924e7c5`, validated 2026-11-28. Each lane asserted the effective
+  [PR CI run 46075806384](https://github.com/ProjectFlora/NativeOIDC/actions/runs/46075806384)
+  at `07ab8f0` (the first run of the final matrix), validated 2026-11-28.
+  All three configurations passed, and each lane asserted the effective
   Xcode major before any build:
   - 26-series (`macos-latest`): image `macos-26-arm64-20261123.0526`,
     macOS 26.7.2 (25G332), Xcode 26.6 (17F113); the iOS 18.6 (installed) and
     iOS 26.5 flows.
   - 27-series (`xcode-27`): image `xcode-27-arm64-20261123.0387`,
     macOS 27.0.1 (26A434), Xcode 27.2 (27B52); the iOS 27.2 flow.
-
-  (The 16-series configuration also passed in that run; its lane was removed
-  from the matrix by the scope correction, and this record is re-pointed at
-  the first run of the final matrix.)
 - Apple targets and deployment settings:
   [target builds, XCFramework packaging and slice assertions](../scripts/package-apple-xcframework.sh),
   [simulator selection](../scripts/check-ios-authorization-flow.sh).
