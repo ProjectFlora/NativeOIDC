@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -12,7 +13,10 @@ use jsonwebtoken::{
     },
     Algorithm, DecodingKey, Validation,
 };
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, IgnoredAny, MapAccess},
+    Deserialize, Deserializer, Serialize,
+};
 use serde_json::Value;
 use url::Url;
 
@@ -108,10 +112,47 @@ struct StoredIdTokenClaims {
     sub: String,
     aud: Audience,
     azp: Option<String>,
-    // Versions up to 0.9.0 did not check `auth_time`, so a stored ID Token
-    // may carry a value that is not a non-negative integer. Such a value is
-    // read as absent instead of discarding the other claims.
-    auth_time: Option<Value>,
+}
+
+/// The `auth_time` claim of a stored ID Token, read separately from
+/// [`StoredIdTokenClaims`]. Versions up to 0.9.0 did not check `auth_time`,
+/// so a stored ID Token may carry a value that is not a non-negative integer,
+/// or the claim more than once. Either is read as absent instead of
+/// discarding the other claims.
+struct StoredAuthTime(Option<u64>);
+
+impl<'de> Deserialize<'de> for StoredAuthTime {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = StoredAuthTime;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a JSON object")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> std::result::Result<StoredAuthTime, A::Error> {
+                let mut values = Vec::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "auth_time" {
+                        values.push(map.next_value::<Value>()?);
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                    }
+                }
+                Ok(StoredAuthTime(match values.as_slice() {
+                    [value] => value.as_u64(),
+                    _ => None,
+                }))
+            }
+        }
+
+        deserializer.deserialize_map(Visitor)
+    }
 }
 
 impl ValidatedIdTokenClaims {
@@ -152,12 +193,11 @@ impl ValidatedIdTokenClaims {
         };
         let payload = URL_SAFE_NO_PAD.decode(payload).ok()?;
         let claims: StoredIdTokenClaims = serde_json::from_slice(&payload).ok()?;
+        let auth_time = serde_json::from_slice::<StoredAuthTime>(&payload)
+            .ok()
+            .and_then(|auth_time| auth_time.0);
         Some(Self::new(
-            claims.iss,
-            claims.sub,
-            claims.aud,
-            claims.azp,
-            claims.auth_time.as_ref().and_then(Value::as_u64),
+            claims.iss, claims.sub, claims.aud, claims.azp, auth_time,
         ))
     }
 }
@@ -652,10 +692,16 @@ pub(crate) mod tests {
         }
 
         pub(crate) fn sign(&self, claims: Value) -> String {
+            self.sign_payload(&serde_json::to_vec(&claims).unwrap())
+        }
+
+        /// Signs raw payload bytes, for payloads that a [`Value`] cannot
+        /// represent, such as one with a duplicated claim.
+        pub(crate) fn sign_payload(&self, payload: &[u8]) -> String {
             let protected = URL_SAFE_NO_PAD.encode(
                 serde_json::to_vec(&json!({"alg": self.algorithm, "kid": self.kid})).unwrap(),
             );
-            let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap());
+            let payload = URL_SAFE_NO_PAD.encode(payload);
             let message = format!("{protected}.{payload}");
             let signature = match &self.signing_key {
                 TestSigningKey::Rsa(private_key) => SigningKey::<Sha256>::new(private_key.clone())

@@ -348,7 +348,8 @@ is kept. Otherwise refresh fails as for any invalid ID Token, and the state
 is unchanged. State saved by v0.9.0 or earlier has no `id_token_claims`; it
 takes them from its stored ID Token when it is restored, so no
 reauthentication is needed. A stored `auth_time` that is not a non-negative
-integer is treated as absent there; the other claims are still kept. If that
+integer, or that appears more than once, is treated as absent there; the
+other claims are still kept. If that
 state has no ID Token, the first ID Token validated on a later refresh
 becomes the one that later refreshes are compared with.
 
