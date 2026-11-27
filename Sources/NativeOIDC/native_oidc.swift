@@ -3605,7 +3605,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_authorization_endpoint() != 24513) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_issuer() != 18687) {
+    if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_issuer() != 59612) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_jwks_uri() != 20240) {

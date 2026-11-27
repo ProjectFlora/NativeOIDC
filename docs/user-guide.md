@@ -349,6 +349,20 @@ returns a replacement state JSON. Persist the updated complete state after
 every success, including refresh-token rotation. A missing refresh token,
 scope, or ID Token in a successful refresh response retains the old value.
 
+State keeps the identity claims of its ID Token (`iss`, `sub`, `aud`, `azp`,
+and `auth_time`) under `id_token_claims`. A refreshed ID Token must have the
+same `iss`, `sub`, and `aud` as the original one (OpenID Connect Core 1.0
+§12.2). If it contains `auth_time`, that value must equal the original one;
+a refreshed ID Token without `auth_time` is accepted and the original value
+is kept. Otherwise refresh fails as for any invalid ID Token, and the state
+is unchanged. State saved by v0.9.0 or earlier has no `id_token_claims`; it
+takes them from its stored ID Token when it is restored, so no
+reauthentication is needed. A stored `auth_time` that is not a non-negative
+integer, or that appears more than once, is treated as absent there; the
+other claims are still kept. If that
+state has no ID Token, the first ID Token validated on a later refresh
+becomes the one that later refreshes are compared with.
+
 On failure or cancellation, the local previous state is unchanged. This does
 not guarantee that the server still accepts its tokens: a refresh may reach
 the server before the response is lost. The host decides retry or

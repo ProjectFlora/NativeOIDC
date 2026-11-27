@@ -1044,6 +1044,103 @@ mod tests {
         FfiAuthenticationState::from_json(r#"{"token_response":{"access_token":"old","token_type":"Bearer","refresh_token":"refresh"}}"#.into()).unwrap()
     }
 
+    struct QueuedTransport {
+        bodies: Mutex<std::collections::VecDeque<Vec<u8>>>,
+    }
+
+    #[async_trait]
+    impl NativeHttpTransport for QueuedTransport {
+        async fn execute(
+            &self,
+            _request: FfiHttpRequest,
+            _cancellation: Arc<FfiCancellationHandle>,
+        ) -> std::result::Result<FfiHttpResponse, FfiError> {
+            let body = self.bodies.lock().unwrap().pop_front().unwrap();
+            Ok(FfiHttpResponse {
+                status: 200,
+                headers: vec![],
+                body,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn native_refresh_rejects_an_id_token_for_another_subject_without_mutating_state() {
+        use crate::id_token::tests::{jwks, TestKey};
+
+        let key = TestKey::rs256();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let id_token = |subject: &str| {
+            key.sign(serde_json::json!({
+                "iss": "https://issuer.example/",
+                "sub": subject,
+                "aud": "native-client",
+                "exp": now + 300,
+                "iat": now,
+            }))
+        };
+        // State JSON saved before the claims were recorded: the baseline comes
+        // from the stored ID Token.
+        let state = FfiAuthenticationState::from_json(
+            serde_json::json!({
+                "token_response": {
+                    "access_token": "old",
+                    "token_type": "Bearer",
+                    "refresh_token": "refresh",
+                    "id_token": id_token("user-123"),
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let before = state.to_json().await.unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&before).unwrap();
+        assert_eq!(saved["id_token_claims"]["sub"], "user-123");
+
+        let configuration = FfiServiceConfiguration::new(
+            "https://issuer.example/authorize".into(),
+            "https://issuer.example/token".into(),
+        )
+        .unwrap()
+        .with_oidc_validation_endpoints(
+            "https://issuer.example/".into(),
+            "https://issuer.example/keys".into(),
+        )
+        .unwrap();
+        let transport = Arc::new(QueuedTransport {
+            bodies: Mutex::new(
+                [
+                    serde_json::json!({
+                        "access_token": "new",
+                        "token_type": "Bearer",
+                        "id_token": id_token("someone-else"),
+                    }),
+                    jwks(&[&key]),
+                ]
+                .iter()
+                .map(|body| serde_json::to_vec(body).unwrap())
+                .collect(),
+            ),
+        });
+        assert!(matches!(
+            state
+                .refresh(
+                    configuration,
+                    "native-client".into(),
+                    vec![],
+                    transport,
+                    FfiCancellationHandle::new()
+                )
+                .await,
+            Err(FfiError::InvalidResponse(message))
+                if message == "refreshed ID Token subject does not match the original"
+        ));
+        assert_eq!(state.to_json().await.unwrap(), before);
+    }
+
     #[tokio::test]
     async fn native_refresh_rejects_reserved_and_duplicate_parameters_without_mutating_state() {
         let configuration = FfiServiceConfiguration::new(
