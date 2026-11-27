@@ -163,19 +163,36 @@ pub(super) fn validate_additional_token_parameters(
     Ok(())
 }
 
-pub(super) fn validate_issuer(issuer: &Url) -> Result<()> {
-    if issuer.scheme() != "https"
-        || issuer.host_str().is_none()
-        || !issuer.username().is_empty()
-        || issuer.password().is_some()
-        || issuer.query().is_some()
-        || issuer.fragment().is_some()
-    {
-        return Err(AuthError::InvalidConfiguration(
+/// Checks an OIDC issuer identifier and returns it parsed as a URL.
+///
+/// The identifier itself is kept and compared as an exact string; the parsed
+/// URL is only used to build the discovery URL and for these checks. Strings
+/// that `Url::parse` would silently change by stripping whitespace or control
+/// characters are rejected, so the identifier and the parsed URL never refer
+/// to different text.
+pub(super) fn parse_issuer(issuer: &str) -> Result<Url> {
+    let invalid = || {
+        AuthError::InvalidConfiguration(
             "OIDC issuer must be an HTTPS URL without user info, query, or fragment",
-        ));
+        )
+    };
+    if issuer
+        .chars()
+        .any(|c| c.is_ascii_whitespace() || c.is_control())
+    {
+        return Err(invalid());
     }
-    Ok(())
+    let parsed = Url::parse(issuer).map_err(|_| invalid())?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(invalid());
+    }
+    Ok(parsed)
 }
 
 pub(super) fn validate_redirect_uri(redirect_uri: &Url) -> Result<()> {
@@ -369,6 +386,46 @@ mod tests {
             assert!(
                 matches!(result, Err(AuthError::InvalidConfiguration(_))),
                 "{url} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn issuer_identifier_is_kept_exactly_and_checked() {
+        for issuer in [
+            "https://issuer.example",
+            "https://issuer.example/",
+            "https://issuer.example/tenant",
+            "https://issuer.example/tenant/",
+        ] {
+            let configuration = service_configuration()
+                .with_oidc_validation_endpoints(
+                    issuer,
+                    Url::parse("https://issuer.example/keys").unwrap(),
+                )
+                .unwrap();
+            assert_eq!(configuration.issuer(), Some(issuer));
+        }
+
+        for issuer in [
+            "not a URL",
+            "http://issuer.example",
+            "https://user@issuer.example",
+            "https://issuer.example?",
+            "https://issuer.example/?tenant=one",
+            "https://issuer.example#",
+            " https://issuer.example",
+            "https://issuer.example
+",
+            "https://issuer.example/ten	ant",
+        ] {
+            let result = service_configuration().with_oidc_validation_endpoints(
+                issuer,
+                Url::parse("https://issuer.example/keys").unwrap(),
+            );
+            assert!(
+                matches!(result, Err(AuthError::InvalidConfiguration(_))),
+                "{issuer:?} must be rejected"
             );
         }
     }

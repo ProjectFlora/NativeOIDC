@@ -171,7 +171,7 @@ pub struct AuthorizationSession {
     authorization_url: Url,
     redirect_uri: Url,
     token_endpoint: Url,
-    oidc_issuer: Option<Url>,
+    oidc_issuer: Option<String>,
     jwks_uri: Option<Url>,
     jwks_cache: JwksCache,
     client_id: String,
@@ -300,7 +300,7 @@ impl AuthorizationSession {
         }
         validate_id_token_if_present(
             token_response.id_token.as_deref(),
-            self.oidc_issuer.as_ref(),
+            self.oidc_issuer.as_deref(),
             self.jwks_uri.as_ref(),
             &self.client_id,
             self.nonce.as_deref(),

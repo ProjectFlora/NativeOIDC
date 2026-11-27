@@ -35,7 +35,7 @@ struct JwksCacheState {
 
 pub(crate) struct IdTokenValidation<'a> {
     pub(crate) token: &'a str,
-    pub(crate) issuer: &'a Url,
+    pub(crate) issuer: &'a str,
     pub(crate) jwks_uri: &'a Url,
     pub(crate) client_id: &'a str,
     pub(crate) expected_nonce: Option<&'a str>,
@@ -128,7 +128,7 @@ pub(crate) async fn validate_id_token(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn validate_id_token_if_present(
     id_token: Option<&str>,
-    issuer: Option<&Url>,
+    issuer: Option<&str>,
     jwks_uri: Option<&Url>,
     client_id: &str,
     expected_nonce: Option<&str>,
@@ -237,7 +237,7 @@ async fn validate_id_token_with_clock(
         .map_err(|_| AuthError::InvalidJwks("signing key is malformed or unsupported"))?;
 
     let mut validation = Validation::new(algorithm);
-    validation.set_issuer(&[issuer.as_str()]);
+    validation.set_issuer(&[issuer]);
     validation.set_audience(&[client_id]);
     validation.set_required_spec_claims(&["iss", "aud", "exp", "sub"]);
     validation.algorithms = vec![algorithm];
@@ -249,7 +249,7 @@ async fn validate_id_token_with_clock(
         .map_err(|_| AuthError::InvalidIdToken("signature or required claims are invalid"))?
         .claims;
 
-    if claims.iss != issuer.as_str() || !claims.aud.contains(client_id) {
+    if claims.iss != issuer || !claims.aud.contains(client_id) {
         return Err(AuthError::InvalidIdToken(
             "issuer or audience does not match the request",
         ));
@@ -721,11 +721,10 @@ mod tests {
         json!({"keys": keys.iter().map(|key| key.jwk.clone()).collect::<Vec<_>>()})
     }
 
-    fn endpoints() -> (Url, Url) {
-        (
-            Url::parse("https://issuer.example").unwrap(),
-            Url::parse("https://issuer.example/keys").unwrap(),
-        )
+    const ISSUER: &str = "https://issuer.example/";
+
+    fn jwks_uri() -> Url {
+        Url::parse("https://issuer.example/keys").unwrap()
     }
 
     async fn validate(
@@ -735,11 +734,30 @@ mod tests {
         expected_nonce: Option<&str>,
         require_nonce: bool,
     ) -> Result<()> {
-        let (issuer, jwks_uri) = endpoints();
+        validate_for_issuer(
+            ISSUER,
+            token,
+            jwks_cache,
+            transport,
+            expected_nonce,
+            require_nonce,
+        )
+        .await
+    }
+
+    async fn validate_for_issuer(
+        issuer: &str,
+        token: &str,
+        jwks_cache: &JwksCache,
+        transport: &dyn HttpTransport,
+        expected_nonce: Option<&str>,
+        require_nonce: bool,
+    ) -> Result<()> {
+        let jwks_uri = jwks_uri();
         validate_id_token(
             IdTokenValidation {
                 token,
-                issuer: &issuer,
+                issuer,
                 jwks_uri: &jwks_uri,
                 client_id: "native-client",
                 expected_nonce,
@@ -758,11 +776,11 @@ mod tests {
         transport: &dyn HttpTransport,
         now: u64,
     ) -> Result<()> {
-        let (issuer, jwks_uri) = endpoints();
+        let jwks_uri = jwks_uri();
         validate_id_token_with_clock(
             IdTokenValidation {
                 token,
-                issuer: &issuer,
+                issuer: ISSUER,
                 jwks_uri: &jwks_uri,
                 client_id: "native-client",
                 expected_nonce: Some("expected-nonce"),
@@ -874,6 +892,57 @@ mod tests {
             validate_at(&key.sign(claims), &cache, &transport, now)
                 .await
                 .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn issuer_is_compared_as_an_exact_string() {
+        let key = TestKey::es256("issuer-key");
+        for (issuer, iss, accepted) in [
+            ("https://issuer.example", "https://issuer.example", true),
+            ("https://issuer.example", "https://issuer.example/", false),
+            ("https://issuer.example/", "https://issuer.example/", true),
+            ("https://issuer.example/", "https://issuer.example", false),
+            (
+                "https://issuer.example/tenant",
+                "https://issuer.example/tenant",
+                true,
+            ),
+            (
+                "https://issuer.example/tenant",
+                "https://issuer.example/tenant/",
+                false,
+            ),
+            (
+                "https://issuer.example/tenant/",
+                "https://issuer.example/tenant/",
+                true,
+            ),
+            (
+                "https://issuer.example/tenant/",
+                "https://issuer.example/tenant",
+                false,
+            ),
+        ] {
+            let token = key.sign(claims(iss, json!("native-client"), None));
+            let transport = TestTransport::new([jwks(&[&key])]);
+            let result = validate_for_issuer(
+                issuer,
+                &token,
+                &JwksCache::default(),
+                &transport,
+                None,
+                false,
+            )
+            .await;
+            if accepted {
+                assert!(result.is_ok(), "{issuer} vs {iss}: {result:?}");
+            } else {
+                assert!(
+                    matches!(result, Err(AuthError::InvalidIdToken(_))),
+                    "{issuer} vs {iss} must be rejected"
+                );
+            }
         }
     }
 
@@ -1310,7 +1379,7 @@ mod tests {
         let cache = JwksCache::default();
         let transport =
             ScriptedTransport::new(vec![Ok(key_response(&[&key], "max-age=300"))], true);
-        let (_, uri) = endpoints();
+        let uri = jwks_uri();
         let first = load_jwks(
             &uri,
             &cache,
@@ -1348,7 +1417,7 @@ mod tests {
         let cache = JwksCache::default();
         let transport =
             ScriptedTransport::new(vec![Ok(key_response(&[&key], "max-age=300"))], true);
-        let (_, uri) = endpoints();
+        let uri = jwks_uri();
         let cancellation = CancellationHandle::new();
         let first = load_jwks(
             &uri,
@@ -1386,7 +1455,7 @@ mod tests {
         let cache = JwksCache::default();
         seed_cache(&cache, &key);
         let transport = ScriptedTransport::new(vec![], false);
-        let (_, uri) = endpoints();
+        let uri = jwks_uri();
         let cancellation = CancellationHandle::new();
         cancellation.cancel();
         assert!(matches!(

@@ -183,7 +183,7 @@ impl AuthenticationState {
         .await?;
         validate_id_token_if_present(
             refreshed.id_token.as_deref(),
-            configuration.issuer.as_ref(),
+            configuration.issuer.as_deref(),
             configuration.jwks_uri.as_ref(),
             client_id,
             self.oidc_nonce.as_deref(),
