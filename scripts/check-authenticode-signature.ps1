@@ -10,7 +10,7 @@
 # - a TimeStamperCertificate: the signature was timestamped, so it stays
 #   valid after the signing certificate expires;
 # - with -ExpectedSigner, a signer certificate subject that contains that
-#   text (for example "SignPath Foundation").
+#   text (for example the publisher name).
 #
 # Uses only Get-AuthenticodeSignature (Windows PowerShell 5.1 and
 # PowerShell 7 on Windows), so it needs no Windows SDK signtool.

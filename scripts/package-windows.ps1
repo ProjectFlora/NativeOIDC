@@ -26,8 +26,8 @@ try {
     $target = "target/x86_64-pc-windows-msvc/release"
 
     # The version resource that build.rs links into the DLL (Issue #258):
-    # SignPath enforces the product name and version of signed binaries, so
-    # a DLL without them, or with another crate version, is not packaged.
+    # code signing services check the product name and version of signed
+    # binaries, so a DLL without them, or with another crate version, is not packaged.
     $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed: $LASTEXITCODE" }
     $crateVersion = ($metadata.packages | Where-Object { $_.name -eq "native-oidc" }).version
