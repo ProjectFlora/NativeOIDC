@@ -26,8 +26,29 @@ interoperability testing and support policies are still evolving. Each release r
   not a non-negative integer, as it already did for `exp` and `iat`
   ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260)).
 
+### Distribution
+
+- `native_oidc.dll` in the Windows package carries a version resource:
+  product name `NativeOIDC`, company `ProjectFlora`, and the release version
+  as its file and product version, as Windows Explorer's file properties and
+  `FileVersionInfo` show them. Packaging fails when they do not match. The
+  release packages are still not code signed; this prepares signing through
+  SignPath Foundation, which requires these attributes
+  ([#258](https://github.com/ProjectFlora/NativeOIDC/issues/258)).
+- `scripts/check-authenticode-signature.ps1` checks that a file has a
+  valid, timestamped, embedded Authenticode signature, and
+  `scripts/check-windows-release-consumer.ps1 -RequireAuthenticodeSignature`
+  runs it on the packaged DLL. No release workflow requires a signature yet
+  ([#258](https://github.com/ProjectFlora/NativeOIDC/issues/258)).
+
 ### Documentation
 
+- A [code signing policy](docs/code-signing-policy.md) and a
+  [privacy statement](docs/privacy.md), linked from the README: what is to be
+  signed through SignPath Foundation, the team roles, how to verify a
+  signature, and that the library sends no telemetry and contacts only the
+  endpoints the host application configures
+  ([#258](https://github.com/ProjectFlora/NativeOIDC/issues/258)).
 - The [public API coverage matrix](docs/api-coverage.md) links each operation
   group to the Swift guide's sections and names the Apple consumer app as
   where the Swift examples run, as it already did for the Kotlin, C++, and

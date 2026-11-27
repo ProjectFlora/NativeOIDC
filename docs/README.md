@@ -74,6 +74,12 @@ affect; the [CI job selection](ci-job-selection.md) lists the rules.
 The UniFFI version decision and the dependency security audit are recorded
 in [dependency maintenance](dependency-maintenance.md).
 
+The [code signing policy](code-signing-policy.md) records what is signed (the
+Windows DLL, once SignPath Foundation signing is enabled; releases are unsigned
+until then), who approves signing, and how to verify a signature. The
+[privacy statement](privacy.md) describes what the library sends over the
+network.
+
 Build checks, mock-provider tests, and real-provider/device verification are
 different kinds of evidence. Consult the [coverage matrix](api-coverage.md)
 and [interoperability limits](live-idp-interoperability.md) before treating an
