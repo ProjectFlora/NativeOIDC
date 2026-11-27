@@ -40,8 +40,10 @@ try {
         ProductVersion   = $crateVersion
         FileVersion      = $crateVersion
         CompanyName      = "ProjectFlora"
+        FileDescription  = "NativeOIDC OAuth 2.0 and OpenID Connect client library"
         OriginalFilename = "native_oidc.dll"
         InternalName     = "native_oidc"
+        LegalCopyright   = "Copyright ProjectFlora. Licensed under the Apache License, Version 2.0."
     }
     foreach ($field in $expected.Keys) {
         if ($versionInfo.$field -ne $expected[$field]) {

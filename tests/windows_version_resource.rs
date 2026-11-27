@@ -188,6 +188,17 @@ fn version_info_tree_matches_the_crate_version_and_product_name() {
     assert_eq!(field("FileVersion"), Some("0.9.0-rc.1"));
     assert_eq!(field("OriginalFilename"), Some("native_oidc.dll"));
     assert_eq!(field("CompanyName"), Some("ProjectFlora"));
+    // These two are asserted against literal values, not against
+    // `native_oidc_strings`, so removing either field from the encoder (or
+    // mistyping its text) fails the test rather than passing the round-trip.
+    assert_eq!(
+        field("FileDescription"),
+        Some("NativeOIDC OAuth 2.0 and OpenID Connect client library")
+    );
+    assert_eq!(
+        field("LegalCopyright"),
+        Some("Copyright ProjectFlora. Licensed under the Apache License, Version 2.0.")
+    );
 
     let var_file_info = &root.children[1];
     assert_eq!(var_file_info.children.len(), 1);
