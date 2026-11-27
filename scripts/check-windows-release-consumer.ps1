@@ -1,9 +1,22 @@
+# Validates a Windows release package (native-oidc-windows-<version>.zip)
+# by building and running the C++ and .NET consumers against it.
+#
+# -RequireAuthenticodeSignature also requires a valid, timestamped
+# Authenticode signature on the packaged native_oidc.dll, checked with
+# scripts/check-authenticode-signature.ps1 before any consumer is built;
+# -ExpectedSigner is passed on to that check. Releases are not signed yet
+# (Issue #258), so no workflow passes the switch until signing is enabled.
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Package
+    [string]$Package,
+    [switch]$RequireAuthenticodeSignature,
+    [string]$ExpectedSigner
 )
 
 $ErrorActionPreference = "Stop"
+if ($ExpectedSigner -and -not $RequireAuthenticodeSignature) {
+    throw "-ExpectedSigner needs -RequireAuthenticodeSignature."
+}
 
 # Runs one consumer against a fresh local mock provider. The provider prints
 # its port on the first standard output line, and the consumer receives the
@@ -67,6 +80,11 @@ try {
         if (-not (Test-Path $path) -or (Get-Item $path).Length -eq 0) {
             throw "Windows release archive is missing $file."
         }
+    }
+    if ($RequireAuthenticodeSignature) {
+        $signatureArguments = @{ Path = (Join-Path $packageRoot.FullName "native_oidc.dll") }
+        if ($ExpectedSigner) { $signatureArguments.ExpectedSigner = $ExpectedSigner }
+        & (Join-Path $PSScriptRoot "check-authenticode-signature.ps1") @signatureArguments
     }
 
     $mockBuild = Join-Path $workDir "mock-provider-build"

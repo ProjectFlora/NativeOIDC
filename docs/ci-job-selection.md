@@ -28,7 +28,8 @@ change cannot affect it. Every job runs when:
 
 - a path matches no rule ("unclassified path"),
 - the change touches `.github/**`, the selector or its tests, `Cargo.toml`,
-  `Cargo.lock` or `.gitattributes`,
+  `Cargo.lock`, the Cargo build script (`build.rs`, `build_support/**`) or
+  `.gitattributes`,
 - the diff cannot be computed (see below), or
 - the `Select CI jobs` job itself fails, even if it wrote some outputs before
   failing.
@@ -65,6 +66,7 @@ package.
 | `.github/**` | all | A workflow change can change any check, so it is not judged by the rules it may itself break. |
 | `scripts/select_ci_jobs.py`, `scripts/test_select_ci_jobs.py` | all | The selector itself. |
 | `Cargo.toml`, `Cargo.lock` | all | Dependencies, features and version feed every build, the license notices and the Swift package manifest check. |
+| `build.rs`, `build_support/**` | all | Cargo runs the build script for every target; on Windows MSVC targets it links the DLL's version resource. |
 | `.gitattributes` | all | Line endings of checked-out build inputs (for example `about.hbs`). |
 | `src/windows/**` | Rust, `windows` | Compiled only for Windows and for tests (`#[cfg(any(windows, test))]` in `src/lib.rs`), so it is in neither the Apple and Android libraries nor the generated bindings. |
 | `src/**` (other) | Rust, packages | The shared core every platform links, and the source of the UniFFI bindings. |
@@ -89,7 +91,7 @@ package.
 | `scripts/test_normalize_zip.py` | `test`, `apple` | Its real-`ditto` tests run only on macOS. |
 | Apple CI scripts (`apple-phase-timing.sh`, `check-apple-*`, `check-ios-*`, `check-spm-package.sh`, `install-ios-simulator-runtime.sh`, `ios-mock-oauth-provider.py`, `normalize_*.py`, `package-apple-xcframework.sh`, `select_ios_simulator.py`) | `test`, `apple` | |
 | Android CI scripts (`check-android-targets.sh`, `check-android-release-consumer.sh`, `check-android-maven-publication.sh`) | `test`, `android` | |
-| Windows CI scripts (`package-windows.ps1`, `check-windows-release-consumer.ps1`) | `test`, `windows` | |
+| Windows CI scripts (`package-windows.ps1`, `check-windows-release-consumer.ps1`, `check-authenticode-signature.ps1`) | `test`, `windows` | |
 | Release-only scripts (`check-android-maven-consumer.sh`, `check-android-maven-publication-status.sh`, `verify-android-maven-consumer.sh`, `check-gpg-keyserver.sh`), manual real-browser scripts (`check-macos-real-browser.sh`, `check-windows-real-browser.ps1`, `real_browser_mock_provider.py`) and other `scripts/test_*.py` | `test` | The release workflows or a maintainer run them; the Tests job runs their unit tests. The real-browser check sources (`native/apple/MacOSRealBrowserCheck.swift`, `native/consumer-smoke/windows/real-browser/**`) follow their platform's rule: the Apple job type-checks the Swift file, and the Windows project is kept under the Windows consumer rule. |
 | `scripts/build-release-docs.py`, `scripts/check-release-docs.py` | `test` | The Tests job builds and checks the release documentation set with them; the release workflows run them too. |
 | `scripts/agent-precheck.sh` | none | Precheck for the agent workflow automations; only Orca runs it, and no build, package or check reads it. |

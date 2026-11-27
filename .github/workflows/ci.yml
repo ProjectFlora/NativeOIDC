@@ -236,6 +236,22 @@ jobs:
         run: |
           scripts/package-windows.ps1 -Package target/windows-audit-package
           scripts/check-windows-release-consumer.ps1 -Package target/windows-audit-package.zip
+      # The Authenticode check that the release consumer validation runs
+      # with -RequireAuthenticodeSignature once releases are signed
+      # (Issue #258). Packages are unsigned until then, so it must reject
+      # this package's DLL, directly and through the consumer check, and
+      # accept a Microsoft-signed, timestamped binary of the runner.
+      - name: Self-test the Authenticode signature check
+        shell: pwsh
+        run: |
+          $unsigned = "target/windows-audit-package/native_oidc.dll"
+          $rejected = $false
+          try { scripts/check-authenticode-signature.ps1 -Path $unsigned } catch { $rejected = $true; Write-Output "Rejected as expected: $_" }
+          if (-not $rejected) { throw "The unsigned $unsigned passed the Authenticode check." }
+          $rejected = $false
+          try { scripts/check-windows-release-consumer.ps1 -Package target/windows-audit-package.zip -RequireAuthenticodeSignature } catch { $rejected = $true; Write-Output "Rejected as expected: $_" }
+          if (-not $rejected) { throw "The consumer check accepted the unsigned package with -RequireAuthenticodeSignature." }
+          scripts/check-authenticode-signature.ps1 -Path (Join-Path $PSHOME "pwsh.exe") -ExpectedSigner "Microsoft Corporation"
       - uses: actions/upload-artifact@v7
         with:
           name: windows-audit-package
