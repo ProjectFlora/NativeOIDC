@@ -260,6 +260,33 @@ fn additional_claims(payload: &[u8]) -> Option<BTreeMap<String, Value>> {
     Some(claims)
 }
 
+/// The most arrays and objects nested in one additional claim value.
+///
+/// serde_json reads at most 127 nested arrays and objects. Saved
+/// [`AuthenticationState`](crate::AuthenticationState) holds each additional
+/// claim three levels deep (the state, `id_token_claims`, and
+/// `additional_claims`), two levels deeper than the ID Token payload does, so
+/// a claim that the payload can hold may make the saved state unreadable.
+/// Claims nested deeper than this are not accepted.
+pub(crate) const MAX_ADDITIONAL_CLAIM_DEPTH: usize = 124;
+
+/// Whether every additional claim stays readable in saved state.
+fn additional_claims_fit_saved_state(claims: &BTreeMap<String, Value>) -> bool {
+    claims
+        .values()
+        .all(|value| json_depth(value) <= MAX_ADDITIONAL_CLAIM_DEPTH)
+}
+
+/// The number of arrays and objects nested in `value`, 0 for a scalar. The
+/// recursion is bounded because serde_json limits the nesting it reads.
+fn json_depth(value: &Value) -> usize {
+    match value {
+        Value::Array(values) => 1 + values.iter().map(json_depth).max().unwrap_or(0),
+        Value::Object(members) => 1 + members.values().map(json_depth).max().unwrap_or(0),
+        _ => 0,
+    }
+}
+
 fn audiences(aud: Audience) -> Vec<String> {
     let mut aud = match aud {
         Audience::Single(audience) => vec![audience],
@@ -273,7 +300,9 @@ fn audiences(aud: Audience) -> Vec<String> {
 impl IdTokenClaims {
     /// Reads the claims of an ID Token that this library already validated,
     /// such as the one kept in authentication state. The signature is not
-    /// checked again. Returns `None` when the value is not a readable JWT.
+    /// checked again. Returns `None` when the value is not a readable JWT, or
+    /// when its claims are nested too deeply to keep in saved state (see
+    /// [`MAX_ADDITIONAL_CLAIM_DEPTH`]).
     pub(crate) fn read_stored(token: &str) -> Option<Self> {
         let payload = jwt_payload(token)?;
         let claims: StoredIdTokenClaims = serde_json::from_slice(&payload).ok()?;
@@ -289,7 +318,8 @@ impl IdTokenClaims {
             acr: authentication.acr,
             amr: authentication.amr,
             azp: claims.azp,
-            additional_claims: additional_claims(&payload)?,
+            additional_claims: additional_claims(&payload)
+                .filter(additional_claims_fit_saved_state)?,
         })
     }
 }
@@ -512,6 +542,11 @@ async fn validate_id_token_with_clock(
         .ok_or(AuthError::InvalidIdToken(
             "signature or required claims are invalid",
         ))?;
+    if !additional_claims_fit_saved_state(&additional_claims) {
+        return Err(AuthError::InvalidIdToken(
+            "ID Token claims are nested too deeply",
+        ));
+    }
     Ok(IdTokenClaims {
         iss: claims.iss,
         sub: claims.sub,

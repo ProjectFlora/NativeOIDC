@@ -49,7 +49,9 @@ interoperability testing and support policies are still evolving. Each release r
   versions ignore the new key when they read state saved by this version. ID
   Token validation now rejects an `auth_time` claim that is not a
   non-negative integer, as it already did for `exp` and `iat`, an `acr` that
-  is not a string, and an `amr` that is not an array of strings
+  is not a string, an `amr` that is not an array of strings, and a claim
+  nested more than 124 arrays and objects deep, because saved state holding
+  it could not be read back
   ([#260](https://github.com/ProjectFlora/NativeOIDC/issues/260),
   [#262](https://github.com/ProjectFlora/NativeOIDC/issues/262)).
 - Compatibility: `FfiServiceConfiguration.issuer()` (Swift, Kotlin) and Rust

@@ -444,7 +444,10 @@ mod tests {
     use super::*;
     use crate::{
         authorization::{test_support::*, validation::RESERVED_TOKEN_PARAMETERS},
-        id_token::tests::{jwks, ScriptedTransport, TestKey},
+        id_token::{
+            tests::{jwks, ScriptedTransport, TestKey},
+            MAX_ADDITIONAL_CLAIM_DEPTH,
+        },
         HttpResponse,
     };
 
@@ -909,6 +912,61 @@ mod tests {
         let restored: AuthenticationState =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
         assert_eq!(restored.id_token_claims().cloned(), before);
+    }
+
+    #[tokio::test]
+    async fn claims_nested_up_to_the_saved_state_limit_restore_and_deeper_ones_are_rejected() {
+        fn nested(depth: usize) -> Value {
+            (0..depth).fold(serde_json::json!(0), |value, _| serde_json::json!([value]))
+        }
+        let key = TestKey::rs256();
+        let auth_time = unix_now() - 10;
+        let original = key.sign(id_token_claims("user-123", Some(auth_time)));
+        let mut state = oidc_state(Some(original));
+
+        // A claim nested to the limit is accepted, and the saved state
+        // restores it.
+        let mut deepest = id_token_claims("user-123", Some(auth_time));
+        deepest["nested"] = nested(MAX_ADDITIONAL_CLAIM_DEPTH);
+        let transport = refresh_transport(Some(&key.sign(deepest)), &key);
+        refresh_with(&mut state, "https://issuer.example/", &transport)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.id_token_claims().unwrap().additional_claims["nested"],
+            nested(MAX_ADDITIONAL_CLAIM_DEPTH)
+        );
+        let saved = serde_json::to_vec(&state).unwrap();
+        let restored: AuthenticationState = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(restored.id_token_claims(), state.id_token_claims());
+
+        // One more level would make the saved state unreadable, so the limit
+        // is the deepest claim that saved state can hold.
+        let mut deeper_state = serde_json::to_value(&state).unwrap();
+        deeper_state["id_token_claims"]["additional_claims"]["nested"] =
+            nested(MAX_ADDITIONAL_CLAIM_DEPTH + 1);
+        let deeper_state = serde_json::to_vec(&deeper_state).unwrap();
+        assert!(serde_json::from_slice::<AuthenticationState>(&deeper_state).is_err());
+
+        // An ID Token with a deeper claim is rejected and leaves the state
+        // as it was. Stored with the state, it gives no claims.
+        let mut too_deep = id_token_claims("user-123", Some(auth_time));
+        too_deep["nested"] = nested(MAX_ADDITIONAL_CLAIM_DEPTH + 1);
+        let too_deep = key.sign(too_deep);
+        let before = serde_json::to_value(&state).unwrap();
+        let transport = refresh_transport(Some(&too_deep), &key);
+        let result = refresh_with(&mut state, "https://issuer.example/", &transport).await;
+        assert!(
+            matches!(
+                result,
+                Err(AuthError::InvalidIdToken(
+                    "ID Token claims are nested too deeply"
+                ))
+            ),
+            "{result:?}"
+        );
+        assert_eq!(serde_json::to_value(&state).unwrap(), before);
+        assert_eq!(oidc_state(Some(too_deep)).id_token_claims(), None);
     }
 
     #[test]
