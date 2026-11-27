@@ -65,13 +65,19 @@ func guideExplicitConfiguration() throws -> FfiServiceConfiguration {
 
 /// The guide's signed-in user example.
 struct GuideAccountKey: Hashable {
-  let issuer: String
-  let subject: String
+  // The exact UTF-8 bytes of iss and sub.
+  let issuer: [UInt8]
+  let subject: [UInt8]
 }
 
 func guideAccountKey(for state: FfiAuthenticationState) async -> GuideAccountKey? {
   guard let claims = await state.idTokenClaims() else { return nil }
-  return GuideAccountKey(issuer: claims.iss, subject: claims.sub)
+  return GuideAccountKey(issuer: Array(claims.iss.utf8), subject: Array(claims.sub.utf8))
+}
+
+/// The guide's UserInfo subject check.
+func guideUserInfoSubjectMatches(_ userinfoSubject: String, idTokenSubject: String) -> Bool {
+  userinfoSubject.utf8.elementsEqual(idTokenSubject.utf8)
 }
 
 /// The guide's authorization-options example.
@@ -625,11 +631,28 @@ private func checkStateUpdate() async throws {
     serialized: #"{"token_response":{"access_token":"a","token_type":"Bearer","id_token":"eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lkcC5leGFtcGxlIiwic3ViIjoidXNlci0xMjMiLCJhdWQiOiJuYXRpdmUtcHVibGljLWNsaWVudCIsImV4cCI6MjAwMCwiaWF0IjoxMDAwfQ.c2ln"},"expires_at":null}"#
   )
   guard await guideAccountKey(for: saved)
-    == GuideAccountKey(issuer: "https://idp.example", subject: "user-123")
+    == GuideAccountKey(
+      issuer: Array("https://idp.example".utf8), subject: Array("user-123".utf8))
   else {
     fatalError("guide check: saved state did not return its issuer and subject")
   }
-  print("guide check ok: signed-in user (issuer and subject)")
+  // Precomposed and decomposed "café" are equal as Swift strings but are
+  // different OIDC identifiers.
+  let precomposed = "caf\u{E9}"
+  let decomposed = "cafe\u{301}"
+  guard precomposed == decomposed else {
+    fatalError("guide check: Swift no longer treats canonically equivalent strings as equal")
+  }
+  let issuer = Array("https://idp.example".utf8)
+  guard
+    GuideAccountKey(issuer: issuer, subject: Array(precomposed.utf8))
+      != GuideAccountKey(issuer: issuer, subject: Array(decomposed.utf8)),
+    !guideUserInfoSubjectMatches(precomposed, idTokenSubject: decomposed),
+    guideUserInfoSubjectMatches("user-123", idTokenSubject: "user-123")
+  else {
+    fatalError("guide check: OIDC identifiers were not compared exactly")
+  }
+  print("guide check ok: signed-in user (issuer and subject, compared exactly)")
 }
 
 private func checkCancellation() async throws {

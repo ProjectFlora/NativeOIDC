@@ -117,8 +117,16 @@ fn restored_id_token_claims(
         return Some(claims);
     }
     let stored = stored_id_token_claims(token_response);
-    match (EarlierIdTokenClaims::deserialize(&saved), stored) {
-        (Ok(earlier), Some(stored)) => Some(IdTokenClaims {
+    // Only a record with no member outside the earlier form is migrated. A
+    // current-form record that cannot be read (for example with an
+    // unreadable `amr`) takes its claims from the stored ID Token.
+    let earlier = if is_earlier_id_token_claims(&saved) {
+        EarlierIdTokenClaims::deserialize(&saved).ok()
+    } else {
+        None
+    };
+    match (earlier, stored) {
+        (Some(earlier), Some(stored)) => Some(IdTokenClaims {
             iss: earlier.iss,
             sub: earlier.sub,
             aud: earlier.aud,
@@ -128,6 +136,17 @@ fn restored_id_token_claims(
         }),
         (_, stored) => stored,
     }
+}
+
+/// Whether a saved claims record is an object with only the members of
+/// [`EarlierIdTokenClaims`].
+fn is_earlier_id_token_claims(saved: &Value) -> bool {
+    const EARLIER_MEMBERS: [&str; 5] = ["iss", "sub", "aud", "azp", "auth_time"];
+    saved.as_object().is_some_and(|members| {
+        members
+            .keys()
+            .all(|member| EARLIER_MEMBERS.contains(&member.as_str()))
+    })
 }
 
 fn stored_id_token_claims(token_response: &TokenResponse) -> Option<IdTokenClaims> {
@@ -928,6 +947,25 @@ mod tests {
 
         let without_id_token = oidc_state(None);
         assert_eq!(without_id_token.id_token_claims(), None);
+    }
+
+    #[test]
+    fn state_with_unreadable_current_claims_takes_them_from_its_id_token() {
+        let key = TestKey::rs256();
+        let state = oidc_state(Some(key.sign(id_token_claims("user-123", Some(1_000)))));
+        let expected = state.id_token_claims().cloned().unwrap();
+        let mut serialized = serde_json::to_value(&state).unwrap();
+
+        // A current-form record (with exp and iat) whose amr cannot be read
+        // is not migrated as an earlier record: its auth_time and azp are
+        // not kept.
+        let saved = &mut serialized["id_token_claims"];
+        saved["auth_time"] = serde_json::json!(2_000);
+        saved["azp"] = serde_json::json!("other-client");
+        saved["amr"] = serde_json::json!("not-an-array");
+
+        let restored: AuthenticationState = serde_json::from_value(serialized).unwrap();
+        assert_eq!(restored.id_token_claims(), Some(&expected));
     }
 
     #[test]
