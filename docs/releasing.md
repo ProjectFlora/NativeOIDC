@@ -173,7 +173,15 @@ After the GitHub Release is created, the `publish_maven` job publishes
    so the job runs no Rust NDK build. The POM, the module metadata, and the
    sources and javadoc jars are generated from the tag. The check requires
    the AAR, and its entry in the module metadata, to have the expected
-   SHA-256, and requires every file's signature and `.md5`/`.sha1` checksums.
+   SHA-256, and requires every file's signature and its `.md5`/`.sha1`
+   checksums. Each signature must additionally verify with the signing
+   key and carry no armor `Version:` header and no unreplaced `@`
+   placeholder. The build drops the `Version:` header right after
+   signing: the bcpg jar Gradle's signing plugin uses writes it from
+   Bouncy Castle's default version string, which is still an unreplaced
+   release-name token in the published artifact (`Version: BCPG
+   v@RELEASE_NAME@` in v0.7.0, Issue #169). Armor headers are comments
+   outside the signed data, so dropping one leaves the signature valid.
 4. It uploads the bundle to the Central Portal (`android_maven_central_release.py upload`,
    `publishingType=AUTOMATIC`), records the deployment, and waits until the
    Portal reports it `PUBLISHED` (30 × 60 s). Publishing can still fail
@@ -184,8 +192,11 @@ After the GitHub Release is created, the `publish_maven` job publishes
    does.
 
 So Maven Central and the GitHub Release ship the same AAR bytes. The
-candidate run and pull request CI run the same publication check on an
-unsigned publication that builds its own AAR.
+candidate run's `android` job runs the same publication check on an
+unsigned publication that builds its own AAR; pull request CI runs the
+same check signed, with a generated throwaway key and a Central Portal
+bundle, so the signature checks run on every pull request that touches
+Android.
 
 ### The Maven Central state
 
