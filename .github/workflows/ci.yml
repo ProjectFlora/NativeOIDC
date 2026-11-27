@@ -165,6 +165,19 @@ jobs:
       - uses: $/.github/actions/setup-xcode
         with:
           version: ${{ matrix.xcode }}
+      # The upstream selector switches with `sudo xcode-select -s` without
+      # checking the result, so a failed switch would leave the image
+      # default in effect and the lane could pass under the wrong major.
+      # Assert that the effective Xcode is of the lane's series (#284):
+      # the lanes exist to validate specific Xcode series.
+      - name: Verify the selected Xcode major
+        run: |
+          major=$(xcodebuild -version | awk '/^Xcode /{print $2}' | cut -d. -f1)
+          if [[ "$major" != "${{ matrix.xcode }}" ]]; then
+            echo "Selected Xcode major is $major; the lane expects ${{ matrix.xcode }}" >&2
+            xcodebuild -version >&2
+            exit 1
+          fi
       # The 26-series image ships no iOS 18 runtime (its runtimes are 26.x
       # only), so the 18 configuration installs one, as the release
       # workflow does on `macos-26`. The 16-series image bundles the 18.x
