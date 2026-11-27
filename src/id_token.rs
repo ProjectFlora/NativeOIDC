@@ -15,7 +15,7 @@ use jsonwebtoken::{
     Algorithm, DecodingKey, Validation,
 };
 use serde::{
-    de::{self, IgnoredAny, MapAccess},
+    de::{self, DeserializeOwned, IgnoredAny, MapAccess},
     Deserialize, Deserializer, Serialize,
 };
 use serde_json::{value::RawValue, Value};
@@ -179,9 +179,10 @@ struct StoredIdTokenClaims {
 
 /// The `auth_time`, `acr`, and `amr` claims of a stored ID Token, read
 /// separately from [`StoredIdTokenClaims`]. Versions up to 0.9.0 did not check
-/// these claims, so a stored ID Token may carry a value of another type, or
-/// the claim more than once. Either is read as absent instead of discarding
-/// the other claims.
+/// these claims, so a stored ID Token may carry a value of another type, a
+/// value nested too deeply to read as a [`Value`], or the claim more than
+/// once. Each claim is read from its raw JSON on its own, and any of these is
+/// read as absent instead of discarding the other claims.
 #[derive(Default)]
 struct StoredAuthenticationClaims {
     auth_time: Option<u64>,
@@ -209,18 +210,18 @@ impl<'de> Deserialize<'de> for StoredAuthenticationClaims {
                 let mut amr = Vec::new();
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
-                        "auth_time" => auth_time.push(map.next_value::<Value>()?),
-                        "acr" => acr.push(map.next_value::<Value>()?),
-                        "amr" => amr.push(map.next_value::<Value>()?),
+                        "auth_time" => auth_time.push(map.next_value::<Box<RawValue>>()?),
+                        "acr" => acr.push(map.next_value::<Box<RawValue>>()?),
+                        "amr" => amr.push(map.next_value::<Box<RawValue>>()?),
                         _ => {
                             map.next_value::<IgnoredAny>()?;
                         }
                     }
                 }
                 Ok(StoredAuthenticationClaims {
-                    auth_time: single_value(auth_time).and_then(|value| value.as_u64()),
-                    acr: single_value(acr).and_then(|value| serde_json::from_value(value).ok()),
-                    amr: single_value(amr).and_then(|value| serde_json::from_value(value).ok()),
+                    auth_time: single_value(auth_time),
+                    acr: single_value(acr),
+                    amr: single_value(amr),
                 })
             }
         }
@@ -229,11 +230,12 @@ impl<'de> Deserialize<'de> for StoredAuthenticationClaims {
     }
 }
 
-fn single_value(mut values: Vec<Value>) -> Option<Value> {
-    if values.len() == 1 {
-        values.pop()
-    } else {
-        None
+/// Reads a claim that appeared exactly once as `T`, or `None` when it
+/// appeared more than once or its value cannot be read as `T`.
+fn single_value<T: DeserializeOwned>(values: Vec<Box<RawValue>>) -> Option<T> {
+    match values.as_slice() {
+        [value] => serde_json::from_str(value.get()).ok(),
+        _ => None,
     }
 }
 

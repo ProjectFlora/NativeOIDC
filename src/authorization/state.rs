@@ -973,10 +973,13 @@ mod tests {
     async fn state_whose_stored_id_token_has_a_claim_too_deep_to_save_keeps_its_baseline() {
         // Earlier versions accepted and stored an ID Token with a claim
         // nested deeper than saved state can hold, and even with one nested
-        // deeper than serde_json reads into a Value (127 levels).
+        // deeper than serde_json reads into a Value (127 levels), including
+        // `acr` and `amr`, which they did not check.
         let key = TestKey::rs256();
         let auth_time = unix_now() - 10;
-        let mut stored_claims = id_token_claims("user-123", None);
+        let mut stored_claims = id_token_claims("user-123", Some(auth_time));
+        stored_claims["acr"] = nested(200);
+        stored_claims["amr"] = nested(200);
         stored_claims["email"] = serde_json::json!("user@example.com");
         stored_claims["nested"] = nested(MAX_ADDITIONAL_CLAIM_DEPTH + 1);
         stored_claims["unreadable"] = nested(200);
@@ -991,20 +994,22 @@ mod tests {
             "iss": "https://issuer.example/",
             "sub": "user-123",
             "aud": ["native-client"],
-            "auth_time": auth_time,
+            "auth_time": auth_time - 5,
         });
 
         for (case, saved, expected_auth_time) in [
-            ("none", without_claims, None),
-            ("earlier", earlier_claims, Some(auth_time)),
+            ("none", without_claims, auth_time),
+            ("earlier", earlier_claims, auth_time - 5),
         ] {
-            // The claims that cannot be saved are left out; the identity, the
-            // authentication baseline, and the other claims are kept, and
-            // the state can be saved and read back.
+            // The claims that cannot be read or saved are left out; the
+            // identity, the readable authentication baseline, and the other
+            // claims are kept, and the state can be saved and read back.
             let mut restored: AuthenticationState = serde_json::from_value(saved).unwrap();
             let claims = restored.id_token_claims().unwrap();
             assert_eq!(claims.sub, "user-123", "{case}");
-            assert_eq!(claims.auth_time, expected_auth_time, "{case}");
+            assert_eq!(claims.auth_time, Some(expected_auth_time), "{case}");
+            assert_eq!(claims.acr, None, "{case}");
+            assert_eq!(claims.amr, None, "{case}");
             assert_eq!(claims.exp, stored_claims["exp"].as_u64().unwrap(), "{case}");
             assert_eq!(
                 claims.additional_claims,
@@ -1031,19 +1036,18 @@ mod tests {
                 ),
                 "{case}"
             );
-            if let Some(auth_time) = expected_auth_time {
-                let other_auth_time = key.sign(id_token_claims("user-123", Some(auth_time + 1)));
-                let transport = refresh_transport(Some(&other_auth_time), &key);
-                assert!(
-                    matches!(
-                        refresh_with(&mut restored, "https://issuer.example/", &transport).await,
-                        Err(AuthError::InvalidIdToken(
-                            "refreshed ID Token auth_time does not match the original"
-                        ))
-                    ),
-                    "{case}"
-                );
-            }
+            let other_auth_time =
+                key.sign(id_token_claims("user-123", Some(expected_auth_time + 1)));
+            let transport = refresh_transport(Some(&other_auth_time), &key);
+            assert!(
+                matches!(
+                    refresh_with(&mut restored, "https://issuer.example/", &transport).await,
+                    Err(AuthError::InvalidIdToken(
+                        "refreshed ID Token auth_time does not match the original"
+                    ))
+                ),
+                "{case}"
+            );
         }
     }
 
