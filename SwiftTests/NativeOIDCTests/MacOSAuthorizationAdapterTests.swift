@@ -66,6 +66,37 @@
       }
     }
 
+    func testMatchingCallbackWithInvalidHostFailsTheWait() async throws {
+      let listener = try LoopbackHTTPListener(callbackPath: "/oauth/callback")
+      let port = try await listener.start()
+      let callbackTask = Task {
+        try await listener.waitForCallback()
+      }
+      let deadline = Date().addingTimeInterval(5)
+      while !(await listener.isWaitingForCallback) {
+        guard Date() < deadline else {
+          await listener.cancel()
+          XCTFail("listener did not start waiting for its callback")
+          return
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+      }
+      // Mirrors the Windows `matching_callback_with_invalid_host_is_terminal`
+      // request: the path matches the template, but the Host header does not.
+      let socket = try Self.openSocket(
+        port: port,
+        request: "GET /oauth/callback?code=sample HTTP/1.1\r\nHost: localhost:\(port)\r\n\r\n"
+      )
+      let response = try Self.readResponse(from: socket)
+      Darwin.close(socket)
+      XCTAssertTrue(response.hasPrefix("HTTP/1.1 400"), "response was: \(response)")
+      do {
+        _ = try await callbackTask.value
+        XCTFail("a matching request with an invalid Host delivered a callback")
+      } catch MacOSAuthorizationAdapterError.malformedLoopbackRequest {
+      }
+    }
+
     func testIndependentListenersBindDifferentPortsAndCancelSeparately() async throws {
       let first = try LoopbackHTTPListener(callbackPath: "/oauth/callback")
       let second = try LoopbackHTTPListener(callbackPath: "/oauth/callback")
@@ -349,6 +380,27 @@
         throw URLError(.networkConnectionLost)
       }
       return socket
+    }
+
+    /// Reads everything the peer sends until it closes the connection,
+    /// failing after a bounded time instead of hanging the suite.
+    private static func readResponse(from socket: Int32) throws -> String {
+      var timeout = timeval(tv_sec: 5, tv_usec: 0)
+      Darwin.setsockopt(
+        socket, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+        socklen_t(MemoryLayout<timeval>.size)
+      )
+      var data = Data()
+      var buffer = [UInt8](repeating: 0, count: 4096)
+      while true {
+        let count = Darwin.recv(socket, &buffer, buffer.count, 0)
+        guard count >= 0 else {
+          throw URLError(.networkConnectionLost)
+        }
+        if count == 0 { break }
+        data.append(contentsOf: buffer[0..<count])
+      }
+      return String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
     }
   }
 #endif
