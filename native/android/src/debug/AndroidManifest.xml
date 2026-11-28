@@ -8,5 +8,9 @@
             android:name="net.projectflora.nativeoidc.AndroidNoBrowserFlowTestActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
+            android:name="net.projectflora.nativeoidc.AndroidFakeBrowserFlowTestActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 </manifest>
