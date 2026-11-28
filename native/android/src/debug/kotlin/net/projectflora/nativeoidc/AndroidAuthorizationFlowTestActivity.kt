@@ -23,14 +23,18 @@ open class AndroidAuthorizationFlowTestActivity : Activity() {
         options: FfiAuthorizationOptions,
         redirects: AndroidRedirectConfiguration,
         transport: NativeHttpTransport,
+        // Seams for tests that reach the adapter, for example to call cancel()
+        // while the operation waits for a callback.
+        onAdapter: (AndroidAuthorizationAdapter) -> Unit = {},
         onResult: (Result<FfiAuthenticationState>) -> Unit,
     ) {
         scope.launch {
+            val adapter = AndroidAuthorizationAdapter(this@AndroidAuthorizationFlowTestActivity)
+            onAdapter(adapter)
             val result: Result<FfiAuthenticationState> =
                 try {
                     Result.success(
-                        AndroidAuthorizationAdapter(this@AndroidAuthorizationFlowTestActivity)
-                            .authorize(configuration, options, redirects, transport),
+                        adapter.authorize(configuration, options, redirects, transport),
                     )
                 } catch (error: Throwable) {
                     // Errors such as NoClassDefFoundError reach the test as a
