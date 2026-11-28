@@ -81,19 +81,36 @@
         }
         try await Task.sleep(nanoseconds: 10_000_000)
       }
-      // Mirrors the Windows `matching_callback_with_invalid_host_is_terminal`
-      // request: the path matches the template, but the Host header does not.
-      let socket = try Self.openSocket(
-        port: port,
-        request: "GET /oauth/callback?code=sample HTTP/1.1\r\nHost: localhost:\(port)\r\n\r\n"
-      )
-      let response = try Self.readResponse(from: socket)
-      Darwin.close(socket)
-      XCTAssertTrue(response.hasPrefix("HTTP/1.1 400"), "response was: \(response)")
+      // Bounds the callback wait: if the invalid-Host branch regressed to an
+      // HTTP 400 without completing the callback, the watchdog cancels the
+      // listener so the test fails below instead of hanging the suite.
+      let watchdog = Task {
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        guard !Task.isCancelled else { return }
+        await listener.cancel()
+      }
+      defer { watchdog.cancel() }
+      do {
+        // Mirrors the Windows `matching_callback_with_invalid_host_is_terminal`
+        // request: the path matches the template, but the Host header does not.
+        let socket = try Self.openSocket(
+          port: port,
+          request: "GET /oauth/callback?code=sample HTTP/1.1\r\nHost: localhost:\(port)\r\n\r\n"
+        )
+        defer { Darwin.close(socket) }
+        let response = try Self.readResponse(from: socket)
+        XCTAssertTrue(response.hasPrefix("HTTP/1.1 400"), "response was: \(response)")
+      } catch {
+        await listener.cancel()
+        throw error
+      }
       do {
         _ = try await callbackTask.value
         XCTFail("a matching request with an invalid Host delivered a callback")
       } catch MacOSAuthorizationAdapterError.malformedLoopbackRequest {
+      } catch {
+        XCTFail("the callback wait did not fail with a malformed loopback request: \(error)")
+        throw error
       }
     }
 
