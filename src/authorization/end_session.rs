@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn logout_callback_rejects_malformed_encoding_and_encoded_duplicate_state() {
+    fn end_session_callback_rejects_malformed_encoding_and_encoded_duplicate_state() {
         let configuration = service_configuration()
             .with_end_session_endpoint(Url::parse("https://issuer.example/logout").unwrap())
             .unwrap();

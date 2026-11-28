@@ -68,7 +68,7 @@ pub(super) fn validate_endpoint(endpoint: &Url) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_logout_endpoint(endpoint: &Url) -> Result<()> {
+pub(super) fn validate_end_session_endpoint(endpoint: &Url) -> Result<()> {
     if endpoint.scheme() != "https" || validate_endpoint(endpoint).is_err() {
         return Err(AuthError::InvalidConfiguration(
             "end-session endpoint must use HTTPS without user info or fragments",
@@ -95,7 +95,7 @@ pub(super) fn validate_revocation_endpoint(endpoint: &Url) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_oidc_endpoint(endpoint: &Url) -> Result<()> {
+pub(super) fn validate_jwks_endpoint(endpoint: &Url) -> Result<()> {
     if endpoint.scheme() != "https" || validate_endpoint(endpoint).is_err() {
         return Err(AuthError::InvalidConfiguration(
             "JWKS endpoint must use HTTPS without user info or fragments",
@@ -245,7 +245,7 @@ pub(super) fn validate_scope(scope: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn reject_reserved_endpoint_parameters(endpoint: &Url) -> Result<()> {
+pub(super) fn reject_reserved_authorization_endpoint_parameters(endpoint: &Url) -> Result<()> {
     if endpoint
         .query_pairs()
         .any(|(name, _)| RESERVED_AUTHORIZATION_PARAMETERS.contains(&name.as_ref()))
