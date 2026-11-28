@@ -80,7 +80,9 @@ and [interoperability limits](live-idp-interoperability.md) before treating an
 example or CI fixture as a compatibility guarantee. The
 [OIDC platform evaluation](oidc-platform-evaluation.md) records, for v0.9.0,
 the feature coverage per environment, the differences from the
-specifications, and the release each follow-up belongs to.
+specifications, and the release each follow-up belongs to. The
+[naming audit](naming-audit.md) records the names that did not match their
+behavior and the release each public rename belongs to.
 
 ## Implementation specifications
 
