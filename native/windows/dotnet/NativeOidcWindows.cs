@@ -6,7 +6,10 @@ using Microsoft.Win32.SafeHandles;
 
 namespace ProjectFlora.NativeOidc;
 
-/// <summary>Runs Windows browser authorization through the native Rust library.</summary>
+/// <summary>
+/// Runs Windows browser authorization, token refresh, end-session, and token
+/// revocation, and reads ID Token claims, through the native Rust library.
+/// </summary>
 public static class NativeOidcWindows
 {
     /// <summary>
@@ -37,7 +40,7 @@ public static class NativeOidcWindows
             {
                 throw new InvalidOperationException("The native authorization call returned no result.");
             }
-            using var result = new NativeMethods.AuthorizationResultHandle(resultPointer);
+            using var result = new NativeMethods.ResultHandle(resultPointer);
 
             var valuePointer = NativeMethods.ResultValue(result);
             var value = Marshal.PtrToStringUTF8(valuePointer)
@@ -80,7 +83,7 @@ public static class NativeOidcWindows
             {
                 throw new InvalidOperationException("The native refresh call returned no result.");
             }
-            using var result = new NativeMethods.AuthorizationResultHandle(resultPointer);
+            using var result = new NativeMethods.ResultHandle(resultPointer);
 
             var valuePointer = NativeMethods.ResultValue(result);
             var value = Marshal.PtrToStringUTF8(valuePointer)
@@ -124,7 +127,7 @@ public static class NativeOidcWindows
             {
                 throw new InvalidOperationException("The native end-session call returned no result.");
             }
-            using var result = new NativeMethods.AuthorizationResultHandle(resultPointer);
+            using var result = new NativeMethods.ResultHandle(resultPointer);
 
             var valuePointer = NativeMethods.ResultValue(result);
             var value = Marshal.PtrToStringUTF8(valuePointer)
@@ -166,7 +169,7 @@ public static class NativeOidcWindows
             {
                 throw new InvalidOperationException("The native revocation call returned no result.");
             }
-            using var result = new NativeMethods.AuthorizationResultHandle(resultPointer);
+            using var result = new NativeMethods.ResultHandle(resultPointer);
 
             var valuePointer = NativeMethods.ResultValue(result);
             var value = Marshal.PtrToStringUTF8(valuePointer)
@@ -205,7 +208,7 @@ public static class NativeOidcWindows
         {
             throw new InvalidOperationException("The native ID Token claims call returned no result.");
         }
-        using var result = new NativeMethods.AuthorizationResultHandle(resultPointer);
+        using var result = new NativeMethods.ResultHandle(resultPointer);
 
         var valuePointer = NativeMethods.ResultValue(result);
         var value = Marshal.PtrToStringUTF8(valuePointer)
@@ -264,11 +267,11 @@ public static class NativeOidcWindows
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true,
             EntryPoint = "native_oidc_windows_authorization_result_status")]
-        internal static extern int ResultStatus(AuthorizationResultHandle result);
+        internal static extern int ResultStatus(ResultHandle result);
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true,
             EntryPoint = "native_oidc_windows_authorization_result_value")]
-        internal static extern IntPtr ResultValue(AuthorizationResultHandle result);
+        internal static extern IntPtr ResultValue(ResultHandle result);
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true,
             EntryPoint = "native_oidc_windows_authorization_result_free")]
@@ -288,9 +291,9 @@ public static class NativeOidcWindows
             }
         }
 
-        internal sealed class AuthorizationResultHandle : SafeHandleZeroOrMinusOneIsInvalid
+        internal sealed class ResultHandle : SafeHandleZeroOrMinusOneIsInvalid
         {
-            internal AuthorizationResultHandle(IntPtr handle) : base(ownsHandle: true)
+            internal ResultHandle(IntPtr handle) : base(ownsHandle: true)
             {
                 SetHandle(handle);
             }

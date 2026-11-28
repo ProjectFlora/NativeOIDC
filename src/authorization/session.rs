@@ -5,7 +5,7 @@ use url::Url;
 use super::{
     http::{send_token_request, serialize_token_form},
     validation::{
-        parse_callback_query, reject_reserved_endpoint_parameters,
+        parse_callback_query, reject_reserved_authorization_endpoint_parameters,
         validate_additional_token_parameter, validate_redirect_uri, validate_redirect_uri_match,
         validate_scope, CallbackQueryError, RESERVED_AUTHORIZATION_PARAMETERS,
     },
@@ -121,7 +121,7 @@ impl AuthorizationRequest {
     /// Generates state, an optional OIDC nonce, and an S256 PKCE challenge.
     pub fn begin(self) -> Result<AuthorizationSession> {
         let mut authorization_url = self.configuration.authorization_endpoint.clone();
-        reject_reserved_endpoint_parameters(&authorization_url)?;
+        reject_reserved_authorization_endpoint_parameters(&authorization_url)?;
 
         let state = random_token()?;
         let nonce = if self.scopes.iter().any(|scope| scope == "openid") {

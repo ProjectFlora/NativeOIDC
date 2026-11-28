@@ -66,6 +66,11 @@ interoperability testing and support policies are still evolving. Each release r
   (existing `Url` arguments still compile and behave as before), and
   `ServiceConfiguration::issuer()` returns `Option<&str>` instead of
   `Option<&Url>` ([#261](https://github.com/ProjectFlora/NativeOIDC/issues/261)).
+- The Windows C ABI and .NET error message for a missing or malformed
+  endpoint URL reads "an endpoint URL is missing or invalid" instead of
+  "authorization or token endpoint URL is invalid", because it is also
+  returned for the revocation, end-session, and JWKS endpoints. The status
+  is unchanged ([#254](https://github.com/ProjectFlora/NativeOIDC/issues/254)).
 
 ### Distribution
 
@@ -83,6 +88,13 @@ interoperability testing and support policies are still evolving. Each release r
 
 ### Documentation
 
+- The [naming audit](docs/naming-audit.md) records the public and internal
+  names that did not match their behavior, with the outcome of each. The
+  public renames are planned for v0.10.0
+  ([#291](https://github.com/ProjectFlora/NativeOIDC/issues/291)–[#294](https://github.com/ProjectFlora/NativeOIDC/issues/294));
+  doc comments on the UniFFI records, the Windows C ABI, and the .NET wrapper
+  now say what they cover
+  ([#254](https://github.com/ProjectFlora/NativeOIDC/issues/254)).
 - The [public API coverage matrix](docs/api-coverage.md) links each operation
   group to the Swift guide's sections and names the Apple consumer app as
   where the Swift examples run, as it already did for the Kotlin, C++, and

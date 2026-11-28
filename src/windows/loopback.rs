@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::{AuthError, CancellationHandle};
 
-use super::data::WindowsAuthorizationError;
+use super::data::WindowsOperationError;
 
 const MAX_REQUEST_SIZE: usize = 16 * 1024;
 const MAX_CALLBACK_CONNECTIONS: usize = 32;
@@ -15,9 +15,9 @@ const CALLBACK_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) fn parse_redirect_template(
     template: &str,
-) -> std::result::Result<Url, WindowsAuthorizationError> {
+) -> std::result::Result<Url, WindowsOperationError> {
     let mut redirect =
-        Url::parse(template).map_err(|_| WindowsAuthorizationError::InvalidRedirectUri)?;
+        Url::parse(template).map_err(|_| WindowsOperationError::InvalidRedirectUri)?;
     if redirect.scheme() != "http"
         || redirect.host_str() != Some("127.0.0.1")
         || redirect.port().is_some()
@@ -25,7 +25,7 @@ pub(super) fn parse_redirect_template(
         || redirect.password().is_some()
         || redirect.fragment().is_some()
     {
-        return Err(WindowsAuthorizationError::InvalidRedirectUri);
+        return Err(WindowsOperationError::InvalidRedirectUri);
     }
     if redirect.path().is_empty() {
         redirect.set_path("/");
@@ -38,7 +38,7 @@ pub(super) async fn wait_for_callback(
     callback_path: &str,
     port: u16,
     cancellation: CancellationHandle,
-) -> std::result::Result<Url, WindowsAuthorizationError> {
+) -> std::result::Result<Url, WindowsOperationError> {
     let mut connections = tokio::task::JoinSet::new();
     let result = loop {
         tokio::select! {
@@ -47,9 +47,9 @@ pub(super) async fn wait_for_callback(
             finished = connections.join_next(), if !connections.is_empty() => {
                 match finished {
                     Some(Ok(Ok(Some(callback)))) => break Ok(callback),
-                    Some(Ok(Err(WindowsAuthorizationError::Core(error)))) => break Err(error.into()),
+                    Some(Ok(Err(WindowsOperationError::Core(error)))) => break Err(error.into()),
                     // A disconnected unrelated client must not terminate authorization.
-                    Some(Ok(Ok(None) | Err(WindowsAuthorizationError::Loopback(_)))) => {},
+                    Some(Ok(Ok(None) | Err(WindowsOperationError::Loopback(_)))) => {},
                     Some(Err(error)) => break Err(io::Error::other(error).into()),
                     _ => {},
                 }
@@ -79,7 +79,7 @@ async fn handle_callback_connection(
     callback_path: &str,
     port: u16,
     cancellation: CancellationHandle,
-) -> std::result::Result<Option<Url>, WindowsAuthorizationError> {
+) -> std::result::Result<Option<Url>, WindowsOperationError> {
     let request = read_request_headers(&mut stream, &cancellation).await?;
     let outcome = request
         .as_deref()
@@ -182,7 +182,7 @@ fn parse_callback_request(bytes: &[u8], callback_path: &str, port: u16) -> Callb
 async fn read_request_headers(
     stream: &mut TcpStream,
     cancellation: &CancellationHandle,
-) -> std::result::Result<Option<Vec<u8>>, WindowsAuthorizationError> {
+) -> std::result::Result<Option<Vec<u8>>, WindowsOperationError> {
     let mut request = Vec::new();
     let mut chunk = [0; 1024];
     while request.len() < MAX_REQUEST_SIZE {
@@ -206,7 +206,7 @@ async fn write_response(
     stream: &mut TcpStream,
     status: u16,
     body: &str,
-) -> std::result::Result<(), WindowsAuthorizationError> {
+) -> std::result::Result<(), WindowsOperationError> {
     let reason = match status {
         200 => "OK",
         404 => "Not Found",
@@ -351,7 +351,7 @@ mod tests {
         cancellation.cancel();
         assert!(matches!(
             first_task.await.unwrap(),
-            Err(WindowsAuthorizationError::Core(AuthError::Cancelled))
+            Err(WindowsOperationError::Core(AuthError::Cancelled))
         ));
         let mut byte = [0; 1];
         let closed = tokio::time::timeout(Duration::from_secs(2), stalled.read(&mut byte))
@@ -444,7 +444,7 @@ mod tests {
             .starts_with("HTTP/1.1 400"));
         assert!(matches!(
             callback_task.await.unwrap(),
-            Err(WindowsAuthorizationError::Core(
+            Err(WindowsOperationError::Core(
                 AuthError::InvalidAuthorizationResponse(_)
             ))
         ));
@@ -466,7 +466,7 @@ mod tests {
         cancellation.cancel();
         assert!(matches!(
             callback_task.await.unwrap(),
-            Err(WindowsAuthorizationError::Core(AuthError::Cancelled))
+            Err(WindowsOperationError::Core(AuthError::Cancelled))
         ));
     }
 

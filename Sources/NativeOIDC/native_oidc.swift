@@ -1592,7 +1592,7 @@ public protocol FfiServiceConfigurationProtocol: AnyObject, Sendable {
     func withRegistrationEndpoint(endpoint: String) throws  -> FfiServiceConfiguration
     
     /**
-     * Adds an HTTPS OAuth 2.0 token revocation endpoint.
+     * Adds an OAuth 2.0 token revocation endpoint: HTTPS, or HTTP on a loopback host.
      */
     func withRevocationEndpoint(endpoint: String) throws  -> FfiServiceConfiguration
     
@@ -1785,7 +1785,7 @@ open func withRegistrationEndpoint(endpoint: String)throws  -> FfiServiceConfigu
 }
     
     /**
-     * Adds an HTTPS OAuth 2.0 token revocation endpoint.
+     * Adds an OAuth 2.0 token revocation endpoint: HTTPS, or HTTP on a loopback host.
      */
 open func withRevocationEndpoint(endpoint: String)throws  -> FfiServiceConfiguration  {
     return try  FfiConverterTypeFfiServiceConfiguration_lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
@@ -2787,7 +2787,7 @@ public func FfiConverterTypeFfiIdTokenClaims_lower(_ value: FfiIdTokenClaims) ->
 
 
 /**
- * A JSON-valued token response parameter.
+ * A named JSON value: a token response parameter or an ID Token claim.
  */
 public struct FfiJsonParameter: Equatable, Hashable {
     /**
@@ -3008,7 +3008,7 @@ public func FfiConverterTypeFfiRegistrationOptions_lower(_ value: FfiRegistratio
  */
 public struct FfiTokenResponse: Equatable, Hashable {
     /**
-     * The bearer access token.
+     * The access token.
      */
     public var accessToken: String
     /**
@@ -3040,7 +3040,7 @@ public struct FfiTokenResponse: Equatable, Hashable {
     // declare one manually.
     public init(
         /**
-         * The bearer access token.
+         * The access token.
          */accessToken: String, 
         /**
          * The token type, typically `Bearer`.
@@ -3860,7 +3860,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_with_registration_endpoint() != 19553) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_with_revocation_endpoint() != 25506) {
+    if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_with_revocation_endpoint() != 43520) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_native_oidc_checksum_method_nativehttptransport_execute() != 29726) {

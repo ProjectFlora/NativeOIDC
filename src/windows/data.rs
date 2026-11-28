@@ -85,12 +85,12 @@ pub(super) struct WindowsParameter {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum WindowsAuthorizationError {
+pub(super) enum WindowsOperationError {
     #[error(transparent)]
     Core(#[from] AuthError),
     #[error("issuer URL is invalid")]
     InvalidIssuer,
-    #[error("authorization or token endpoint URL is invalid")]
+    #[error("an endpoint URL is missing or invalid")]
     InvalidEndpoint,
     #[error("redirect URI must be an unported http://127.0.0.1 loopback URI")]
     InvalidRedirectUri,
@@ -140,9 +140,9 @@ pub(super) struct EndpointSelection<'a> {
 
 pub(super) fn ensure_unique_parameter_names(
     parameters: &[WindowsParameter],
-) -> std::result::Result<(), WindowsAuthorizationError> {
+) -> std::result::Result<(), WindowsOperationError> {
     if !are_parameter_names_unique(parameters.iter().map(|parameter| parameter.name.as_str())) {
-        return Err(WindowsAuthorizationError::DuplicateParameter);
+        return Err(WindowsOperationError::DuplicateParameter);
     }
     Ok(())
 }

@@ -1,7 +1,7 @@
 use url::Url;
 
 use super::validation::{
-    parse_issuer, validate_endpoint, validate_logout_endpoint, validate_oidc_endpoint,
+    parse_issuer, validate_end_session_endpoint, validate_endpoint, validate_jwks_endpoint,
     validate_registration_endpoint, validate_revocation_endpoint,
 };
 use crate::{id_token::JwksCache, Result};
@@ -47,7 +47,7 @@ impl ServiceConfiguration {
 
     /// Adds an HTTPS end-session endpoint.
     pub fn with_end_session_endpoint(mut self, endpoint: Url) -> Result<Self> {
-        validate_logout_endpoint(&endpoint)?;
+        validate_end_session_endpoint(&endpoint)?;
         self.end_session_endpoint = Some(endpoint);
         Ok(self)
     }
@@ -76,7 +76,7 @@ impl ServiceConfiguration {
     ) -> Result<Self> {
         let issuer = issuer.as_ref();
         parse_issuer(issuer)?;
-        validate_oidc_endpoint(&jwks_uri)?;
+        validate_jwks_endpoint(&jwks_uri)?;
         self.issuer = Some(issuer.to_owned());
         self.jwks_uri = Some(jwks_uri);
         self.jwks_cache = JwksCache::default();

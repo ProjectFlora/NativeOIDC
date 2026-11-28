@@ -303,7 +303,7 @@ impl FfiServiceConfiguration {
         Ok(Arc::new(Self { inner }))
     }
 
-    /// Adds an HTTPS OAuth 2.0 token revocation endpoint.
+    /// Adds an OAuth 2.0 token revocation endpoint: HTTPS, or HTTP on a loopback host.
     pub fn with_revocation_endpoint(
         &self,
         endpoint: String,
@@ -394,7 +394,7 @@ pub struct FfiParameter {
     pub value: String,
 }
 
-/// A JSON-valued token response parameter.
+/// A named JSON value: a token response parameter or an ID Token claim.
 #[derive(uniffi::Record)]
 pub struct FfiJsonParameter {
     /// Parameter name.
@@ -546,7 +546,7 @@ impl FfiAuthorizationSession {
 /// Token values returned by an OAuth token endpoint.
 #[derive(uniffi::Record)]
 pub struct FfiTokenResponse {
-    /// The bearer access token.
+    /// The access token.
     pub access_token: String,
     /// The token type, typically `Bearer`.
     pub token_type: String,

@@ -11,8 +11,8 @@ use crate::{
 
 use super::data::{
     ensure_unique_parameter_names, ConfigurationKind, ConfigurationSource, EndpointSelection,
-    WindowsAuthorizationError, WindowsAuthorizationRequest, WindowsEndSessionRequest,
-    WindowsEndSessionResponse, WindowsParameter, WindowsRefreshRequest, WindowsRevocationRequest,
+    WindowsAuthorizationRequest, WindowsEndSessionRequest, WindowsEndSessionResponse,
+    WindowsOperationError, WindowsParameter, WindowsRefreshRequest, WindowsRevocationRequest,
 };
 use super::loopback::{parse_redirect_template, wait_for_callback};
 
@@ -31,7 +31,7 @@ async fn build_service_configuration(
     endpoints: EndpointSelection<'_>,
     transport: &dyn HttpTransport,
     cancellation: &CancellationHandle,
-) -> std::result::Result<ResolvedConfiguration, WindowsAuthorizationError> {
+) -> std::result::Result<ResolvedConfiguration, WindowsOperationError> {
     let EndpointSelection {
         issuer,
         authorization_endpoint,
@@ -47,24 +47,24 @@ async fn build_service_configuration(
                 kind,
                 ConfigurationKind::Revocation | ConfigurationKind::EndSession
             ) {
-                named_endpoint.ok_or(WindowsAuthorizationError::InvalidEndpoint)?;
+                named_endpoint.ok_or(WindowsOperationError::InvalidEndpoint)?;
             }
             let configuration = ServiceConfiguration::new(authorization_endpoint, token_endpoint)?;
             Ok((configuration, ConfigurationSource::Explicit))
         }
         (None, None) => {
             if matches!(kind, ConfigurationKind::Oidc) && jwks_uri.is_some() {
-                return Err(WindowsAuthorizationError::InvalidIssuer);
+                return Err(WindowsOperationError::InvalidIssuer);
             }
-            let issuer = issuer.ok_or(WindowsAuthorizationError::InvalidIssuer)?;
+            let issuer = issuer.ok_or(WindowsOperationError::InvalidIssuer)?;
             // Core keeps the identifier exactly as given; the parse only keeps
             // the Windows error for a malformed issuer.
-            Url::parse(issuer).map_err(|_| WindowsAuthorizationError::InvalidIssuer)?;
+            Url::parse(issuer).map_err(|_| WindowsOperationError::InvalidIssuer)?;
             let configuration =
                 ServiceConfiguration::discover(issuer, transport, cancellation.clone()).await?;
             Ok((configuration, ConfigurationSource::Discovered))
         }
-        _ => Err(WindowsAuthorizationError::InvalidEndpoint),
+        _ => Err(WindowsOperationError::InvalidEndpoint),
     }
 }
 
@@ -79,7 +79,7 @@ fn add_operation_endpoints(
     source: ConfigurationSource,
     endpoints: EndpointSelection<'_>,
     configuration: ServiceConfiguration,
-) -> std::result::Result<ServiceConfiguration, WindowsAuthorizationError> {
+) -> std::result::Result<ServiceConfiguration, WindowsOperationError> {
     let EndpointSelection {
         issuer,
         jwks_uri,
@@ -93,11 +93,11 @@ fn add_operation_endpoints(
         ConfigurationKind::Oidc => match (source, issuer, jwks_uri) {
             (ConfigurationSource::Discovered, ..) | (_, None, None) => Ok(configuration),
             (_, Some(issuer), Some(jwks_uri)) => {
-                Url::parse(issuer).map_err(|_| WindowsAuthorizationError::InvalidIssuer)?;
+                Url::parse(issuer).map_err(|_| WindowsOperationError::InvalidIssuer)?;
                 let jwks_uri = parse_endpoint(jwks_uri)?;
                 Ok(configuration.with_oidc_validation_endpoints(issuer, jwks_uri)?)
             }
-            _ => Err(WindowsAuthorizationError::InvalidIssuer),
+            _ => Err(WindowsOperationError::InvalidIssuer),
         },
         ConfigurationKind::Revocation => match named_endpoint {
             Some(endpoint) => Ok(configuration.with_revocation_endpoint(endpoint)?),
@@ -111,8 +111,8 @@ fn add_operation_endpoints(
 }
 
 /// Parses an endpoint URL, reporting a malformed URL as an invalid endpoint.
-fn parse_endpoint(endpoint: &str) -> std::result::Result<Url, WindowsAuthorizationError> {
-    Url::parse(endpoint).map_err(|_| WindowsAuthorizationError::InvalidEndpoint)
+fn parse_endpoint(endpoint: &str) -> std::result::Result<Url, WindowsOperationError> {
+    Url::parse(endpoint).map_err(|_| WindowsOperationError::InvalidEndpoint)
 }
 
 /// Builds the service configuration shared by all blocking operations.
@@ -128,7 +128,7 @@ async fn build_configuration(
     endpoints: EndpointSelection<'_>,
     transport: &dyn HttpTransport,
     cancellation: &CancellationHandle,
-) -> std::result::Result<ServiceConfiguration, WindowsAuthorizationError> {
+) -> std::result::Result<ServiceConfiguration, WindowsOperationError> {
     let (configuration, source) =
         build_service_configuration(kind, endpoints, transport, cancellation).await?;
     add_operation_endpoints(kind, source, endpoints, configuration)
@@ -138,9 +138,9 @@ pub(super) async fn authorize_with_browser<F>(
     request: WindowsAuthorizationRequest,
     cancellation: CancellationHandle,
     open_browser: F,
-) -> std::result::Result<AuthenticationState, WindowsAuthorizationError>
+) -> std::result::Result<AuthenticationState, WindowsOperationError>
 where
-    F: FnOnce(&Url) -> std::result::Result<(), WindowsAuthorizationError>,
+    F: FnOnce(&Url) -> std::result::Result<(), WindowsOperationError>,
 {
     if cancellation.is_cancelled() {
         return Err(AuthError::Cancelled.into());
@@ -166,7 +166,7 @@ where
     let mut redirect_uri = redirect_template;
     redirect_uri
         .set_port(Some(port))
-        .map_err(|_| WindowsAuthorizationError::InvalidRedirectUri)?;
+        .map_err(|_| WindowsOperationError::InvalidRedirectUri)?;
 
     let mut authorization_request = AuthorizationRequest::new(
         configuration,
@@ -197,7 +197,7 @@ where
 pub(super) async fn refresh_with_windows_request(
     request: WindowsRefreshRequest,
     cancellation: CancellationHandle,
-) -> std::result::Result<AuthenticationState, WindowsAuthorizationError> {
+) -> std::result::Result<AuthenticationState, WindowsOperationError> {
     if cancellation.is_cancelled() {
         return Err(AuthError::Cancelled.into());
     }
@@ -238,9 +238,9 @@ pub(super) async fn end_session_with_browser<F>(
     request: WindowsEndSessionRequest,
     cancellation: CancellationHandle,
     open_browser: F,
-) -> std::result::Result<Option<WindowsEndSessionResponse>, WindowsAuthorizationError>
+) -> std::result::Result<Option<WindowsEndSessionResponse>, WindowsOperationError>
 where
-    F: FnOnce(&Url) -> std::result::Result<(), WindowsAuthorizationError>,
+    F: FnOnce(&Url) -> std::result::Result<(), WindowsOperationError>,
 {
     if cancellation.is_cancelled() {
         return Err(AuthError::Cancelled.into());
@@ -276,7 +276,7 @@ where
     let mut redirect_uri = redirect_template;
     redirect_uri
         .set_port(Some(port))
-        .map_err(|_| WindowsAuthorizationError::InvalidRedirectUri)?;
+        .map_err(|_| WindowsOperationError::InvalidRedirectUri)?;
     end_session_request =
         end_session_request.with_post_logout_redirect_uri(redirect_uri.clone())?;
     let session = end_session_request.begin()?;
@@ -302,7 +302,7 @@ where
 pub(super) async fn revoke_with_windows_request(
     request: WindowsRevocationRequest,
     cancellation: CancellationHandle,
-) -> std::result::Result<(), WindowsAuthorizationError> {
+) -> std::result::Result<(), WindowsOperationError> {
     if cancellation.is_cancelled() {
         return Err(AuthError::Cancelled.into());
     }
@@ -374,7 +374,7 @@ mod tests {
 
         assert!(matches!(
             revoke_with_windows_request(request, cancellation).await,
-            Err(WindowsAuthorizationError::Core(AuthError::Cancelled))
+            Err(WindowsOperationError::Core(AuthError::Cancelled))
         ));
     }
 
@@ -464,7 +464,7 @@ mod tests {
 
         assert!(matches!(
             refresh_with_windows_request(request, cancellation).await,
-            Err(WindowsAuthorizationError::Core(AuthError::Cancelled))
+            Err(WindowsOperationError::Core(AuthError::Cancelled))
         ));
     }
 
@@ -557,7 +557,7 @@ mod tests {
 
         assert!(matches!(
             refresh_with_windows_request(request, CancellationHandle::new()).await,
-            Err(WindowsAuthorizationError::DuplicateParameter)
+            Err(WindowsOperationError::DuplicateParameter)
         ));
     }
 
@@ -576,13 +576,8 @@ mod tests {
         };
 
         assert!(matches!(
-            end_session_with_browser(
-                request,
-                cancellation,
-                |_| Ok::<(), WindowsAuthorizationError>(())
-            )
-            .await,
-            Err(WindowsAuthorizationError::Core(AuthError::Cancelled))
+            end_session_with_browser(request, cancellation, |_| Ok(())).await,
+            Err(WindowsOperationError::Core(AuthError::Cancelled))
         ));
     }
 
@@ -729,7 +724,7 @@ mod tests {
         // operations, with a controlled transport instead of HTTPS.
         async fn discover(
             metadata_issuer: &str,
-        ) -> std::result::Result<ServiceConfiguration, WindowsAuthorizationError> {
+        ) -> std::result::Result<ServiceConfiguration, WindowsOperationError> {
             let transport = ScriptedTransport::new(
                 vec![ok(serde_json::json!({
                     "issuer": metadata_issuer,
@@ -756,7 +751,7 @@ mod tests {
 
         assert!(matches!(
             discover(SLASH_VARIANT).await,
-            Err(WindowsAuthorizationError::Core(
+            Err(WindowsOperationError::Core(
                 AuthError::InvalidDiscoveryMetadata(_)
             ))
         ));
@@ -952,10 +947,10 @@ mod tests {
         assert!(matches!(
             end_session_with_browser(request, CancellationHandle::new(), |_| Ok::<
                 (),
-                WindowsAuthorizationError,
+                WindowsOperationError,
             >(()))
             .await,
-            Err(WindowsAuthorizationError::InvalidEndpoint)
+            Err(WindowsOperationError::InvalidEndpoint)
         ));
     }
 

@@ -18,7 +18,7 @@ use crate::{
 #[derive(Serialize, Deserialize)]
 /// Token values returned by an OAuth token endpoint.
 pub struct TokenResponse {
-    /// The bearer access token.
+    /// The access token.
     pub access_token: String,
     /// The token type, typically `Bearer`.
     pub token_type: String,

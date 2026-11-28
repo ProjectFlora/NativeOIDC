@@ -6,8 +6,8 @@ use url::Url;
 use crate::{AuthError, AuthenticationState, CancellationHandle};
 
 use super::data::{
-    WindowsAuthorizationError, WindowsAuthorizationRequest, WindowsEndSessionRequest,
-    WindowsEndSessionResponse, WindowsRefreshRequest, WindowsRevocationRequest,
+    WindowsAuthorizationRequest, WindowsEndSessionRequest, WindowsEndSessionResponse,
+    WindowsOperationError, WindowsRefreshRequest, WindowsRevocationRequest,
 };
 use super::ops::{
     authorize_with_browser, end_session_with_browser, id_token_claims_json,
@@ -18,12 +18,14 @@ const STATUS_SUCCESS: i32 = 0;
 const STATUS_ERROR: i32 = 1;
 const STATUS_CANCELLED: i32 = 2;
 
-/// Opaque cancellation handle for a blocking Windows authorization call.
+/// Opaque cancellation handle for a blocking Windows operation call.
 pub struct NativeOidcWindowsCancellationHandle {
     cancellation: CancellationHandle,
 }
 
-/// Opaque result returned by [`native_oidc_windows_authorize`].
+/// Opaque result returned by [`native_oidc_windows_authorize`] and, through
+/// the type aliases below, by every other blocking operation and
+/// [`native_oidc_windows_id_token_claims`].
 pub struct NativeOidcWindowsAuthorizationResult {
     status: i32,
     value: CString,
@@ -49,7 +51,7 @@ impl NativeOidcWindowsAuthorizationResult {
     }
 }
 
-fn open_system_browser(url: &Url) -> std::result::Result<(), WindowsAuthorizationError> {
+fn open_system_browser(url: &Url) -> std::result::Result<(), WindowsOperationError> {
     use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
 
     let operation: Vec<u16> = "open".encode_utf16().chain([0]).collect();
@@ -65,7 +67,7 @@ fn open_system_browser(url: &Url) -> std::result::Result<(), WindowsAuthorizatio
         )
     };
     if result as isize <= 32 {
-        return Err(WindowsAuthorizationError::BrowserCouldNotBeOpened);
+        return Err(WindowsOperationError::BrowserCouldNotBeOpened);
     }
     Ok(())
 }
@@ -73,11 +75,11 @@ fn open_system_browser(url: &Url) -> std::result::Result<(), WindowsAuthorizatio
 fn authorize(
     request: WindowsAuthorizationRequest,
     cancellation: CancellationHandle,
-) -> std::result::Result<AuthenticationState, WindowsAuthorizationError> {
+) -> std::result::Result<AuthenticationState, WindowsOperationError> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| WindowsAuthorizationError::RuntimeInitialization(error.to_string()))?
+        .map_err(|error| WindowsOperationError::RuntimeInitialization(error.to_string()))?
         .block_on(authorize_with_browser(
             request,
             cancellation,
@@ -88,22 +90,22 @@ fn authorize(
 fn refresh(
     request: WindowsRefreshRequest,
     cancellation: CancellationHandle,
-) -> std::result::Result<AuthenticationState, WindowsAuthorizationError> {
+) -> std::result::Result<AuthenticationState, WindowsOperationError> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| WindowsAuthorizationError::RuntimeInitialization(error.to_string()))?
+        .map_err(|error| WindowsOperationError::RuntimeInitialization(error.to_string()))?
         .block_on(refresh_with_windows_request(request, cancellation))
 }
 
 fn end_session(
     request: WindowsEndSessionRequest,
     cancellation: CancellationHandle,
-) -> std::result::Result<Option<WindowsEndSessionResponse>, WindowsAuthorizationError> {
+) -> std::result::Result<Option<WindowsEndSessionResponse>, WindowsOperationError> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| WindowsAuthorizationError::RuntimeInitialization(error.to_string()))?
+        .map_err(|error| WindowsOperationError::RuntimeInitialization(error.to_string()))?
         .block_on(end_session_with_browser(
             request,
             cancellation,
@@ -114,11 +116,11 @@ fn end_session(
 fn revoke(
     request: WindowsRevocationRequest,
     cancellation: CancellationHandle,
-) -> std::result::Result<(), WindowsAuthorizationError> {
+) -> std::result::Result<(), WindowsOperationError> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| WindowsAuthorizationError::RuntimeInitialization(error.to_string()))?
+        .map_err(|error| WindowsOperationError::RuntimeInitialization(error.to_string()))?
         .block_on(revoke_with_windows_request(request, cancellation))
 }
 
@@ -139,7 +141,7 @@ fn run_authorize(
             Ok(state) => result(STATUS_SUCCESS, state),
             Err(error) => result(STATUS_ERROR, error.to_string()),
         },
-        Err(WindowsAuthorizationError::Core(AuthError::Cancelled)) => {
+        Err(WindowsOperationError::Core(AuthError::Cancelled)) => {
             result(STATUS_CANCELLED, AuthError::Cancelled.to_string())
         }
         Err(error) => result(STATUS_ERROR, error.to_string()),
@@ -159,7 +161,7 @@ fn run_refresh(
             Ok(state) => result(STATUS_SUCCESS, state),
             Err(error) => result(STATUS_ERROR, error.to_string()),
         },
-        Err(WindowsAuthorizationError::Core(AuthError::Cancelled)) => {
+        Err(WindowsOperationError::Core(AuthError::Cancelled)) => {
             result(STATUS_CANCELLED, AuthError::Cancelled.to_string())
         }
         Err(error) => result(STATUS_ERROR, error.to_string()),
@@ -182,7 +184,7 @@ fn run_end_session(
             },
             None => result(STATUS_SUCCESS, ""),
         },
-        Err(WindowsAuthorizationError::Core(AuthError::Cancelled)) => {
+        Err(WindowsOperationError::Core(AuthError::Cancelled)) => {
             result(STATUS_CANCELLED, AuthError::Cancelled.to_string())
         }
         Err(error) => result(STATUS_ERROR, error.to_string()),
@@ -199,7 +201,7 @@ fn run_revoke(
     };
     match revoke(request, cancellation) {
         Ok(()) => result(STATUS_SUCCESS, ""),
-        Err(WindowsAuthorizationError::Core(AuthError::Cancelled)) => {
+        Err(WindowsOperationError::Core(AuthError::Cancelled)) => {
             result(STATUS_CANCELLED, AuthError::Cancelled.to_string())
         }
         Err(error) => result(STATUS_ERROR, error.to_string()),
@@ -244,7 +246,7 @@ pub unsafe extern "C" fn native_oidc_windows_id_token_claims(
     }
 }
 
-/// Creates a cancellation handle for [`native_oidc_windows_authorize`].
+/// Creates a cancellation handle for any blocking operation call.
 ///
 /// The returned handle must be freed with
 /// [`native_oidc_windows_cancellation_free`].
@@ -256,10 +258,10 @@ pub extern "C" fn native_oidc_windows_cancellation_new() -> *mut NativeOidcWindo
     }))
 }
 
-/// Requests cancellation of an active Windows authorization.
+/// Requests cancellation of an active Windows operation call.
 ///
-/// A null handle is ignored. Do not free the handle until the authorization
-/// call has returned.
+/// A null handle is ignored. Do not free the handle until the operation call
+/// has returned.
 ///
 /// # Safety
 ///
@@ -279,8 +281,8 @@ pub unsafe extern "C" fn native_oidc_windows_cancellation_cancel(
 /// # Safety
 ///
 /// `handle` must be null or a live handle returned by
-/// [`native_oidc_windows_cancellation_new`], and no authorization call may still
-/// be using it.
+/// [`native_oidc_windows_cancellation_new`], and no operation call may still be
+/// using it.
 #[no_mangle]
 pub unsafe extern "C" fn native_oidc_windows_cancellation_free(
     handle: *mut NativeOidcWindowsCancellationHandle,
@@ -446,7 +448,7 @@ pub unsafe extern "C" fn native_oidc_windows_revoke(
     run_revoke(&request_json, cancellation)
 }
 
-/// Returns the status of an authorization result.
+/// Returns the status of a result.
 ///
 /// Values are `0` for success, `1` for failure, and `2` for cancellation. A
 /// null result is treated as failure.
@@ -454,7 +456,8 @@ pub unsafe extern "C" fn native_oidc_windows_revoke(
 /// # Safety
 ///
 /// `authorization_result` must be null or a live result handle returned by
-/// [`native_oidc_windows_authorize`].
+/// any `native_oidc_windows_*` operation or
+/// [`native_oidc_windows_id_token_claims`].
 #[no_mangle]
 pub unsafe extern "C" fn native_oidc_windows_authorization_result_status(
     authorization_result: *const NativeOidcWindowsAuthorizationResult,
@@ -472,7 +475,8 @@ pub unsafe extern "C" fn native_oidc_windows_authorization_result_status(
 /// # Safety
 ///
 /// `authorization_result` must be null or a live result handle returned by
-/// [`native_oidc_windows_authorize`].
+/// any `native_oidc_windows_*` operation or
+/// [`native_oidc_windows_id_token_claims`].
 #[no_mangle]
 pub unsafe extern "C" fn native_oidc_windows_authorization_result_value(
     authorization_result: *const NativeOidcWindowsAuthorizationResult,
@@ -482,12 +486,13 @@ pub unsafe extern "C" fn native_oidc_windows_authorization_result_value(
         .map_or(ptr::null(), |result| result.value.as_ptr())
 }
 
-/// Frees an authorization result.
+/// Frees a result.
 ///
 /// # Safety
 ///
 /// `authorization_result` must be null or a live result handle returned by
-/// [`native_oidc_windows_authorize`].
+/// any `native_oidc_windows_*` operation or
+/// [`native_oidc_windows_id_token_claims`].
 #[no_mangle]
 pub unsafe extern "C" fn native_oidc_windows_authorization_result_free(
     authorization_result: *mut NativeOidcWindowsAuthorizationResult,
