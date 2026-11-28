@@ -3860,7 +3860,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_with_registration_endpoint() != 19553) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_with_revocation_endpoint() != 25506) {
+    if (uniffi_native_oidc_checksum_method_ffiserviceconfiguration_with_revocation_endpoint() != 43520) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_native_oidc_checksum_method_nativehttptransport_execute() != 29726) {
